@@ -1,5 +1,5 @@
 import { CANVAS_WIDTH, CANVAS_HEIGHT, PATH, drawMap, drawPathDebug } from "./map.js";
-import { createEnemy, stepEnemy, ENEMY_TYPES, damageEnemy } from "./enemy.js";
+import { createEnemy, stepEnemy, ENEMY_TYPES, damageEnemy, stepEnemyFire } from "./enemy.js";
 import { WAVES, buildSpawnQueue } from "./waves.js";
 import { createEconomy, earn, loseLife, spend } from "./economy.js";
 import { createTower, stepTower, damageTower, TOWER_TYPES } from "./tower.js";
@@ -162,11 +162,25 @@ function loop(now) {
       }
     }
 
+    for (const e of enemies) {
+      const shot = stepEnemyFire(e, towers, dt);
+      if (shot) {
+        projectiles.push(createProjectile(shot.x, shot.y, shot.target, shot.damage, 300));
+      }
+    }
+
     for (const p of projectiles) {
       const hit = stepProjectile(p, dt);
-      if (hit) damageEnemy(p.target, p.damage);
+      if (hit) {
+        if ("maxHp" in p.target && "range" in p.target) {
+          damageTower(p.target, p.damage);
+        } else {
+          damageEnemy(p.target, p.damage);
+        }
+      }
     }
     projectiles = projectiles.filter((p) => p.alive);
+    towers = towers.filter((t) => t.hp > 0);
 
     const killedEnemies = enemies.filter((e) => !e.alive);
     for (const e of killedEnemies) earn(economy, e.bounty);

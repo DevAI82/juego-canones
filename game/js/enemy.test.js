@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ENEMY_TYPES, createEnemy, stepEnemy, damageEnemy } from "./enemy.js";
+import { ENEMY_TYPES, createEnemy, stepEnemy, damageEnemy, stepEnemyFire } from "./enemy.js";
 
 const PATH = [{ x: 0, y: 0 }, { x: 100, y: 0 }];
 
@@ -38,4 +38,23 @@ test("damageEnemy reduces hp and reports death at 0", () => {
   const dead = damageEnemy(e, 999);
   assert.equal(dead, false);
   assert.equal(e.alive, false);
+});
+
+test("stepEnemyFire targets the nearest tower in range and respects cooldown", () => {
+  const e = createEnemy("tank", PATH);
+  e.x = 0; e.y = 0;
+  e.fireTimer = 0;
+  const near = { x: 20, y: 0, hp: 10 };
+  const far = { x: e.fireRange + 50, y: 0, hp: 10 };
+  const shot = stepEnemyFire(e, [far, near], 0.016);
+  assert.ok(shot);
+  assert.equal(shot.target, near);
+  assert.ok(e.fireTimer > 0);
+});
+
+test("stepEnemyFire returns null when no tower in range", () => {
+  const e = createEnemy("soldier", PATH);
+  e.x = 0; e.y = 0;
+  const shot = stepEnemyFire(e, [{ x: 9999, y: 0, hp: 10 }], 0.016);
+  assert.equal(shot, null);
 });

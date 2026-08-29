@@ -4,7 +4,8 @@ export function createProjectile(x, y, target, damage, speed = 400) {
 
 export function stepProjectile(proj, dt) {
   if (!proj.alive) return false;
-  if (!proj.target.alive) {
+  const targetDead = proj.target.alive === false || proj.target.hp <= 0;
+  if (targetDead) {
     proj.alive = false;
     return false;
   }

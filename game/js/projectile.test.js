@@ -33,3 +33,19 @@ test("stepProjectile fizzles if the target died first", () => {
   assert.equal(hit, false);
   assert.equal(p.alive, false);
 });
+
+test("stepProjectile hits a tower-shaped target (hp, no alive flag)", () => {
+  const target = { x: 10, y: 0, hp: 80 };
+  const p = createProjectile(0, 0, target, 10, 1000);
+  const hit = stepProjectile(p, 1);
+  assert.equal(hit, true);
+  assert.equal(p.alive, false);
+});
+
+test("stepProjectile fizzles if a tower-shaped target already reached 0 hp", () => {
+  const target = { x: 100, y: 0, hp: 0 };
+  const p = createProjectile(0, 0, target, 10);
+  const hit = stepProjectile(p, 0.1);
+  assert.equal(hit, false);
+  assert.equal(p.alive, false);
+});

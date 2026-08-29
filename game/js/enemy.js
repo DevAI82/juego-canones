@@ -56,3 +56,24 @@ export function damageEnemy(enemy, amount) {
   }
   return enemy.alive;
 }
+
+export function stepEnemyFire(enemy, towers, dt) {
+  if (!enemy.alive) return null;
+  enemy.fireTimer -= dt;
+  if (enemy.fireTimer > 0) return null;
+
+  let best = null;
+  let bestDist = Infinity;
+  for (const t of towers) {
+    if (t.hp <= 0) continue;
+    const d = Math.hypot(t.x - enemy.x, t.y - enemy.y);
+    if (d <= enemy.fireRange && d < bestDist) {
+      best = t;
+      bestDist = d;
+    }
+  }
+  if (!best) return null;
+
+  enemy.fireTimer = enemy.fireCooldown;
+  return { x: enemy.x, y: enemy.y, target: best, damage: enemy.fireDamage };
+}
