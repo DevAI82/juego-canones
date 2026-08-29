@@ -1,9 +1,10 @@
 import { CANVAS_WIDTH, CANVAS_HEIGHT, PATH, drawMap, drawPathDebug } from "./map.js";
 import { createEnemy, stepEnemy, ENEMY_TYPES, damageEnemy } from "./enemy.js";
 import { WAVES, buildSpawnQueue } from "./waves.js";
-import { createEconomy, earn, loseLife } from "./economy.js";
-import { createTower, stepTower, damageTower } from "./tower.js";
+import { createEconomy, earn, loseLife, spend } from "./economy.js";
+import { createTower, stepTower, damageTower, TOWER_TYPES } from "./tower.js";
 import { createProjectile, stepProjectile } from "./projectile.js";
+import { initBuildMenu, updateBuildMenu } from "./ui.js";
 
 const canvas = document.getElementById("game-canvas");
 const ctx = canvas.getContext("2d");
@@ -16,10 +17,10 @@ let waveIndex = 0;
 let spawnQueue = buildSpawnQueue(waveIndex);
 let waveClock = 0;
 let enemies = [];
-let towers = [
-  createTower("basic", 400, 300),
-  createTower("laser", 800, 300),
-];
+let towers = [];
+let selectedBuildType = null;
+let mouseX = 0;
+let mouseY = 0;
 let projectiles = [];
 let gameOver = false;
 
@@ -101,6 +102,38 @@ function drawHud() {
   ctx.restore();
 }
 
+const buildMenuEl = document.getElementById("build-menu");
+initBuildMenu(buildMenuEl, {
+  onSelect: (type) => {
+    selectedBuildType = selectedBuildType === type ? null : type;
+  },
+});
+
+function canvasPos(evt) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: ((evt.clientX - rect.left) / rect.width) * CANVAS_WIDTH,
+    y: ((evt.clientY - rect.top) / rect.height) * CANVAS_HEIGHT,
+  };
+}
+
+canvas.addEventListener("mousemove", (evt) => {
+  const pos = canvasPos(evt);
+  mouseX = pos.x;
+  mouseY = pos.y;
+});
+
+canvas.addEventListener("click", (evt) => {
+  if (!selectedBuildType) return;
+  const def = TOWER_TYPES[selectedBuildType];
+  const countOnField = towers.filter((t) => t.type === selectedBuildType && t.hp > 0).length;
+  if (countOnField >= def.maxCount) return;
+  if (!spend(economy, def.cost)) return;
+  const pos = canvasPos(evt);
+  towers.push(createTower(selectedBuildType, pos.x, pos.y));
+  selectedBuildType = null;
+});
+
 let lastTime = performance.now();
 
 function loop(now) {
@@ -154,6 +187,17 @@ function loop(now) {
   for (const e of enemies) drawEnemy(e);
   for (const p of projectiles) drawProjectile(p);
   drawHud();
+
+  if (selectedBuildType) {
+    ctx.save();
+    ctx.globalAlpha = 0.5;
+    ctx.fillStyle = "#5af";
+    ctx.beginPath();
+    ctx.arc(mouseX, mouseY, 16, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+  updateBuildMenu(buildMenuEl, { towers, economy, selectedType: selectedBuildType });
 
   requestAnimationFrame(loop);
 }
