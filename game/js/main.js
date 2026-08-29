@@ -1,4 +1,4 @@
-import { CANVAS_WIDTH, CANVAS_HEIGHT, PATH, drawMap, drawPathDebug, distanceToPath } from "./map.js";
+import { CANVAS_WIDTH, CANVAS_HEIGHT, PATH, SOLDIER_PATH, drawMap, drawPathDebug, distanceToPath } from "./map.js";
 import { createEnemy, stepEnemy, damageEnemy, stepEnemyFire } from "./enemy.js";
 import { WAVES, buildSpawnQueue } from "./waves.js";
 import { createEconomy, earn, loseLife, spend } from "./economy.js";
@@ -8,9 +8,11 @@ import { initBuildMenu, updateBuildMenu, initUpgradePanel, updateUpgradePanel } 
 import { applyUpgrade, upgradeCost, canUpgrade } from "./upgrades.js";
 
 // Minimum distance (px) a new tower must keep from the road -- rejects
-// placement on or immediately next to the path. Tower sprites draw ~40px
-// wide, so this keeps them visually clear of the road.
-const MIN_PLACEMENT_DIST_FROM_PATH = 28;
+// placement on or immediately next to the path. The trench itself reads
+// as ~30-50px wide on screen, and towers draw ~40px wide with a platform
+// pad, so this keeps them visually clear of the actual road surface, not
+// just the single-pixel-wide waypoint line down its middle.
+const MIN_PLACEMENT_DIST_FROM_PATH = 40;
 
 // Refund fraction paid back to the player when selling a tower via the
 // upgrade panel's "Vender" button.
@@ -58,6 +60,11 @@ let mouseX = 0;
 let mouseY = 0;
 let projectiles = [];
 let explosions = [];
+// Laser hits are instant (no travel time, matching a beam of light rather
+// than a physical bullet) -- damage applies the moment the shot fires, and
+// `beams` holds only the brief visual flash, not something that needs to
+// "arrive" like a projectile.
+let beams = [];
 let gameOver = false;
 let win = false;
 
@@ -71,7 +78,9 @@ function trySpawn() {
   if (interWaveTimer > 0) return;
   while (spawnQueue.length && spawnQueue[0].time <= waveClock) {
     const { type } = spawnQueue.shift();
-    enemies.push(createEnemy(type, PATH));
+    // Vehicles are confined to the trench; only foot soldiers can duck out
+    // and cut across open ground on the shorter, more exposed SOLDIER_PATH.
+    enemies.push(createEnemy(type, type === "soldier" ? SOLDIER_PATH : PATH));
   }
 }
 
@@ -122,6 +131,22 @@ function drawEnemy(e) {
 function drawTower(t) {
   const img = sprites[`tower_${t.type}`];
   const levelSum = t.level.damage + t.level.range + t.level.fireRate;
+
+  // A dark platform under every tower keeps it visible regardless of
+  // terrain color -- the turret sprites and the grass/dirt map share
+  // similar olive/earth tones, so without this a tower can be hard to
+  // spot at a glance (this is why every real TD game gives towers a base
+  // pad instead of relying on the terrain to contrast on its own).
+  ctx.save();
+  ctx.fillStyle = "rgba(20,22,18,0.75)";
+  ctx.beginPath();
+  ctx.arc(t.x, t.y, 19, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(220,220,200,0.55)";
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.restore();
+
   ctx.save();
   ctx.translate(t.x, t.y);
   ctx.rotate(t.angle);
@@ -192,6 +217,21 @@ function drawExplosion(ex) {
     ctx.arc(ex.x, ex.y, 20 * scale, 0, Math.PI * 2);
     ctx.fill();
   }
+  ctx.restore();
+}
+
+function drawBeam(b) {
+  const t = b.age / b.duration;
+  ctx.save();
+  ctx.globalAlpha = 1 - t;
+  ctx.strokeStyle = "#aef9ff";
+  ctx.lineWidth = 3;
+  ctx.shadowColor = "#7ff9ff";
+  ctx.shadowBlur = 8;
+  ctx.beginPath();
+  ctx.moveTo(b.x1, b.y1);
+  ctx.lineTo(b.x2, b.y2);
+  ctx.stroke();
   ctx.restore();
 }
 
@@ -335,8 +375,22 @@ function loop(now) {
     for (const t of towers) {
       const shot = stepTower(t, enemies, dt);
       if (shot) {
-        for (let i = 0; i < shot.projectilesPerShot; i++) {
-          projectiles.push(createProjectile(shot.x, shot.y, shot.target, shot.damage));
+        if (t.type === "laser") {
+          // A railgun beam travels effectively instantly -- damage the
+          // target immediately rather than spawning a bullet that flies
+          // toward it, and leave only a brief visual flash behind.
+          damageEnemy(shot.target, shot.damage);
+          beams.push({ x1: shot.x, y1: shot.y, x2: shot.target.x, y2: shot.target.y, age: 0, duration: 0.15 });
+        } else {
+          for (let i = 0; i < shot.projectilesPerShot; i++) {
+            // Offset each shot perpendicular to the barrel so the double
+            // tower's two rounds are visibly two separate bullets from its
+            // twin barrels, not one bullet drawn on top of the other.
+            const spread = shot.projectilesPerShot > 1 ? (i - (shot.projectilesPerShot - 1) / 2) * 6 : 0;
+            const px = shot.x - Math.sin(t.angle) * spread;
+            const py = shot.y + Math.cos(t.angle) * spread;
+            projectiles.push(createProjectile(px, py, shot.target, shot.damage));
+          }
         }
       }
     }
@@ -361,6 +415,8 @@ function loop(now) {
     projectiles = projectiles.filter((p) => p.alive);
     for (const ex of explosions) ex.age += dt;
     explosions = explosions.filter((ex) => ex.age < ex.duration);
+    for (const bm of beams) bm.age += dt;
+    beams = beams.filter((bm) => bm.age < bm.duration);
     towers = towers.filter((t) => t.hp > 0);
 
     const killedEnemies = enemies.filter((e) => !e.alive);
@@ -384,6 +440,7 @@ function loop(now) {
   for (const t of towers) drawTower(t);
   for (const e of enemies) drawEnemy(e);
   for (const p of projectiles) drawProjectile(p);
+  for (const bm of beams) drawBeam(bm);
   for (const ex of explosions) drawExplosion(ex);
   drawHud();
 
