@@ -4,7 +4,8 @@ import { WAVES, buildSpawnQueue } from "./waves.js";
 import { createEconomy, earn, loseLife, spend } from "./economy.js";
 import { createTower, stepTower, damageTower, TOWER_TYPES } from "./tower.js";
 import { createProjectile, stepProjectile } from "./projectile.js";
-import { initBuildMenu, updateBuildMenu } from "./ui.js";
+import { initBuildMenu, updateBuildMenu, renderUpgradePanel } from "./ui.js";
+import { applyUpgrade, upgradeCost, canUpgrade } from "./upgrades.js";
 
 const canvas = document.getElementById("game-canvas");
 const ctx = canvas.getContext("2d");
@@ -19,6 +20,8 @@ let waveClock = 0;
 let enemies = [];
 let towers = [];
 let selectedBuildType = null;
+let selectedTower = null;
+const upgradePanelEl = document.getElementById("upgrade-panel");
 let mouseX = 0;
 let mouseY = 0;
 let projectiles = [];
@@ -66,6 +69,15 @@ function drawTower(t) {
   ctx.fillRect(-14, -10, 28, 20);
   ctx.fillRect(0, -3, 22, 6);
   ctx.restore();
+
+  if (t === selectedTower) {
+    ctx.save();
+    ctx.strokeStyle = "#5af";
+    ctx.beginPath();
+    ctx.arc(t.x, t.y, t.range, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
 
   const w = 30;
   const pct = t.hp / t.maxHp;
@@ -124,14 +136,17 @@ canvas.addEventListener("mousemove", (evt) => {
 });
 
 canvas.addEventListener("click", (evt) => {
-  if (!selectedBuildType) return;
-  const def = TOWER_TYPES[selectedBuildType];
-  const countOnField = towers.filter((t) => t.type === selectedBuildType && t.hp > 0).length;
-  if (countOnField >= def.maxCount) return;
-  if (!spend(economy, def.cost)) return;
   const pos = canvasPos(evt);
-  towers.push(createTower(selectedBuildType, pos.x, pos.y));
-  selectedBuildType = null;
+  if (selectedBuildType) {
+    const def = TOWER_TYPES[selectedBuildType];
+    const countOnField = towers.filter((t) => t.type === selectedBuildType && t.hp > 0).length;
+    if (countOnField >= def.maxCount) return;
+    if (!spend(economy, def.cost)) return;
+    towers.push(createTower(selectedBuildType, pos.x, pos.y));
+    selectedBuildType = null;
+    return;
+  }
+  selectedTower = towers.find((t) => Math.hypot(t.x - pos.x, t.y - pos.y) < 20) || null;
 });
 
 let lastTime = performance.now();
@@ -212,6 +227,26 @@ function loop(now) {
     ctx.restore();
   }
   updateBuildMenu(buildMenuEl, { towers, economy, selectedType: selectedBuildType });
+  if (selectedTower && selectedTower.hp <= 0) selectedTower = null;
+  renderUpgradePanel(upgradePanelEl, selectedTower, {
+    onUpgrade: (skill) => {
+      if (!canUpgrade(selectedTower, skill)) return;
+      const cost = upgradeCost(skill, selectedTower.level[skill]);
+      if (!spend(economy, cost)) return;
+      applyUpgrade(selectedTower, skill, TOWER_TYPES[selectedTower.type]);
+    },
+    onRepair: () => {
+      const cost = Math.round((selectedTower.maxHp - selectedTower.hp) * 0.5);
+      if (cost <= 0) return;
+      if (!spend(economy, cost)) return;
+      selectedTower.hp = selectedTower.maxHp;
+    },
+    onSell: () => {
+      damageTower(selectedTower, selectedTower.hp);
+      towers = towers.filter((t) => t !== selectedTower);
+      selectedTower = null;
+    },
+  });
 
   requestAnimationFrame(loop);
 }
