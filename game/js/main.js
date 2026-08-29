@@ -1,11 +1,25 @@
-import { CANVAS_WIDTH, CANVAS_HEIGHT, PATH, drawMap, drawPathDebug } from "./map.js";
-import { createEnemy, stepEnemy, ENEMY_TYPES, damageEnemy, stepEnemyFire } from "./enemy.js";
+import { CANVAS_WIDTH, CANVAS_HEIGHT, PATH, drawMap, drawPathDebug, distanceToPath } from "./map.js";
+import { createEnemy, stepEnemy, damageEnemy, stepEnemyFire } from "./enemy.js";
 import { WAVES, buildSpawnQueue } from "./waves.js";
 import { createEconomy, earn, loseLife, spend } from "./economy.js";
 import { createTower, stepTower, damageTower, TOWER_TYPES } from "./tower.js";
 import { createProjectile, stepProjectile } from "./projectile.js";
-import { initBuildMenu, updateBuildMenu, renderUpgradePanel } from "./ui.js";
+import { initBuildMenu, updateBuildMenu, initUpgradePanel, updateUpgradePanel } from "./ui.js";
 import { applyUpgrade, upgradeCost, canUpgrade } from "./upgrades.js";
+
+// Minimum distance (px) a new tower must keep from the road -- rejects
+// placement on or immediately next to the path. Tower sprites draw ~40px
+// wide, so this keeps them visually clear of the road.
+const MIN_PLACEMENT_DIST_FROM_PATH = 28;
+
+// Refund fraction paid back to the player when selling a tower via the
+// upgrade panel's "Vender" button.
+const SELL_REFUND_FRACTION = 0.6;
+
+// Pause between waves so the player has a moment to place/upgrade towers,
+// plus how long remains on that pause (ticked down each frame, skippable
+// via the "Siguiente oleada" fast-forward button).
+const INTER_WAVE_DELAY = 4;
 
 const canvas = document.getElementById("game-canvas");
 const ctx = canvas.getContext("2d");
@@ -47,7 +61,14 @@ let explosions = [];
 let gameOver = false;
 let win = false;
 
+// Inter-wave delay state: while > 0, the next wave's spawn queue has already
+// been built but trySpawn won't drain it yet (waveClock is held at 0), so
+// the player gets a calm moment between waves. The "Siguiente oleada" button
+// zeroes this to skip the wait immediately.
+let interWaveTimer = 0;
+
 function trySpawn() {
+  if (interWaveTimer > 0) return;
   while (spawnQueue.length && spawnQueue[0].time <= waveClock) {
     const { type } = spawnQueue.shift();
     enemies.push(createEnemy(type, PATH));
@@ -55,12 +76,14 @@ function trySpawn() {
 }
 
 function nextWaveIfDone() {
+  if (interWaveTimer > 0) return;
   if (spawnQueue.length === 0 && enemies.length === 0) {
     if (waveIndex < WAVES.length - 1) {
       waveIndex++;
       economy.wave = waveIndex + 1;
       spawnQueue = buildSpawnQueue(waveIndex);
       waveClock = 0;
+      interWaveTimer = INTER_WAVE_DELAY;
     } else if (!win) {
       win = true;
     }
@@ -74,7 +97,10 @@ function drawEnemy(e) {
   ctx.translate(e.x, e.y);
   ctx.rotate(e.angle);
   if (ready(img)) {
-    const w = 32, h = 32;
+    // Draw at the sprite's real aspect ratio instead of squashing every
+    // enemy into a fixed square -- source crops range up to ~3.8:1.
+    const h = 26;
+    const w = h * (img.naturalWidth / img.naturalHeight);
     ctx.drawImage(img, -w / 2, -h / 2, w, h);
   } else {
     ctx.fillStyle = e.type === "tank" ? "#7a3b3b" : e.type === "buggy" ? "#b8ab7a" : "#8a8f5c";
@@ -109,7 +135,10 @@ function drawTower(t) {
     ctx.restore();
   }
   if (ready(img)) {
-    const w = 40, h = 40;
+    // Draw at the sprite's real aspect ratio instead of squashing every
+    // turret into a fixed square -- the laser turret crop alone is ~3.8:1.
+    const h = 34;
+    const w = h * (img.naturalWidth / img.naturalHeight);
     ctx.drawImage(img, -w / 2, -h / 2, w, h);
     const damagePct = 1 - t.hp / t.maxHp;
     if (damagePct > 0) {
@@ -180,6 +209,9 @@ function drawHud() {
   ctx.fillText(`Oleada ${economy.wave}/${WAVES.length}`, 20, 30);
   ctx.fillText(`Vidas: ${economy.lives}`, 20, 55);
   ctx.fillText(`$${economy.money}`, 20, 80);
+  if (interWaveTimer > 0 && !gameOver && !win) {
+    ctx.fillText(`Siguiente oleada en ${Math.ceil(interWaveTimer)}s`, 20, 105);
+  }
   if (gameOver || win) {
     ctx.font = "48px sans-serif";
     ctx.fillText(gameOver ? "GAME OVER" : "¡VICTORIA!", CANVAS_WIDTH / 2 - 150, CANVAS_HEIGHT / 2);
@@ -192,8 +224,44 @@ function drawHud() {
 const buildMenuEl = document.getElementById("build-menu");
 initBuildMenu(buildMenuEl, {
   onSelect: (type) => {
+    if (gameOver || win) return;
     selectedBuildType = selectedBuildType === type ? null : type;
   },
+});
+
+// Upgrade panel callbacks are defined once, here, and read the *current*
+// value of the module-level `selectedTower` variable at click time via
+// normal closure semantics -- they are never re-created per frame, which is
+// what makes the panel's buttons clickable in the first place (see
+// initUpgradePanel's comment in ui.js).
+initUpgradePanel(upgradePanelEl, {
+  onUpgrade: (skill) => {
+    if (gameOver || win || !selectedTower) return;
+    if (!canUpgrade(selectedTower, skill)) return;
+    const cost = upgradeCost(skill, selectedTower.level[skill]);
+    if (!spend(economy, cost)) return;
+    applyUpgrade(selectedTower, skill, TOWER_TYPES[selectedTower.type]);
+  },
+  onRepair: () => {
+    if (gameOver || win || !selectedTower) return;
+    const cost = Math.round((selectedTower.maxHp - selectedTower.hp) * 0.5);
+    if (cost <= 0) return;
+    if (!spend(economy, cost)) return;
+    selectedTower.hp = selectedTower.maxHp;
+  },
+  onSell: () => {
+    if (gameOver || win || !selectedTower) return;
+    earn(economy, Math.round(TOWER_TYPES[selectedTower.type].cost * SELL_REFUND_FRACTION));
+    damageTower(selectedTower, selectedTower.hp);
+    towers = towers.filter((t) => t !== selectedTower);
+    selectedTower = null;
+  },
+});
+
+const skipWaveBtn = document.getElementById("skip-wave-btn");
+skipWaveBtn.addEventListener("click", () => {
+  if (gameOver || win) return;
+  interWaveTimer = 0;
 });
 
 function canvasPos(evt) {
@@ -211,11 +279,13 @@ canvas.addEventListener("mousemove", (evt) => {
 });
 
 canvas.addEventListener("click", (evt) => {
+  if (gameOver || win) return;
   const pos = canvasPos(evt);
   if (selectedBuildType) {
     const def = TOWER_TYPES[selectedBuildType];
     const countOnField = towers.filter((t) => t.type === selectedBuildType && t.hp > 0).length;
     if (countOnField >= def.maxCount) return;
+    if (distanceToPath(PATH, pos.x, pos.y) < MIN_PLACEMENT_DIST_FROM_PATH) return;
     if (!spend(economy, def.cost)) return;
     towers.push(createTower(selectedBuildType, pos.x, pos.y));
     selectedBuildType = null;
@@ -246,7 +316,11 @@ function loop(now) {
   lastTime = now;
 
   if (!gameOver && !win) {
-    waveClock += dt;
+    if (interWaveTimer > 0) {
+      interWaveTimer = Math.max(0, interWaveTimer - dt);
+    } else {
+      waveClock += dt;
+    }
     trySpawn();
 
     for (const e of enemies) {
@@ -300,7 +374,7 @@ function loop(now) {
   }
 
   ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-  if (mapImage.complete && mapImage.naturalWidth > 0) {
+  if (ready(mapImage)) {
     drawMap(ctx, mapImage);
   } else {
     ctx.fillStyle = "#3a4a2f";
@@ -324,25 +398,8 @@ function loop(now) {
   }
   updateBuildMenu(buildMenuEl, { towers, economy, selectedType: selectedBuildType });
   if (selectedTower && selectedTower.hp <= 0) selectedTower = null;
-  renderUpgradePanel(upgradePanelEl, selectedTower, {
-    onUpgrade: (skill) => {
-      if (!canUpgrade(selectedTower, skill)) return;
-      const cost = upgradeCost(skill, selectedTower.level[skill]);
-      if (!spend(economy, cost)) return;
-      applyUpgrade(selectedTower, skill, TOWER_TYPES[selectedTower.type]);
-    },
-    onRepair: () => {
-      const cost = Math.round((selectedTower.maxHp - selectedTower.hp) * 0.5);
-      if (cost <= 0) return;
-      if (!spend(economy, cost)) return;
-      selectedTower.hp = selectedTower.maxHp;
-    },
-    onSell: () => {
-      damageTower(selectedTower, selectedTower.hp);
-      towers = towers.filter((t) => t !== selectedTower);
-      selectedTower = null;
-    },
-  });
+  updateUpgradePanel(upgradePanelEl, selectedTower);
+  skipWaveBtn.classList.toggle("hidden", !(interWaveTimer > 0 && !gameOver && !win));
 
   requestAnimationFrame(loop);
 }
