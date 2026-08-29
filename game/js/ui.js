@@ -42,6 +42,16 @@ export function updateBuildMenu(container, { towers, economy, selectedType }) {
 // "currently selected tower" from their own enclosing scope at call time
 // (e.g. a module-level `let selectedTower` in main.js) rather than a value
 // snapshotted when initUpgradePanel was invoked.
+// Holographic-card art per skill, and the shared "Mejorar" button art --
+// cropped from the user's Gemini-generated mockup (diseño mejoras.jpg) so
+// the panel matches the premium sci-fi look they commissioned, rather than
+// plain text buttons.
+const SKILL_ICON = {
+  damage: "assets/ui_icon_damage.png",
+  range: "assets/ui_icon_range.png",
+  fireRate: "assets/ui_icon_firerate.png",
+};
+
 export function initUpgradePanel(container, { onUpgrade, onRepair, onSell }) {
   container.innerHTML = "";
   const cols = {};
@@ -51,28 +61,63 @@ export function initUpgradePanel(container, { onUpgrade, onRepair, onSell }) {
     col.className = "upgrade-col";
 
     const label = document.createElement("div");
+    label.className = "upgrade-label";
     label.textContent = SKILL_LABELS[skill];
-    const levelEl = document.createElement("div");
-    const costEl = document.createElement("div");
+
+    // The hologram-icon crop only covers the icon area of the mockup (not
+    // the stats/pips region below it, which needs to show live numbers) --
+    // this inner card is the cyan-bordered box, with the icon as its top
+    // background and its own dark fill showing through underneath for the
+    // stats/pips row, so the border reads as one continuous card exactly
+    // like the mockup's.
+    const card = document.createElement("div");
+    card.className = "upgrade-card";
+    card.style.backgroundImage = `url(${SKILL_ICON[skill]})`;
+
+    const stats = document.createElement("div");
+    stats.className = "upgrade-stats";
+    const levelEl = document.createElement("span");
+    levelEl.className = "upgrade-level";
+    const costEl = document.createElement("span");
+    costEl.className = "upgrade-cost";
+    stats.appendChild(levelEl);
+    stats.appendChild(costEl);
+
+    const pips = document.createElement("div");
+    pips.className = "upgrade-pips";
+    const pipEls = [];
+    for (let i = 0; i < UPGRADE_DEFS[skill].levels; i++) {
+      const pip = document.createElement("span");
+      pip.className = "upgrade-pip";
+      pips.appendChild(pip);
+      pipEls.push(pip);
+    }
+
+    card.appendChild(stats);
+    card.appendChild(pips);
+
     const btn = document.createElement("button");
+    btn.className = "upgrade-btn";
+    btn.textContent = "Mejorar";
     btn.addEventListener("click", () => onUpgrade(skill));
 
     col.appendChild(label);
-    col.appendChild(levelEl);
-    col.appendChild(costEl);
+    col.appendChild(card);
     col.appendChild(btn);
     container.appendChild(col);
 
-    cols[skill] = { levelEl, costEl, btn };
+    cols[skill] = { levelEl, costEl, btn, pipEls };
   }
 
   const repairBtn = document.createElement("button");
-  repairBtn.textContent = "Reparar";
+  repairBtn.className = "upgrade-icon-btn upgrade-repair-btn";
+  repairBtn.setAttribute("aria-label", "Reparar");
   repairBtn.addEventListener("click", () => onRepair());
   container.appendChild(repairBtn);
 
   const sellBtn = document.createElement("button");
-  sellBtn.textContent = "Vender";
+  sellBtn.className = "upgrade-icon-btn upgrade-sell-btn";
+  sellBtn.setAttribute("aria-label", "Vender");
   sellBtn.addEventListener("click", () => onSell());
   container.appendChild(sellBtn);
 
@@ -91,7 +136,7 @@ export function updateUpgradePanel(container, tower) {
 
   const refs = container._upgradePanelRefs;
   for (const skill of Object.keys(UPGRADE_DEFS)) {
-    const { levelEl, costEl, btn } = refs.cols[skill];
+    const { levelEl, costEl, btn, pipEls } = refs.cols[skill];
     const level = tower.level[skill];
     const maxed = !canUpgrade(tower, skill);
     const cost = maxed ? "-" : upgradeCost(skill, level);
@@ -99,5 +144,6 @@ export function updateUpgradePanel(container, tower) {
     costEl.textContent = `$${cost}`;
     btn.textContent = maxed ? "Máx" : "Mejorar";
     btn.disabled = maxed;
+    pipEls.forEach((pip, i) => pip.classList.toggle("filled", i < level));
   }
 }

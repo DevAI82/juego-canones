@@ -21,7 +21,110 @@ html, body { margin: 0; padding: 0; background: #111; }
 .build-btn.selected { border-color: #5af; }
 .build-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-#upgrade-panel { position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; background: rgba(0,0,0,0.7); padding: 10px; border-radius: 4px; }
+/* Premium sci-fi holographic upgrade panel, styled after a Gemini-generated
+   mockup (diseño mejoras.jpg) the user commissioned. Each skill card's
+   background is a crop of that mockup's own hologram-icon art
+   (game/js/ui.js sets it inline per skill); the surrounding chrome (glow,
+   pip bar, buttons) is built in CSS so it can reflect live game state. */
+#upgrade-panel {
+  position: absolute;
+  bottom: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 10px;
+  font-family: sans-serif;
+}
 #upgrade-panel.hidden { display: none; }
-.upgrade-col { color: #fff; font-family: sans-serif; text-align: center; min-width: 100px; }
-.upgrade-col button { display: block; width: 100%; margin-top: 4px; }
+
+.upgrade-col {
+  width: 148px;
+  color: #dffcff;
+  text-align: center;
+}
+.upgrade-label {
+  font-size: 13px;
+  font-weight: bold;
+  text-shadow: 0 1px 3px #000;
+  margin-bottom: 4px;
+}
+
+/* The bordered hologram box itself: the skill icon image fills its top
+   (at native aspect ratio, not stretched/cropped) and the box's own dark
+   fill shows through below for the live stats/pips row, so the cyan
+   border still reads as one continuous card like the mockup's. */
+.upgrade-card {
+  padding: 68px 8px 8px;
+  background-color: #060a0c;
+  background-size: 100% auto;
+  background-position: top center;
+  background-repeat: no-repeat;
+  border: 1px solid #6fd8e6;
+  border-radius: 4px;
+  box-shadow: 0 0 10px rgba(111, 216, 230, 0.45), inset 0 0 20px rgba(0, 0, 0, 0.6);
+}
+.upgrade-stats {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  text-shadow: 0 0 4px #000;
+}
+.upgrade-cost { color: #ffe27a; font-weight: bold; }
+
+.upgrade-pips {
+  display: flex;
+  gap: 3px;
+  margin: 6px 0 2px;
+  padding: 2px;
+  border: 1px solid #4fb8c8;
+  border-radius: 2px;
+}
+.upgrade-pip {
+  flex: 1;
+  height: 10px;
+  background: #0c1417;
+  border-radius: 1px;
+}
+.upgrade-pip.filled {
+  background: #ffe9b0;
+  box-shadow: 0 0 6px #ffdb8a;
+}
+
+.upgrade-btn {
+  display: block;
+  width: 100%;
+  height: 30px;
+  margin-top: 6px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #f2e9c9;
+  font-family: sans-serif;
+  font-weight: bold;
+  letter-spacing: 0.5px;
+  text-shadow: 0 1px 2px #000;
+  background: linear-gradient(#5c6a3f, #3a4326);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.25), inset 0 -2px 3px rgba(0,0,0,0.5), 0 0 6px rgba(0,0,0,0.6);
+}
+.upgrade-btn:disabled {
+  cursor: not-allowed;
+  filter: grayscale(0.6) brightness(0.7);
+}
+
+.upgrade-icon-btn {
+  width: 84px;
+  height: 92px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  background-color: #2a2f26;
+  background-size: cover;
+  background-position: center;
+  box-shadow: 0 0 8px rgba(0,0,0,0.7);
+}
+.upgrade-icon-btn:hover { filter: brightness(1.15); }
+.upgrade-icon-btn:active { filter: brightness(0.85); }
+.upgrade-repair-btn { background-image: url(assets/ui_btn_repair.png); }
+.upgrade-sell-btn { background-image: url(assets/ui_btn_sell.png); }
