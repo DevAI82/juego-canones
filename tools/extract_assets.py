@@ -10,6 +10,29 @@ ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "game" / "assets"
 OUT.mkdir(parents=True, exist_ok=True)
 
+# Sprites are drawn on-canvas at tiny sizes (tens of px), but the source
+# JPEGs are huge (e.g. tower_laser's crop is ~2600x680px). Downscale every
+# sprite so its longer edge is ~SPRITE_MAX_EDGE px before saving -- still far
+# more detail than any on-screen draw size needs, but a fraction of the
+# load-time/per-frame resampling cost of the full-resolution crop.
+SPRITE_MAX_EDGE = 256
+
+# game/js/map.js's CANVAS_WIDTH/CANVAS_HEIGHT -- the exact size the map
+# background is drawn at every frame. Keeping this in sync avoids shipping
+# an 8MB+ image that's resampled down on every single draw call.
+MAP_WIDTH = 1200
+MAP_HEIGHT = 750
+
+
+def downscale(im, max_edge=SPRITE_MAX_EDGE):
+    """Shrink im so its longer edge is max_edge px, preserving aspect ratio.
+    No-op if the image is already smaller than that."""
+    if max(im.size) <= max_edge:
+        return im
+    out = im.copy()
+    out.thumbnail((max_edge, max_edge), Image.Resampling.LANCZOS)
+    return out
+
 
 def color_key(im, bg, tol=32, open_iters=2):
     """Make background-connected pixels near `bg` (or near any color in
@@ -138,6 +161,14 @@ def extract_towers():
             # corner since it shares x-range with the AA-2 turret above;
             # clear it with an explicit crop-local box.
             keyed = clear_regions(keyed, [(1630, 0, keyed.width, 195)])
+        if name == "tower_double":
+            # Every other directional sprite (tower_basic, tower_laser,
+            # enemy_tank, enemy_buggy) has its "front" pointing toward +x in
+            # the source art, matching the game's rotation convention
+            # (angle=0 -> +x). The AA-2 Cyclone's twin barrels alone point
+            # toward -x in the source sheet, so flip it here to match.
+            keyed = keyed.transpose(Image.FLIP_LEFT_RIGHT)
+        keyed = downscale(keyed)
         keyed.save(OUT / f"{name}.png")
 
 
@@ -173,7 +204,7 @@ def extract_enemies():
         (lx0 - tank_box[0], ly0 - tank_box[1], lx1 - tank_box[0], ly1 - tank_box[1])
         for (lx0, ly0, lx1, ly1) in label_boxes_orig
     ])
-    tint_red(tank_rgba).save(OUT / "enemy_tank.png")
+    downscale(tint_red(tank_rgba)).save(OUT / "enemy_tank.png")
 
     buggy_box = (700, 210, 1005, 365)
     buggy = im.crop(buggy_box)
@@ -182,7 +213,7 @@ def extract_enemies():
         (lx0 - buggy_box[0], ly0 - buggy_box[1], lx1 - buggy_box[0], ly1 - buggy_box[1])
         for (lx0, ly0, lx1, ly1) in label_boxes_orig
     ])
-    buggy_rgba.save(OUT / "enemy_buggy.png")
+    downscale(buggy_rgba).save(OUT / "enemy_buggy.png")
 
     soldier_box = (895, 450, 990, 550)
     soldier = im.crop(soldier_box)
@@ -191,7 +222,7 @@ def extract_enemies():
         (lx0 - soldier_box[0], ly0 - soldier_box[1], lx1 - soldier_box[0], ly1 - soldier_box[1])
         for (lx0, ly0, lx1, ly1) in label_boxes_orig
     ])
-    soldier_rgba.save(OUT / "enemy_soldier.png")
+    downscale(soldier_rgba).save(OUT / "enemy_soldier.png")
 
 
 def extract_explosion():
@@ -230,7 +261,7 @@ def extract_explosion():
     # tol=34 (vs. 32 elsewhere): needed a bit looser than the illustrated
     # sprites to cover this photo's per-corner color variance without
     # reopening a gap for the grass blob defect this is meant to fix.
-    color_key(crop, bg_colors, tol=34).save(OUT / "explosion.png")
+    downscale(color_key(crop, bg_colors, tol=34)).save(OUT / "explosion.png")
 
 
 def extract_map():
@@ -252,7 +283,16 @@ def extract_map():
     col = median_patch(50, max(minimap_box[1] - 80, 0))
     arr[minimap_box[1]:minimap_box[3], minimap_box[0]:minimap_box[2]] = col
 
-    Image.fromarray(arr).save(OUT / "map_bg.png")
+    out_img = Image.fromarray(arr)
+    # drawMap() in game/js/map.js always draws this at exactly
+    # CANVAS_WIDTH x CANVAS_HEIGHT (ctx.drawImage(mapImage, 0, 0, 1200, 750)),
+    # stretching it to that box regardless of its own aspect ratio. Doing
+    # that same resize once here -- instead of shipping the full ~2400x1792
+    # source and letting the browser resample it down on every frame --
+    # produces an identical on-screen result at a fraction of the file size
+    # and per-frame cost.
+    out_img = out_img.resize((MAP_WIDTH, MAP_HEIGHT), Image.Resampling.LANCZOS)
+    out_img.save(OUT / "map_bg.png")
 
 
 if __name__ == "__main__":
