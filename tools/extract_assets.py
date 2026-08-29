@@ -243,6 +243,12 @@ def extract_enemies():
         (lx0 - buggy_box[0], ly0 - buggy_box[1], lx1 - buggy_box[0], ly1 - buggy_box[1])
         for (lx0, ly0, lx1, ly1) in label_boxes_orig
     ])
+    # Like the player towers, the source art's natural olive/khaki tone
+    # (mean RGB ~71,70,60) is dark and low-saturation -- almost identical
+    # to the trench's own dirt color, so at the tiny on-screen draw size
+    # it effectively disappears against the terrain. Warm the tint up so
+    # it reads as a distinct enemy unit against both grass and dirt.
+    buggy_rgba = tint_toward(buggy_rgba, (195, 140, 70), strength=0.35)
     downscale(buggy_rgba).save(OUT / "enemy_buggy.png")
 
     soldier_box = (895, 450, 990, 550)
@@ -252,6 +258,12 @@ def extract_enemies():
         (lx0 - soldier_box[0], ly0 - soldier_box[1], lx1 - soldier_box[0], ly1 - soldier_box[1])
         for (lx0, ly0, lx1, ly1) in label_boxes_orig
     ])
+    # Same problem as the buggy, worse: at only ~95x100px before downscale
+    # (drawn smaller still in-game than any other sprite), a dark
+    # camo-green soldier on dark trench dirt was reported as effectively
+    # invisible. A stronger, warmer tint than the buggy's gives the small
+    # sprite some color to read even at a few pixels tall.
+    soldier_rgba = tint_toward(soldier_rgba, (215, 165, 80), strength=0.5)
     downscale(soldier_rgba).save(OUT / "enemy_soldier.png")
 
 
