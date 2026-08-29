@@ -168,8 +168,38 @@ def extract_towers():
             # (angle=0 -> +x). The AA-2 Cyclone's twin barrels alone point
             # toward -x in the source sheet, so flip it here to match.
             keyed = keyed.transpose(Image.FLIP_LEFT_RIGHT)
+        if name == "tower_basic":
+            # Olive drab reads almost identically to the map's grass at
+            # this draw size -- nudge it toward a cool steel blue so the
+            # player's own towers don't camouflage into the terrain.
+            keyed = tint_toward(keyed, (95, 120, 150), strength=0.4)
+        if name == "tower_double":
+            # Already a cooler grey camo than the basic turret, so it needs
+            # a lighter push -- just enough to read as distinctly "steel"
+            # rather than "olive" next to the basic tower.
+            keyed = tint_toward(keyed, (150, 165, 180), strength=0.25)
         keyed = downscale(keyed)
         keyed.save(OUT / f"{name}.png")
+
+
+def tint_toward(im, target_rgb, strength=0.55):
+    """Blend an RGBA image's per-pixel gray value toward target_rgb, keeping
+    alpha untouched. Preserves shading/detail (each pixel keeps its own
+    brightness) while shifting the overall hue -- used both for the enemy
+    tank's rust-red recolor and for nudging the player towers' palettes
+    away from the map's own green/olive tones so they stay visible against
+    the terrain instead of blending into it."""
+    im = im.convert("RGBA")
+    arr = np.array(im).astype(float)
+    r, g, b, a = arr[..., 0], arr[..., 1], arr[..., 2], arr[..., 3]
+    gray = (r + g + b) / 3
+    tr, tg, tb = target_rgb
+    nr = gray + (tr - gray) * strength
+    ng = gray + (tg - gray) * strength
+    nb = gray + (tb - gray) * strength
+    out = np.stack([nr, ng, nb, a], axis=-1)
+    out = np.clip(out, 0, 255).astype(np.uint8)
+    return Image.fromarray(out, mode="RGBA")
 
 
 def tint_red(im, strength=0.55):
@@ -267,21 +297,32 @@ def extract_explosion():
 def extract_map():
     im = Image.open(ROOT / "mapa.jpg").convert("RGB")
     arr = np.array(im)
-    # paint over the baked-in "ENEMY PATH" legend and the corner minimap
-    # with nearby grass texture (median of an adjacent patch) so our own
-    # HUD/path drawing isn't fighting the source art. This stays opaque
-    # (map_bg.png has no alpha channel), so a flat fill is fine here.
-    def median_patch(x, y, w=15, h=15):
-        patch = arr[y:y + h, x:x + w].reshape(-1, 3)
-        return np.median(patch, axis=0).astype(np.uint8)
+    # Paint over the baked-in "ENEMY PATH" legend and the corner minimap so
+    # our own HUD/path drawing isn't fighting the source art. This stays
+    # opaque (map_bg.png has no alpha channel).
+    #
+    # A flat median-color fill (the original approach) reads as an obvious
+    # solid block once the map is on screen -- real grass has visible blade
+    # texture and tonal variation a single flat color can't fake. Instead,
+    # clone real texture: copy a same-size patch of genuine grass from
+    # directly adjacent to each box (so lighting/terrain matches) straight
+    # over it. Not a seamless blend, but a real photo patch reads as real
+    # terrain in a way a flat fill never does.
+    def clone_patch(dest_box, src_origin):
+        dx0, dy0, dx1, dy1 = dest_box
+        w, h = dx1 - dx0, dy1 - dy0
+        sx0, sy0 = src_origin
+        arr[dy0:dy1, dx0:dx1] = arr[sy0:sy0 + h, sx0:sx0 + w]
 
     legend_box = (2000, 60, 2400, 140)
-    col = median_patch(max(legend_box[0] - 60, 0), legend_box[1])
-    arr[legend_box[1]:legend_box[3], legend_box[0]:legend_box[2]] = col
+    # source: the same width/height strip directly below the legend box,
+    # which is open terrain in the source image
+    clone_patch(legend_box, (legend_box[0], legend_box[3]))
 
     minimap_box = (0, 1370, 430, 1792)
-    col = median_patch(50, max(minimap_box[1] - 80, 0))
-    arr[minimap_box[1]:minimap_box[3], minimap_box[0]:minimap_box[2]] = col
+    # source: the same width/height strip directly above the minimap box
+    lh = minimap_box[3] - minimap_box[1]
+    clone_patch(minimap_box, (minimap_box[0], minimap_box[1] - lh))
 
     out_img = Image.fromarray(arr)
     # drawMap() in game/js/map.js always draws this at exactly
