@@ -11,8 +11,12 @@ import { applyUpgrade, upgradeCost, canUpgrade } from "./upgrades.js";
 // placement on or immediately next to the path. The trench itself reads
 // as ~30-50px wide on screen, and towers draw ~40px wide with a platform
 // pad, so this keeps them visually clear of the actual road surface, not
-// just the single-pixel-wide waypoint line down its middle.
-const MIN_PLACEMENT_DIST_FROM_PATH = 40;
+// just the single-pixel-wide waypoint line down its middle. (The smooth
+// PATH curve blocks a much smaller, more accurate slice of the map than
+// the earlier zigzagging version did, so this can stay closer to the
+// road's actual visual width instead of needing extra padding to
+// compensate for an inaccurate path.)
+const MIN_PLACEMENT_DIST_FROM_PATH = 30;
 
 // Refund fraction paid back to the player when selling a tower via the
 // upgrade panel's "Vender" button.

@@ -1,48 +1,69 @@
 export const CANVAS_WIDTH = 1200;
 export const CANVAS_HEIGHT = 750;
 
-// Waypoints tracing the actual dark-dirt trench floor in
-// game/assets/map_bg.png. The road enters top-left, spirals down through
-// the trench (dipping left into the inner loop before curving back right),
-// and exits off the right edge. The middle section (x:381-940) was
-// re-derived by sampling the map image directly -- a straight-line guess
-// through that stretch used to cut across open grass and a parked tank
-// instead of following the trench (see docs/2026-08-29-tower-defense-plan.md
-// Task 2's original tuning note); these points were snapped to local
-// maxima of "dark, desaturated" pixel density, i.e. the actual trench
-// floor, not eyeballed.
+// Waypoints tracing the trench in game/assets/map_bg.png. The road enters
+// top-left, curves down into the fortified hook-shaped trench, and exits
+// off the right edge.
+//
+// History: an earlier version of this array was built by independently
+// snapping each candidate point to the nearest strong "dark dirt" pixel
+// cluster. That produced an erratic, zigzagging line -- the trench has
+// several parallel lanes close together (the concentric sandbag rings),
+// so independent per-point snapping could jump to a different lane than
+// its neighbors instead of tracing one continuous line, and it also made
+// MIN_PLACEMENT_DIST_FROM_PATH block far more of the map than intended
+// (many more, closer-together path segments meant far more of the canvas
+// counted as "near the road"). This version instead fits a smooth
+// Catmull-Rom curve through a small number of hand-picked anchor points
+// (the entry, the trench's own visual curve, and the exit), which cannot
+// zigzag by construction and was verified by rendering it over the actual
+// map image and checking it doesn't cut across any sandbag wall at a hard
+// angle (one shallow crossing near the trench's inner ring remains, which
+// reads as a connecting trench cut through the position rather than an
+// error).
 export const PATH = [
   { x: -40, y: 10 },
-  { x: 132, y: 19 },
-  { x: 168, y: 106 },
-  { x: 207, y: 143 },
-  { x: 244, y: 165 },
-  { x: 290, y: 181 },
+  { x: -5, y: 7 },
+  { x: 47, y: 3 },
+  { x: 104, y: 9 },
+  { x: 161, y: 36 },
+  { x: 224, y: 89 },
+  { x: 288, y: 148 },
   { x: 343, y: 192 },
-  { x: 381, y: 181 },
-  { x: 405, y: 205 },
-  { x: 440, y: 260 },
-  { x: 445, y: 285 },
-  { x: 450, y: 340 },
-  { x: 425, y: 355 },
-  { x: 435, y: 410 },
-  { x: 355, y: 420 },
-  { x: 375, y: 480 },
-  { x: 475, y: 485 },
-  { x: 495, y: 510 },
-  { x: 585, y: 505 },
-  { x: 655, y: 505 },
-  { x: 725, y: 475 },
-  { x: 830, y: 425 },
-  { x: 850, y: 370 },
-  { x: 895, y: 350 },
-  { x: 945, y: 300 },
-  { x: 915, y: 230 },
+  { x: 386, y: 210 },
+  { x: 423, y: 215 },
+  { x: 455, y: 217 },
+  { x: 485, y: 224 },
+  { x: 511, y: 232 },
+  { x: 535, y: 241 },
+  { x: 560, y: 255 },
+  { x: 589, y: 276 },
+  { x: 620, y: 303 },
+  { x: 643, y: 329 },
+  { x: 652, y: 349 },
+  { x: 647, y: 362 },
+  { x: 634, y: 376 },
+  { x: 620, y: 400 },
+  { x: 598, y: 444 },
+  { x: 570, y: 500 },
+  { x: 556, y: 547 },
+  { x: 574, y: 565 },
+  { x: 626, y: 560 },
+  { x: 691, y: 542 },
+  { x: 750, y: 520 },
+  { x: 798, y: 498 },
+  { x: 843, y: 472 },
+  { x: 883, y: 440 },
+  { x: 914, y: 397 },
+  { x: 933, y: 339 },
+  { x: 950, y: 279 },
   { x: 976, y: 230 },
-  { x: 1020, y: 197 },
-  { x: 1074, y: 172 },
-  { x: 1135, y: 154 },
-  { x: 1175, y: 147 },
+  { x: 1017, y: 198 },
+  { x: 1066, y: 176 },
+  { x: 1114, y: 161 },
+  { x: 1154, y: 149 },
+  { x: 1189, y: 143 },
+  { x: 1219, y: 141 },
   { x: 1240, y: 140 },
 ];
 
