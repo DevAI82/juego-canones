@@ -66,7 +66,17 @@ def color_key(im, bg, tol=32, open_iters=2):
     bg_mask = ndimage.binary_dilation(bg_mask, structure=structure, iterations=open_iters) & close
 
     alpha = np.where(bg_mask, 0, 255).astype(np.uint8)
-    rgba = np.dstack([np.array(im), alpha])
+    rgb = np.array(im)
+    # Zero the RGB channels wherever alpha is 0, not just the alpha
+    # channel itself. Canvas 2D's drawImage respects alpha exactly at
+    # runtime, so leaving the original RGB behind a transparent pixel is
+    # invisible in-game - but it leaves ghost pixel data (e.g. baked-in
+    # label text, a neighboring sprite's art) sitting in the file, visible
+    # to any tool that composites RGB without premultiplying alpha (a
+    # plain Read-tool preview, or any future step that scales/filters
+    # these sprites without being alpha-aware).
+    rgb[bg_mask] = 0
+    rgba = np.dstack([rgb, alpha])
     return Image.fromarray(rgba, mode="RGBA")
 
 
@@ -87,7 +97,10 @@ def clear_regions(rgba_im, boxes):
         cx0, cx1 = max(x0, 0), min(x1, w)
         cy0, cy1 = max(y0, 0), min(y1, h)
         if cx1 > cx0 and cy1 > cy0:
-            arr[cy0:cy1, cx0:cx1, 3] = 0
+            # Zero RGB too, not just alpha - see color_key()'s comment on
+            # why leftover RGB under alpha=0 pixels is a problem even
+            # though it's invisible at runtime.
+            arr[cy0:cy1, cx0:cx1, :] = 0
     return Image.fromarray(arr, mode="RGBA")
 
 
