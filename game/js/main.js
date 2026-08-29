@@ -146,7 +146,16 @@ canvas.addEventListener("click", (evt) => {
     selectedBuildType = null;
     return;
   }
-  selectedTower = towers.find((t) => Math.hypot(t.x - pos.x, t.y - pos.y) < 20) || null;
+  let nearestTower = null;
+  let nearestDist = 20;
+  for (const t of towers) {
+    const d = Math.hypot(t.x - pos.x, t.y - pos.y);
+    if (d < nearestDist) {
+      nearestDist = d;
+      nearestTower = t;
+    }
+  }
+  selectedTower = nearestTower;
 });
 
 let lastTime = performance.now();
