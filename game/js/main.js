@@ -1,7 +1,9 @@
 import { CANVAS_WIDTH, CANVAS_HEIGHT, PATH, drawMap, drawPathDebug } from "./map.js";
-import { createEnemy, stepEnemy, ENEMY_TYPES } from "./enemy.js";
+import { createEnemy, stepEnemy, ENEMY_TYPES, damageEnemy } from "./enemy.js";
 import { WAVES, buildSpawnQueue } from "./waves.js";
 import { createEconomy, earn, loseLife } from "./economy.js";
+import { createTower, stepTower, damageTower } from "./tower.js";
+import { createProjectile, stepProjectile } from "./projectile.js";
 
 const canvas = document.getElementById("game-canvas");
 const ctx = canvas.getContext("2d");
@@ -14,6 +16,11 @@ let waveIndex = 0;
 let spawnQueue = buildSpawnQueue(waveIndex);
 let waveClock = 0;
 let enemies = [];
+let towers = [
+  createTower("basic", 400, 300),
+  createTower("laser", 800, 300),
+];
+let projectiles = [];
 let gameOver = false;
 
 function trySpawn() {
@@ -50,6 +57,36 @@ function drawEnemy(e) {
   ctx.fillRect(e.x - w / 2, e.y - 20, w * pct, 4);
 }
 
+function drawTower(t) {
+  ctx.save();
+  ctx.translate(t.x, t.y);
+  ctx.rotate(t.angle);
+  ctx.fillStyle = t.type === "laser" ? "#8a6a3a" : t.type === "double" ? "#888" : "#6b7a4a";
+  ctx.fillRect(-14, -10, 28, 20);
+  ctx.fillRect(0, -3, 22, 6);
+  ctx.restore();
+
+  const w = 30;
+  const pct = t.hp / t.maxHp;
+  ctx.fillStyle = "#400";
+  ctx.fillRect(t.x - w / 2, t.y - 26, w, 4);
+  ctx.fillStyle = "#3c3";
+  ctx.fillRect(t.x - w / 2, t.y - 26, w * pct, 4);
+
+  const ammoPct = t.ammo / t.maxAmmo;
+  ctx.fillStyle = "#225";
+  ctx.fillRect(t.x - w / 2, t.y - 20, w, 3);
+  ctx.fillStyle = "#5af";
+  ctx.fillRect(t.x - w / 2, t.y - 20, w * ammoPct, 3);
+}
+
+function drawProjectile(p) {
+  ctx.fillStyle = "#ff0";
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+  ctx.fill();
+}
+
 function drawHud() {
   ctx.save();
   ctx.fillStyle = "#fff";
@@ -82,6 +119,26 @@ function loop(now) {
       }
     }
     enemies = enemies.filter((e) => e.alive);
+
+    for (const t of towers) {
+      const shot = stepTower(t, enemies, dt);
+      if (shot) {
+        for (let i = 0; i < shot.projectilesPerShot; i++) {
+          projectiles.push(createProjectile(shot.x, shot.y, shot.target, shot.damage));
+        }
+      }
+    }
+
+    for (const p of projectiles) {
+      const hit = stepProjectile(p, dt);
+      if (hit) damageEnemy(p.target, p.damage);
+    }
+    projectiles = projectiles.filter((p) => p.alive);
+
+    const killedEnemies = enemies.filter((e) => !e.alive);
+    for (const e of killedEnemies) earn(economy, e.bounty);
+    enemies = enemies.filter((e) => e.alive);
+
     nextWaveIfDone();
   }
 
@@ -93,7 +150,9 @@ function loop(now) {
     ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
   }
   drawPathDebug(ctx, PATH);
+  for (const t of towers) drawTower(t);
   for (const e of enemies) drawEnemy(e);
+  for (const p of projectiles) drawProjectile(p);
   drawHud();
 
   requestAnimationFrame(loop);
