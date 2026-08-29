@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { PATH, pathPointAt, distanceToPath } from "./map.js";
+import { PATH, SOLDIER_PATH, pathPointAt, distanceToPath } from "./map.js";
 
 test("PATH has at least 2 waypoints", () => {
   assert.ok(PATH.length >= 2);
@@ -26,4 +26,12 @@ test("distanceToPath returns a large distance for a point far from any segment",
   const path = [{ x: 0, y: 0 }, { x: 100, y: 0 }];
   const d = distanceToPath(path, 50, 5000);
   assert.ok(d > 4000);
+});
+
+test("SOLDIER_PATH has at least 2 waypoints and starts/ends near PATH's entry/exit", () => {
+  assert.ok(SOLDIER_PATH.length >= 2);
+  // both routes should enter and exit at roughly the same map edges, even
+  // though they take different ways through the middle
+  assert.ok(Math.abs(SOLDIER_PATH[0].x - PATH[0].x) < 5);
+  assert.ok(Math.abs(SOLDIER_PATH.at(-1).x - PATH.at(-1).x) < 5);
 });
