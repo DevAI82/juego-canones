@@ -5,65 +5,61 @@ export const CANVAS_HEIGHT = 750;
 // top-left, curves down into the fortified hook-shaped trench, and exits
 // off the right edge.
 //
-// History: an earlier version of this array was built by independently
-// snapping each candidate point to the nearest strong "dark dirt" pixel
-// cluster. That produced an erratic, zigzagging line -- the trench has
-// several parallel lanes close together (the concentric sandbag rings),
-// so independent per-point snapping could jump to a different lane than
-// its neighbors instead of tracing one continuous line, and it also made
-// MIN_PLACEMENT_DIST_FROM_PATH block far more of the map than intended
-// (many more, closer-together path segments meant far more of the canvas
-// counted as "near the road"). This version instead fits a smooth
-// Catmull-Rom curve through a small number of hand-picked anchor points
-// (the entry, the trench's own visual curve, and the exit), which cannot
-// zigzag by construction and was verified by rendering it over the actual
-// map image and checking it doesn't cut across any sandbag wall at a hard
-// angle (one shallow crossing near the trench's inner ring remains, which
-// reads as a connecting trench cut through the position rather than an
-// error).
+// History: two earlier versions of this array were computed from the map
+// image alone and both mis-traced the trench (a per-point pixel-snapping
+// pass zigzagged between the trench's parallel lanes; a hand-picked
+// smooth curve cut across the middle bowl instead of following the outer
+// curve). The user then took a screenshot of the running game and drew
+// the actual intended route directly on top of it. These waypoints are
+// that hand-drawn line, extracted by detecting its color in the
+// screenshot, skeletonizing it to a centerline, and mapping screenshot
+// pixels back to this file's 1200x750 canvas space (calibrated against
+// this same PATH's previous rendering, which was visible in the same
+// screenshot) -- i.e. this is a direct trace of what the user actually
+// asked for, not another automated guess.
 export const PATH = [
   { x: -40, y: 10 },
-  { x: -5, y: 7 },
-  { x: 47, y: 3 },
-  { x: 104, y: 9 },
-  { x: 161, y: 36 },
-  { x: 224, y: 89 },
-  { x: 288, y: 148 },
-  { x: 343, y: 192 },
-  { x: 386, y: 210 },
-  { x: 423, y: 215 },
-  { x: 455, y: 217 },
-  { x: 485, y: 224 },
-  { x: 511, y: 232 },
-  { x: 535, y: 241 },
-  { x: 560, y: 255 },
-  { x: 589, y: 276 },
-  { x: 620, y: 303 },
-  { x: 643, y: 329 },
-  { x: 652, y: 349 },
-  { x: 647, y: 362 },
-  { x: 634, y: 376 },
-  { x: 620, y: 400 },
-  { x: 598, y: 444 },
-  { x: 570, y: 500 },
-  { x: 556, y: 547 },
-  { x: 574, y: 565 },
-  { x: 626, y: 560 },
-  { x: 691, y: 542 },
-  { x: 750, y: 520 },
-  { x: 798, y: 498 },
-  { x: 843, y: 472 },
-  { x: 883, y: 440 },
-  { x: 914, y: 397 },
-  { x: 933, y: 339 },
-  { x: 950, y: 279 },
-  { x: 976, y: 230 },
-  { x: 1017, y: 198 },
-  { x: 1066, y: 176 },
-  { x: 1114, y: 161 },
-  { x: 1154, y: 149 },
-  { x: 1189, y: 143 },
-  { x: 1219, y: 141 },
+  { x: 94, y: 40 },
+  { x: 134, y: 86 },
+  { x: 174, y: 132 },
+  { x: 223, y: 160 },
+  { x: 271, y: 178 },
+  { x: 320, y: 187 },
+  { x: 369, y: 197 },
+  { x: 417, y: 204 },
+  { x: 466, y: 208 },
+  { x: 514, y: 212 },
+  { x: 563, y: 215 },
+  { x: 612, y: 223 },
+  { x: 660, y: 246 },
+  { x: 696, y: 290 },
+  { x: 683, y: 334 },
+  { x: 634, y: 349 },
+  { x: 586, y: 360 },
+  { x: 537, y: 375 },
+  { x: 489, y: 388 },
+  { x: 440, y: 408 },
+  { x: 408, y: 450 },
+  { x: 408, y: 497 },
+  { x: 442, y: 539 },
+  { x: 491, y: 553 },
+  { x: 539, y: 560 },
+  { x: 588, y: 565 },
+  { x: 636, y: 564 },
+  { x: 685, y: 565 },
+  { x: 734, y: 558 },
+  { x: 782, y: 539 },
+  { x: 829, y: 498 },
+  { x: 877, y: 459 },
+  { x: 911, y: 414 },
+  { x: 927, y: 367 },
+  { x: 936, y: 320 },
+  { x: 944, y: 273 },
+  { x: 964, y: 225 },
+  { x: 1008, y: 187 },
+  { x: 1056, y: 165 },
+  { x: 1105, y: 152 },
+  { x: 1153, y: 145 },
   { x: 1240, y: 140 },
 ];
 
