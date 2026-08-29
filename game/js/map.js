@@ -40,6 +40,29 @@ export function drawMap(ctx, mapImage) {
   ctx.drawImage(mapImage, 0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 }
 
+// Point-to-segment distance from (x, y) to the segment (x1,y1)-(x2,y2).
+function distToSegment(x, y, x1, y1, x2, y2) {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const lenSq = dx * dx + dy * dy;
+  let t = lenSq === 0 ? 0 : ((x - x1) * dx + (y - y1) * dy) / lenSq;
+  t = Math.max(0, Math.min(1, t));
+  const px = x1 + t * dx;
+  const py = y1 + t * dy;
+  return Math.hypot(x - px, y - py);
+}
+
+// Minimum distance from (x, y) to any segment of the path (the road).
+// Used to reject tower placement on or too close to the road.
+export function distanceToPath(path, x, y) {
+  let min = Infinity;
+  for (let i = 0; i < path.length - 1; i++) {
+    const d = distToSegment(x, y, path[i].x, path[i].y, path[i + 1].x, path[i + 1].y);
+    if (d < min) min = d;
+  }
+  return min;
+}
+
 export function drawPathDebug(ctx, path) {
   ctx.save();
   ctx.strokeStyle = "rgba(255,0,0,0.6)";
