@@ -31,6 +31,13 @@ test("applyUpgrade decreases fireRate (faster shooting) as level rises", () => {
   assert.ok(t.fireRate < before);
 });
 
+test("applyUpgrade increases range as level rises", () => {
+  const t = createTower("basic", 0, 0);
+  const before = t.range;
+  applyUpgrade(t, "range", TOWER_TYPES.basic);
+  assert.ok(t.range > before);
+});
+
 test("applyUpgrade returns false past max level", () => {
   const t = createTower("basic", 0, 0);
   for (let i = 0; i < UPGRADE_DEFS.damage.levels; i++) applyUpgrade(t, "damage", TOWER_TYPES.basic);
