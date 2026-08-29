@@ -78,6 +78,10 @@ let win = false;
 // zeroes this to skip the wait immediately.
 let interWaveTimer = 0;
 
+// Running clock (seconds) used only for cosmetic animation phase (the
+// enemy walking bob) -- deliberately not gameplay state.
+let frameNow = 0;
+
 function trySpawn() {
   if (interWaveTimer > 0) return;
   while (spawnQueue.length && spawnQueue[0].time <= waveClock) {
@@ -103,11 +107,19 @@ function nextWaveIfDone() {
   }
 }
 
+// How fast the walking/driving bob cycles, in radians of sine-phase per
+// second -- purely a rendering flourish (see drawEnemy), no gameplay effect.
+const BOB_SPEED = 9;
+
 function drawEnemy(e) {
   const spriteKey = `enemy_${e.type}`;
   const img = sprites[spriteKey];
   ctx.save();
-  ctx.translate(e.x, e.y);
+  // A small side-to-side bob while moving, out of phase per-enemy
+  // (bobPhase) so a wave doesn't all bounce in unison -- makes movement
+  // read as walking/driving instead of a sprite gliding in place.
+  const bob = Math.sin(frameNow * BOB_SPEED + e.bobPhase) * 1.6;
+  ctx.translate(e.x, e.y + bob);
   ctx.rotate(e.angle);
   if (ready(img)) {
     // Draw at the sprite's real aspect ratio instead of squashing every
@@ -206,11 +218,49 @@ function drawTower(t) {
   ctx.fillRect(t.x - w / 2, t.y - 20, w * ammoPct, 3);
 }
 
+// A single flying debris speck, in polar coordinates around the blast
+// center -- position is derived from elapsed time (speed * age), not
+// stepped each frame, so nothing here needs its own update logic.
+function makeDebris() {
+  return {
+    angle: Math.random() * Math.PI * 2,
+    speed: 40 + Math.random() * 70,
+    size: 1.5 + Math.random() * 2.5,
+  };
+}
+
+function createExplosion(x, y) {
+  const count = 6 + Math.floor(Math.random() * 5);
+  const debris = [];
+  for (let i = 0; i < count; i++) debris.push(makeDebris());
+  return { x, y, age: 0, duration: 0.5, debris };
+}
+
 function drawExplosion(ex) {
   const img = sprites.explosion;
   const t = ex.age / ex.duration;
   const scale = 0.6 + t * 0.8;
   ctx.save();
+
+  // Bright flash at the moment of impact, gone within the first quarter
+  // of the explosion's life -- reads as the initial blast of light before
+  // the smoke/fire sprite and debris take over.
+  if (t < 0.25) {
+    ctx.globalAlpha = 1 - t / 0.25;
+    ctx.fillStyle = "#fff6d8";
+    ctx.beginPath();
+    ctx.arc(ex.x, ex.y, 24 * (1 - t), 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Expanding, fading shockwave ring.
+  ctx.globalAlpha = Math.max(0, 0.55 - t * 0.55);
+  ctx.strokeStyle = "#ffcf80";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(ex.x, ex.y, 8 + t * 42, 0, Math.PI * 2);
+  ctx.stroke();
+
   ctx.globalAlpha = 1 - t;
   if (ready(img)) {
     const w = 50 * scale, h = 50 * scale;
@@ -221,6 +271,20 @@ function drawExplosion(ex) {
     ctx.arc(ex.x, ex.y, 20 * scale, 0, Math.PI * 2);
     ctx.fill();
   }
+
+  // Debris flying outward from the blast center, fading a bit faster than
+  // the main fireball so it doesn't linger past the explosion itself.
+  ctx.fillStyle = "#241c14";
+  ctx.globalAlpha = Math.max(0, 1 - t * 1.3);
+  for (const d of ex.debris) {
+    const dist = d.speed * ex.age;
+    const dx = ex.x + Math.cos(d.angle) * dist;
+    const dy = ex.y + Math.sin(d.angle) * dist;
+    ctx.beginPath();
+    ctx.arc(dx, dy, d.size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
   ctx.restore();
 }
 
@@ -358,6 +422,7 @@ let lastTime = performance.now();
 function loop(now) {
   const dt = Math.min((now - lastTime) / 1000, 0.05);
   lastTime = now;
+  frameNow = now / 1000;
 
   if (!gameOver && !win) {
     if (interWaveTimer > 0) {
@@ -426,7 +491,7 @@ function loop(now) {
     const killedEnemies = enemies.filter((e) => !e.alive);
     for (const e of killedEnemies) {
       earn(economy, e.bounty);
-      explosions.push({ x: e.x, y: e.y, age: 0, duration: 0.4 });
+      explosions.push(createExplosion(e.x, e.y));
     }
     enemies = enemies.filter((e) => e.alive);
 

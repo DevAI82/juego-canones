@@ -1,3 +1,11 @@
+import { lerpAngle } from "./util.js";
+
+// How quickly a turret's facing angle catches up to its target, in
+// "fraction of the remaining turn per second". Instant snapping (the old
+// behavior) made turrets look robotic; this eases the turn in over a few
+// frames, closer to a real turret's slew rate.
+const TURN_RATE = 6;
+
 export const TOWER_TYPES = {
   basic: { cost: 50, damage: 12, range: 140, fireRate: 0.6, maxAmmo: 20, reloadTime: 2, maxCount: 6, hp: 80, projectilesPerShot: 1 },
   double: { cost: 90, damage: 8, range: 150, fireRate: 0.35, maxAmmo: 20, reloadTime: 3, maxCount: 4, hp: 90, projectilesPerShot: 2 },
@@ -57,7 +65,8 @@ export function stepTower(tower, enemies, dt) {
   tower.target = findTarget(tower, enemies);
   if (!tower.target) return null;
 
-  tower.angle = Math.atan2(tower.target.y - tower.y, tower.target.x - tower.x);
+  const targetAngle = Math.atan2(tower.target.y - tower.y, tower.target.x - tower.x);
+  tower.angle = lerpAngle(tower.angle, targetAngle, TURN_RATE * dt);
   tower.fireTimer -= dt;
   if (tower.fireTimer <= 0 && tower.ammo > 0) {
     tower.fireTimer = tower.fireRate;

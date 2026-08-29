@@ -1,3 +1,11 @@
+import { lerpAngle } from "./util.js";
+
+// How quickly an enemy's facing angle catches up to its direction of
+// travel, in "fraction of the remaining turn per second". Higher = snappier.
+// Instant snapping (the old behavior) read as robotic; this eases into
+// turns over a few frames instead.
+const TURN_RATE = 9;
+
 export const ENEMY_TYPES = {
   soldier: { hp: 40, speed: 55, damage: 1, bounty: 8, fireRange: 90, fireDamage: 2, fireCooldown: 1.2 },
   buggy: { hp: 25, speed: 95, damage: 1, bounty: 10, fireRange: 100, fireDamage: 2, fireCooldown: 1.0 },
@@ -6,11 +14,14 @@ export const ENEMY_TYPES = {
 
 export function createEnemy(type, path) {
   const def = ENEMY_TYPES[type];
+  // +/-10% per-instance speed variation so a wave of identical enemies
+  // doesn't move in a perfectly uniform, robotic block.
+  const speedJitter = 0.9 + Math.random() * 0.2;
   return {
     type,
     hp: def.hp,
     maxHp: def.hp,
-    speed: def.speed,
+    speed: def.speed * speedJitter,
     damage: def.damage,
     bounty: def.bounty,
     fireRange: def.fireRange,
@@ -22,6 +33,9 @@ export function createEnemy(type, path) {
     x: path[0].x,
     y: path[0].y,
     angle: 0,
+    // Random phase offset for the walking/driving bob animation (drawn in
+    // main.js), so enemies of the same type don't all bob in lockstep.
+    bobPhase: Math.random() * Math.PI * 2,
     alive: true,
   };
 }
@@ -41,7 +55,7 @@ export function stepEnemy(enemy, dt) {
     enemy.y = target.y;
     enemy.waypointIndex++;
   } else {
-    enemy.angle = Math.atan2(dy, dx);
+    enemy.angle = lerpAngle(enemy.angle, Math.atan2(dy, dx), TURN_RATE * dt);
     enemy.x += (dx / dist) * step;
     enemy.y += (dy / dist) * step;
   }
