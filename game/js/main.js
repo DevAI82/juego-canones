@@ -10,8 +10,26 @@ import { applyUpgrade, upgradeCost, canUpgrade } from "./upgrades.js";
 const canvas = document.getElementById("game-canvas");
 const ctx = canvas.getContext("2d");
 
-const mapImage = new Image();
-mapImage.src = "assets/map_bg.png";
+function loadImage(src) {
+  const img = new Image();
+  img.src = src;
+  return img;
+}
+
+const mapImage = loadImage("assets/map_bg.png");
+const sprites = {
+  tower_basic: loadImage("assets/tower_basic.png"),
+  tower_double: loadImage("assets/tower_double.png"),
+  tower_laser: loadImage("assets/tower_laser.png"),
+  enemy_soldier: loadImage("assets/enemy_soldier.png"),
+  enemy_buggy: loadImage("assets/enemy_buggy.png"),
+  enemy_tank: loadImage("assets/enemy_tank.png"),
+  explosion: loadImage("assets/explosion.png"),
+};
+
+function ready(img) {
+  return img.complete && img.naturalWidth > 0;
+}
 
 const economy = createEconomy(150, 20);
 let waveIndex = 0;
@@ -25,6 +43,7 @@ const upgradePanelEl = document.getElementById("upgrade-panel");
 let mouseX = 0;
 let mouseY = 0;
 let projectiles = [];
+let explosions = [];
 let gameOver = false;
 
 function trySpawn() {
@@ -44,12 +63,20 @@ function nextWaveIfDone() {
 }
 
 function drawEnemy(e) {
+  const spriteKey = `enemy_${e.type}`;
+  const img = sprites[spriteKey];
   ctx.save();
   ctx.translate(e.x, e.y);
-  ctx.fillStyle = e.type === "tank" ? "#7a3b3b" : e.type === "buggy" ? "#b8ab7a" : "#8a8f5c";
-  ctx.beginPath();
-  ctx.arc(0, 0, 10, 0, Math.PI * 2);
-  ctx.fill();
+  ctx.rotate(e.angle);
+  if (ready(img)) {
+    const w = 32, h = 32;
+    ctx.drawImage(img, -w / 2, -h / 2, w, h);
+  } else {
+    ctx.fillStyle = e.type === "tank" ? "#7a3b3b" : e.type === "buggy" ? "#b8ab7a" : "#8a8f5c";
+    ctx.beginPath();
+    ctx.arc(0, 0, 10, 0, Math.PI * 2);
+    ctx.fill();
+  }
   ctx.restore();
 
   // health bar
@@ -62,12 +89,35 @@ function drawEnemy(e) {
 }
 
 function drawTower(t) {
+  const img = sprites[`tower_${t.type}`];
+  const levelSum = t.level.damage + t.level.range + t.level.fireRate;
   ctx.save();
   ctx.translate(t.x, t.y);
   ctx.rotate(t.angle);
-  ctx.fillStyle = t.type === "laser" ? "#8a6a3a" : t.type === "double" ? "#888" : "#6b7a4a";
-  ctx.fillRect(-14, -10, 28, 20);
-  ctx.fillRect(0, -3, 22, 6);
+  if (levelSum > 0) {
+    ctx.save();
+    ctx.globalAlpha = Math.min(0.15 + levelSum * 0.06, 0.6);
+    ctx.fillStyle = "#ffd700";
+    ctx.beginPath();
+    ctx.arc(0, 0, 26, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+  if (ready(img)) {
+    const w = 40, h = 40;
+    ctx.drawImage(img, -w / 2, -h / 2, w, h);
+    const damagePct = 1 - t.hp / t.maxHp;
+    if (damagePct > 0) {
+      ctx.globalAlpha = damagePct * 0.6;
+      ctx.fillStyle = "#000";
+      ctx.fillRect(-w / 2, -h / 2, w, h);
+      ctx.globalAlpha = 1;
+    }
+  } else {
+    ctx.fillStyle = t.type === "laser" ? "#8a6a3a" : t.type === "double" ? "#888" : "#6b7a4a";
+    ctx.fillRect(-14, -10, 28, 20);
+    ctx.fillRect(0, -3, 22, 6);
+  }
   ctx.restore();
 
   if (t === selectedTower) {
@@ -91,6 +141,24 @@ function drawTower(t) {
   ctx.fillRect(t.x - w / 2, t.y - 20, w, 3);
   ctx.fillStyle = "#5af";
   ctx.fillRect(t.x - w / 2, t.y - 20, w * ammoPct, 3);
+}
+
+function drawExplosion(ex) {
+  const img = sprites.explosion;
+  const t = ex.age / ex.duration;
+  const scale = 0.6 + t * 0.8;
+  ctx.save();
+  ctx.globalAlpha = 1 - t;
+  if (ready(img)) {
+    const w = 50 * scale, h = 50 * scale;
+    ctx.drawImage(img, ex.x - w / 2, ex.y - h / 2, w, h);
+  } else {
+    ctx.fillStyle = "#f80";
+    ctx.beginPath();
+    ctx.arc(ex.x, ex.y, 20 * scale, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
 }
 
 function drawProjectile(p) {
@@ -204,10 +272,15 @@ function loop(now) {
       }
     }
     projectiles = projectiles.filter((p) => p.alive);
+    for (const ex of explosions) ex.age += dt;
+    explosions = explosions.filter((ex) => ex.age < ex.duration);
     towers = towers.filter((t) => t.hp > 0);
 
     const killedEnemies = enemies.filter((e) => !e.alive);
-    for (const e of killedEnemies) earn(economy, e.bounty);
+    for (const e of killedEnemies) {
+      earn(economy, e.bounty);
+      explosions.push({ x: e.x, y: e.y, age: 0, duration: 0.4 });
+    }
     enemies = enemies.filter((e) => e.alive);
 
     nextWaveIfDone();
@@ -224,6 +297,7 @@ function loop(now) {
   for (const t of towers) drawTower(t);
   for (const e of enemies) drawEnemy(e);
   for (const p of projectiles) drawProjectile(p);
+  for (const ex of explosions) drawExplosion(ex);
   drawHud();
 
   if (selectedBuildType) {
