@@ -128,58 +128,31 @@ def clear_regions(rgba_im, boxes):
 
 
 def extract_towers():
-    im = Image.open(ROOT / "tanques.jpg").convert("RGB")
-    bg = im.getpixel((5, 5))
-    # label boxes, in ORIGINAL image coordinates
-    label_boxes_orig = [
-        (1090, 130, 2752, 230),    # "1. MBT-1 Vanquisher..."
-        (240, 690, 1200, 860),     # "2. AA-2 Cyclone..."
-        (1370, 1280, 2752, 1460),  # "3. RG-3 Tempest..." (two lines)
-    ]
-    crops = {
-        # height trimmed from 680->650: 680 clipped the tip of the AA-2
-        # turret's muzzle brake (bleed starts ~y671 at x1310-1650)
-        "tower_basic": (0, 0, 1650, 650),
-        # y0 350->400 drops the MBT-1 barrel tail (bleeds in up to y386);
-        # y1 1080->1050 drops a sliver of the RG-3 railgun glow (bleeds in
-        # from y1076)
-        "tower_double": (1250, 400, 2752, 1050),
-        "tower_laser": (60, 850, 2752, 1536),
+    """Player tower turrets, from the second-generation reference renders
+    in diseño torres/ (torre simple/doble/laser.jpg) -- clean, isolated,
+    photorealistic top-down turrets on a uniform dark background each,
+    replacing the original tanques.jpg composite sheet's cruder, more
+    cartoonish crops. Much simpler to extract: no labels to erase, no
+    neighboring-turret bleed, one flat background color per image.
+    """
+    sources = {
+        # (filename stem, barrel direction in the source image)
+        "tower_basic": ("torre simple", "down"),
+        "tower_double": ("torre doble", "up"),
+        "tower_laser": ("torre laser", "up"),
     }
-    for name, box in crops.items():
-        cropped = im.crop(box)
-        keyed = color_key(cropped, bg)
-        # translate each label box into this crop's local coordinates;
-        # boxes that fall outside this particular crop are no-ops
-        local_boxes = [
-            (lx0 - box[0], ly0 - box[1], lx1 - box[0], ly1 - box[1])
-            for (lx0, ly0, lx1, ly1) in label_boxes_orig
-        ]
-        keyed = clear_regions(keyed, local_boxes)
-        if name == "tower_laser":
-            # the AA-2 turret's own art bleeds into this crop's top-right
-            # corner since it shares x-range with the AA-2 turret above;
-            # clear it with an explicit crop-local box.
-            keyed = clear_regions(keyed, [(1630, 0, keyed.width, 195)])
-        if name == "tower_double":
-            # Every other directional sprite (tower_basic, tower_laser,
-            # enemy_tank, enemy_buggy) has its "front" pointing toward +x in
-            # the source art, matching the game's rotation convention
-            # (angle=0 -> +x). The AA-2 Cyclone's twin barrels alone point
-            # toward -x in the source sheet, so flip it here to match.
-            keyed = keyed.transpose(Image.FLIP_LEFT_RIGHT)
-        if name == "tower_basic":
-            # Olive drab reads almost identically to the map's grass at
-            # this draw size -- nudge it toward a cool steel blue so the
-            # player's own towers don't camouflage into the terrain.
-            keyed = tint_toward(keyed, (95, 120, 150), strength=0.4)
-        if name == "tower_double":
-            # Already a cooler grey camo than the basic turret, so it needs
-            # a lighter push -- just enough to read as distinctly "steel"
-            # rather than "olive" next to the basic tower.
-            keyed = tint_toward(keyed, (150, 165, 180), strength=0.25)
+    for out_name, (stem, direction) in sources.items():
+        im = Image.open(ROOT / "diseño torres" / f"{stem}.jpg").convert("RGB")
+        bg = im.getpixel((5, 5))
+        keyed = color_key(im, bg)
+        # The game's rotation convention is angle=0 -> barrel points +x
+        # (right). Rotate whichever way the source's barrel actually
+        # points into that orientation: PIL's rotate() is counter-clockwise,
+        # under which "points down" ends up "points right" (+90) and
+        # "points up" ends up "points right" via a clockwise turn (-90).
+        keyed = keyed.rotate(90 if direction == "down" else -90, expand=True)
         keyed = downscale(keyed)
-        keyed.save(OUT / f"{name}.png")
+        keyed.save(OUT / f"{out_name}.png")
 
 
 def tint_toward(im, target_rgb, strength=0.55):
