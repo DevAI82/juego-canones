@@ -45,6 +45,7 @@ let mouseY = 0;
 let projectiles = [];
 let explosions = [];
 let gameOver = false;
+let win = false;
 
 function trySpawn() {
   while (spawnQueue.length && spawnQueue[0].time <= waveClock) {
@@ -54,11 +55,15 @@ function trySpawn() {
 }
 
 function nextWaveIfDone() {
-  if (spawnQueue.length === 0 && enemies.length === 0 && waveIndex < WAVES.length - 1) {
-    waveIndex++;
-    economy.wave = waveIndex + 1;
-    spawnQueue = buildSpawnQueue(waveIndex);
-    waveClock = 0;
+  if (spawnQueue.length === 0 && enemies.length === 0) {
+    if (waveIndex < WAVES.length - 1) {
+      waveIndex++;
+      economy.wave = waveIndex + 1;
+      spawnQueue = buildSpawnQueue(waveIndex);
+      waveClock = 0;
+    } else if (!win) {
+      win = true;
+    }
   }
 }
 
@@ -175,9 +180,11 @@ function drawHud() {
   ctx.fillText(`Oleada ${economy.wave}/${WAVES.length}`, 20, 30);
   ctx.fillText(`Vidas: ${economy.lives}`, 20, 55);
   ctx.fillText(`$${economy.money}`, 20, 80);
-  if (gameOver) {
+  if (gameOver || win) {
     ctx.font = "48px sans-serif";
-    ctx.fillText("GAME OVER", CANVAS_WIDTH / 2 - 130, CANVAS_HEIGHT / 2);
+    ctx.fillText(gameOver ? "GAME OVER" : "¡VICTORIA!", CANVAS_WIDTH / 2 - 150, CANVAS_HEIGHT / 2);
+    ctx.font = "20px sans-serif";
+    ctx.fillText("Pulsa R para reiniciar", CANVAS_WIDTH / 2 - 90, CANVAS_HEIGHT / 2 + 40);
   }
   ctx.restore();
 }
@@ -226,13 +233,19 @@ canvas.addEventListener("click", (evt) => {
   selectedTower = nearestTower;
 });
 
+window.addEventListener("keydown", (evt) => {
+  if (evt.key.toLowerCase() !== "r") return;
+  if (!gameOver && !win) return;
+  location.reload();
+});
+
 let lastTime = performance.now();
 
 function loop(now) {
   const dt = Math.min((now - lastTime) / 1000, 0.05);
   lastTime = now;
 
-  if (!gameOver) {
+  if (!gameOver && !win) {
     waveClock += dt;
     trySpawn();
 
