@@ -16,7 +16,7 @@ import { applyUpgrade, upgradeCost, canUpgrade } from "./upgrades.js";
 // the earlier zigzagging version did, so this can stay closer to the
 // road's actual visual width instead of needing extra padding to
 // compensate for an inaccurate path.)
-const MIN_PLACEMENT_DIST_FROM_PATH = 30;
+const MIN_PLACEMENT_DIST_FROM_PATH = 38;
 
 // Refund fraction paid back to the player when selling a tower via the
 // upgrade panel's "Vender" button.
@@ -175,10 +175,10 @@ function drawTower(t) {
   ctx.save();
   ctx.fillStyle = "rgba(20,22,18,0.75)";
   ctx.beginPath();
-  ctx.arc(t.x, t.y, 19, 0, Math.PI * 2);
+  ctx.arc(t.x, t.y, 38, 0, Math.PI * 2);
   ctx.fill();
   ctx.strokeStyle = "rgba(220,220,200,0.55)";
-  ctx.lineWidth = 1.5;
+  ctx.lineWidth = 2;
   ctx.stroke();
   ctx.restore();
 
@@ -190,14 +190,16 @@ function drawTower(t) {
     ctx.globalAlpha = Math.min(0.15 + levelSum * 0.06, 0.6);
     ctx.fillStyle = "#ffd700";
     ctx.beginPath();
-    ctx.arc(0, 0, 26, 0, Math.PI * 2);
+    ctx.arc(0, 0, 52, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
   }
   if (ready(img)) {
     // Draw at the sprite's real aspect ratio instead of squashing every
     // turret into a fixed square -- the laser turret crop alone is ~3.8:1.
-    const h = 34;
+    // (Doubled from the original 34px per user feedback that towers read
+    // too small against the map.)
+    const h = 68;
     const w = h * (img.naturalWidth / img.naturalHeight);
     ctx.drawImage(img, -w / 2, -h / 2, w, h);
     const damagePct = 1 - t.hp / t.maxHp;
@@ -223,18 +225,18 @@ function drawTower(t) {
     ctx.restore();
   }
 
-  const w = 30;
+  const w = 54;
   const pct = t.hp / t.maxHp;
   ctx.fillStyle = "#400";
-  ctx.fillRect(t.x - w / 2, t.y - 26, w, 4);
+  ctx.fillRect(t.x - w / 2, t.y - 46, w, 5);
   ctx.fillStyle = "#3c3";
-  ctx.fillRect(t.x - w / 2, t.y - 26, w * pct, 4);
+  ctx.fillRect(t.x - w / 2, t.y - 46, w * pct, 5);
 
   const ammoPct = t.ammo / t.maxAmmo;
   ctx.fillStyle = "#225";
-  ctx.fillRect(t.x - w / 2, t.y - 20, w, 3);
+  ctx.fillRect(t.x - w / 2, t.y - 38, w, 4);
   ctx.fillStyle = "#5af";
-  ctx.fillRect(t.x - w / 2, t.y - 20, w * ammoPct, 3);
+  ctx.fillRect(t.x - w / 2, t.y - 38, w * ammoPct, 4);
 }
 
 // A single flying debris speck, in polar coordinates around the blast
@@ -419,7 +421,7 @@ canvas.addEventListener("click", (evt) => {
     return;
   }
   let nearestTower = null;
-  let nearestDist = 20;
+  let nearestDist = 38;
   for (const t of towers) {
     const d = Math.hypot(t.x - pos.x, t.y - pos.y);
     if (d < nearestDist) {
@@ -537,7 +539,7 @@ function loop(now) {
     ctx.globalAlpha = 0.5;
     ctx.fillStyle = "#5af";
     ctx.beginPath();
-    ctx.arc(mouseX, mouseY, 16, 0, Math.PI * 2);
+    ctx.arc(mouseX, mouseY, 32, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
   }
