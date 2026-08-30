@@ -98,15 +98,19 @@ let frameNow = 0;
 // with ids starting over from empty arrays.
 let soundedIds = new Set();
 
-// Tracks the last state.paused value we reacted to, so the music is
-// paused/resumed exactly on the transition (not fought over every frame)
-// -- works for both local play and networked co-op, where `paused` can
-// flip because a *different* player hit pause.
+// Tracks the last "should the music be playing" value we reacted to, so
+// it's paused/resumed exactly on the transition (not fought over every
+// frame) -- works for both local play and networked co-op, where these
+// flags can flip because of a *different* player's action. Covers both
+// ways the board can stop moving: an explicit pause, and the game simply
+// ending (game over or victory) -- stepSimulation() no-ops on any of the
+// three, but never touched audio on its own.
 let lastMusicPaused = false;
 function syncMusicToPause() {
-  if (state.paused === lastMusicPaused) return;
-  lastMusicPaused = state.paused;
-  if (state.paused) pauseMusic();
+  const shouldPause = state.paused || state.gameOver || state.win;
+  if (shouldPause === lastMusicPaused) return;
+  lastMusicPaused = shouldPause;
+  if (shouldPause) pauseMusic();
   else resumeMusic();
 }
 
