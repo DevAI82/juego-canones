@@ -63,6 +63,17 @@ export function startMusic() {
   });
 }
 
+// Pausing the game (togglePause in simulate.js) only stops the battle
+// simulation -- it never touched audio, so the track kept looping under a
+// paused board indefinitely. main.js calls these on every state.paused
+// transition to keep the music in sync with it.
+export function pauseMusic() {
+  if (musicEl) musicEl.pause();
+}
+export function resumeMusic() {
+  if (musicEl) musicEl.play().catch(() => {});
+}
+
 // A single ramp-up-then-decay shape reused by every sound below.
 function envelope(gainNode, ac, attack, decay, peak) {
   const now = ac.currentTime;

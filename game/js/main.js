@@ -12,7 +12,7 @@ import {
   skipWave,
   togglePause,
 } from "./simulate.js";
-import { playSound, toggleMuted, startMusic } from "./audio.js";
+import { playSound, toggleMuted, startMusic, pauseMusic, resumeMusic } from "./audio.js";
 
 // Browsers refuse to start any audio (synthesized SFX or the background
 // music) before a real user gesture. Fire once, on whichever happens
@@ -97,6 +97,18 @@ let frameNow = 0;
 // server reset in networked mode, where `state` is a wholly new object
 // with ids starting over from empty arrays.
 let soundedIds = new Set();
+
+// Tracks the last state.paused value we reacted to, so the music is
+// paused/resumed exactly on the transition (not fought over every frame)
+// -- works for both local play and networked co-op, where `paused` can
+// flip because a *different* player hit pause.
+let lastMusicPaused = false;
+function syncMusicToPause() {
+  if (state.paused === lastMusicPaused) return;
+  lastMusicPaused = state.paused;
+  if (state.paused) pauseMusic();
+  else resumeMusic();
+}
 
 // Compares this frame's projectiles/beams against what we've already
 // played a sound for, and fires the newly-appeared ones' sound effects.
@@ -609,6 +621,7 @@ function loop(now) {
     stepSimulation(state, dt);
   }
   playNewShotSounds();
+  syncMusicToPause();
 
   ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
   if (ready(mapImage)) {
