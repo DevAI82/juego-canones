@@ -55,9 +55,36 @@ body {
 #pause-btn.active { border-color: #ffd700; color: #ffd700; }
 
 #build-menu { position: absolute; bottom: 0; left: 0; width: 100%; display: flex; gap: 8px; padding: 8px; background: rgba(0,0,0,0.5); box-sizing: border-box; }
-.build-btn { flex: 1; padding: 8px; background: #333; color: #fff; border: 2px solid #555; cursor: pointer; font-family: sans-serif; }
-.build-btn.selected { border-color: #5af; }
-.build-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+/* Same premium hologram-card look as .upgrade-card: the tower's own render
+   fills the top of the button (contain, not stretched/cropped) and the
+   live cost/count label sits in the dark strip below it. */
+.build-btn {
+  flex: 1;
+  height: 92px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 4px;
+  background-color: #0a0e10;
+  background-image: none; /* overridden inline per tower type */
+  background-size: auto 66%;
+  background-position: center 6px;
+  background-repeat: no-repeat;
+  border: 1px solid #6fd8e6;
+  border-radius: 4px;
+  box-shadow: 0 0 8px rgba(111, 216, 230, 0.4), inset 0 0 16px rgba(0, 0, 0, 0.6);
+  cursor: pointer;
+}
+.build-btn-label {
+  color: #dffcff;
+  font-family: sans-serif;
+  font-size: 11px;
+  font-weight: bold;
+  text-shadow: 0 1px 3px #000;
+  text-align: center;
+}
+.build-btn.selected { border-color: #ffe27a; box-shadow: 0 0 10px rgba(255, 226, 122, 0.65), inset 0 0 16px rgba(0, 0, 0, 0.6); }
+.build-btn:disabled { opacity: 0.55; cursor: not-allowed; filter: grayscale(0.5); }
 
 /* Premium sci-fi holographic upgrade panel, styled after a Gemini-generated
    mockup (diseño mejoras.jpg) the user commissioned. Each skill card's
@@ -66,7 +93,7 @@ body {
    pip bar, buttons) is built in CSS so it can reflect live game state. */
 #upgrade-panel {
   position: absolute;
-  bottom: 60px;
+  bottom: 118px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;

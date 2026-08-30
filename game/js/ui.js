@@ -3,6 +3,11 @@ import { UPGRADE_DEFS, upgradeCost, canUpgrade } from "./upgrades.js";
 
 const LABELS = { basic: "Básica", double: "Doble", laser: "Láser" };
 const SKILL_LABELS = { damage: "Daño", range: "Alcance", fireRate: "Vel. disparo" };
+// Reuse each tower's own premium render (game/assets/tower_*.png, extracted
+// from the user's "diseño torres" reference images) as the build menu's
+// icon, instead of a plain text button -- per user request for a more
+// premium look here too.
+const TOWER_ICON = { basic: "assets/tower_basic.png", double: "assets/tower_double.png", laser: "assets/tower_laser.png" };
 
 export function initBuildMenu(container, { onSelect }) {
   container.innerHTML = "";
@@ -10,6 +15,10 @@ export function initBuildMenu(container, { onSelect }) {
     const btn = document.createElement("button");
     btn.className = "build-btn";
     btn.dataset.type = type;
+    btn.style.backgroundImage = `url(${TOWER_ICON[type]})`;
+    const label = document.createElement("span");
+    label.className = "build-btn-label";
+    btn.appendChild(label);
     btn.addEventListener("click", () => onSelect(type));
     container.appendChild(btn);
   }
@@ -24,7 +33,7 @@ export function updateBuildMenu(container, { towers, economy, selectedType }) {
     const canAfford = economy.money >= def.cost;
     btn.disabled = atMax || !canAfford;
     btn.classList.toggle("selected", type === selectedType);
-    btn.textContent = `${LABELS[type]} ($${def.cost}) ${countOnField}/${def.maxCount}`;
+    btn.querySelector(".build-btn-label").textContent = `${LABELS[type]} ($${def.cost}) ${countOnField}/${def.maxCount}`;
   }
 }
 

@@ -385,9 +385,37 @@ def extract_explosion():
     downscale(color_key(crop, bg_colors, tol=34)).save(OUT / "explosion.png")
 
 
+def remove_red_path_line(arr):
+    """mapa.jpg has the intended route drawn on it as a solid red line
+    (plus its "ENEMY PATH" legend swatch and minimap inset, handled
+    separately below) -- useful as a guide while designing the route, but
+    the player was still seeing it on screen since it's part of the
+    source photo, not something game/js draws. Detect the line's
+    strongly-red pixels and nearest-neighbor inpaint them from the
+    surrounding terrain: the line is only a few pixels wide, so "copy the
+    closest non-red pixel's color" reconstructs plausible ground texture
+    without needing a real inpainting model.
+    """
+    r = arr[..., 0].astype(int)
+    g = arr[..., 1].astype(int)
+    b = arr[..., 2].astype(int)
+    mask = (r - g > 50) & (r - b > 50) & (r > 100)
+    # Grow the mask a couple px to also catch the line's anti-aliased edge
+    # pixels, which are pink/orange rather than pure red and would
+    # otherwise leave a faint halo behind.
+    mask = ndimage.binary_dilation(mask, iterations=3)
+    if not mask.any():
+        return arr
+    _, nearest_idx = ndimage.distance_transform_edt(mask, return_distances=True, return_indices=True)
+    out = arr.copy()
+    out[mask] = arr[tuple(idx[mask] for idx in nearest_idx)]
+    return out
+
+
 def extract_map():
     im = Image.open(ROOT / "mapa.jpg").convert("RGB")
     arr = np.array(im)
+    arr = remove_red_path_line(arr)
     # Paint over the baked-in "ENEMY PATH" legend and the corner minimap so
     # our own HUD/path drawing isn't fighting the source art. This stays
     # opaque (map_bg.png has no alpha channel).

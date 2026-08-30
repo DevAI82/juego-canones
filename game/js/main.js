@@ -1,4 +1,4 @@
-import { CANVAS_WIDTH, CANVAS_HEIGHT, PATH, drawMap, drawPathDebug } from "./map.js";
+import { CANVAS_WIDTH, CANVAS_HEIGHT, drawMap } from "./map.js";
 import { WAVES } from "./waves.js";
 import { TOWER_TYPES } from "./tower.js";
 import { initBuildMenu, updateBuildMenu, initUpgradePanel, updateUpgradePanel } from "./ui.js";
@@ -617,7 +617,10 @@ function loop(now) {
     ctx.fillStyle = "#3a4a2f";
     ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
   }
-  drawPathDebug(ctx, PATH);
+  // Per user request: the red route line is no longer drawn for the
+  // player. PATH itself is untouched -- vehicles (buggy/tank/motorcycle/
+  // rocket) still follow it exactly via simulate.js/enemy.js, this only
+  // removes the visual debug overlay.
   for (const t of state.towers) drawTower(t);
   for (const e of state.enemies) drawEnemy(e);
   for (const p of state.projectiles) drawProjectile(p);
