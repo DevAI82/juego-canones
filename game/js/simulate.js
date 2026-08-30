@@ -105,7 +105,7 @@ export function stepSimulation(state, dt) {
         // target immediately rather than spawning a bullet that flies
         // toward it, and leave only a brief visual flash behind.
         damageEnemy(shot.target, shot.damage);
-        state.beams.push({ x1: shot.x, y1: shot.y, x2: shot.target.x, y2: shot.target.y, age: 0, duration: 0.15 });
+        state.beams.push(assignId({ x1: shot.x, y1: shot.y, x2: shot.target.x, y2: shot.target.y, age: 0, duration: 0.15 }));
       } else {
         for (let i = 0; i < shot.projectilesPerShot; i++) {
           // Offset each shot perpendicular to the barrel so the double
@@ -120,7 +120,7 @@ export function stepSimulation(state, dt) {
           // Both cannon towers (basic/double) fire the tank-shell sprite
           // per user request; only the laser (handled above, a beam) is
           // visually different among player towers.
-          state.projectiles.push(createProjectile(px, py, shot.target, shot.damage, 400, "shell"));
+          state.projectiles.push(assignId(createProjectile(px, py, shot.target, shot.damage, 400, "shell", "cannon")));
         }
       }
     }
@@ -131,9 +131,13 @@ export function stepSimulation(state, dt) {
     if (shot) {
       // Tank/rocket fire the same tank-shell sprite as the player's cannon
       // towers (per user request); the lighter infantry/vehicle weapons
-      // (soldier, buggy, motorcycle) keep the small tracer streak.
+      // (soldier, buggy, motorcycle) keep the small tracer streak. Sound is
+      // its own three-way split per user request (machinegun for the light
+      // units, cannon for the tank, missile for the rocket launcher) --
+      // rocket shares the tank's "shell" visual but not its sound.
       const style = e.type === "tank" || e.type === "rocket" ? "shell" : "tracer";
-      state.projectiles.push(createProjectile(shot.x, shot.y, shot.target, shot.damage, 300, style));
+      const sound = e.type === "tank" ? "cannon" : e.type === "rocket" ? "missile" : "machinegun";
+      state.projectiles.push(assignId(createProjectile(shot.x, shot.y, shot.target, shot.damage, 300, style, sound)));
     }
   }
 

@@ -12,6 +12,7 @@ import {
   skipWave,
   togglePause,
 } from "./simulate.js";
+import { playSound, toggleMuted } from "./audio.js";
 
 const canvas = document.getElementById("game-canvas");
 const ctx = canvas.getContext("2d");
@@ -77,6 +78,32 @@ let mouseY = 0;
 // Running clock (seconds) used only for cosmetic animation phase (the
 // enemy walking bob) -- deliberately not gameplay state.
 let frameNow = 0;
+
+// Every projectile/beam id we've already played a firing sound for.
+// Rebuilt from the CURRENT state each frame (rather than only ever
+// growing) so ids belonging to projectiles/beams that have since expired
+// naturally fall out -- this also makes it correct across a shared
+// server reset in networked mode, where `state` is a wholly new object
+// with ids starting over from empty arrays.
+let soundedIds = new Set();
+
+// Compares this frame's projectiles/beams against what we've already
+// played a sound for, and fires the newly-appeared ones' sound effects.
+// Every projectile/beam is tagged with `sound`/an implicit "laser" (see
+// simulate.js) all the way back at creation, so this never needs to know
+// *why* a shot happened, only that one just did.
+function playNewShotSounds() {
+  const nextSounded = new Set();
+  for (const p of state.projectiles) {
+    nextSounded.add(p.id);
+    if (!soundedIds.has(p.id)) playSound(p.sound);
+  }
+  for (const b of state.beams) {
+    nextSounded.add(b.id);
+    if (!soundedIds.has(b.id)) playSound("laser");
+  }
+  soundedIds = nextSounded;
+}
 
 // --- Actions ------------------------------------------------------------
 // One call site per player action, used by every click/keydown handler
@@ -454,6 +481,13 @@ skipWaveBtn.addEventListener("click", () => {
   actions.skip();
 });
 
+const muteBtn = document.getElementById("mute-btn");
+muteBtn.addEventListener("click", () => {
+  const muted = toggleMuted();
+  muteBtn.textContent = muted ? "🔇" : "🔊";
+  muteBtn.title = muted ? "Activar sonido" : "Silenciar sonido";
+});
+
 const pauseBtn = document.getElementById("pause-btn");
 pauseBtn.addEventListener("click", () => {
   if (state.gameOver || state.win) return;
@@ -563,6 +597,7 @@ function loop(now) {
   if (!networked) {
     stepSimulation(state, dt);
   }
+  playNewShotSounds();
 
   ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
   if (ready(mapImage)) {

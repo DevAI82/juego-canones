@@ -1,8 +1,11 @@
-// `style` is purely cosmetic (main.js's draw dispatch reads it to pick a
-// tank-shell sprite vs. a lightweight tracer streak) -- stepProjectile
-// itself never looks at it.
-export function createProjectile(x, y, target, damage, speed = 400, style = "tracer") {
-  return { x, y, target, damage, speed, style, alive: true };
+// `style` and `sound` are purely cosmetic -- main.js's draw dispatch reads
+// `style` to pick a tank-shell sprite vs. a lightweight tracer streak, and
+// its audio layer reads `sound` to pick a machinegun/cannon/missile sound
+// effect (independent of `style`: the enemy rocket launcher renders with
+// the same shell sprite as a cannon shot but should still sound distinct).
+// stepProjectile itself never looks at either.
+export function createProjectile(x, y, target, damage, speed = 400, style = "tracer", sound = "machinegun") {
+  return { x, y, target, damage, speed, style, sound, alive: true };
 }
 
 export function stepProjectile(proj, dt) {
