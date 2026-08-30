@@ -12,7 +12,18 @@ import {
   skipWave,
   togglePause,
 } from "./simulate.js";
-import { playSound, toggleMuted } from "./audio.js";
+import { playSound, toggleMuted, startMusic } from "./audio.js";
+
+// Browsers refuse to start any audio (synthesized SFX or the background
+// music) before a real user gesture. Fire once, on whichever happens
+// first -- a click anywhere or any keypress -- then get out of the way.
+function unlockAudioOnce() {
+  startMusic();
+  window.removeEventListener("pointerdown", unlockAudioOnce);
+  window.removeEventListener("keydown", unlockAudioOnce);
+}
+window.addEventListener("pointerdown", unlockAudioOnce);
+window.addEventListener("keydown", unlockAudioOnce);
 
 const canvas = document.getElementById("game-canvas");
 const ctx = canvas.getContext("2d");

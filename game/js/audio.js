@@ -16,13 +16,51 @@ function getCtx() {
 let muted = false;
 export function setMuted(value) {
   muted = value;
+  syncMusicMute();
 }
 export function isMuted() {
   return muted;
 }
 export function toggleMuted() {
-  muted = !muted;
+  return setMutedReturning(!muted);
+}
+function setMutedReturning(value) {
+  setMuted(value);
   return muted;
+}
+
+// Looping background music -- a real <audio> element rather than decoding
+// the file through the Web Audio API, since it's several minutes long and
+// just needs to loop and be volume-controlled, not shaped/mixed like the
+// short synthesized effects above. Kept quiet by default (per user
+// request: soft, balanced against gunfire/explosions, not competing with
+// them) -- MUSIC_VOLUME is deliberately well below the perceived loudness
+// of the sound effects' short, punchy envelopes.
+const MUSIC_VOLUME = 0.22;
+let musicEl = null;
+function getMusicEl() {
+  if (!musicEl) {
+    musicEl = new Audio("assets/music.mp3");
+    musicEl.loop = true;
+    musicEl.volume = MUSIC_VOLUME;
+  }
+  return musicEl;
+}
+function syncMusicMute() {
+  if (musicEl) musicEl.muted = muted;
+}
+
+// Browsers block audio (even a plain <audio> element) from starting before
+// a user gesture -- call this from the first click/keydown handler in
+// main.js, same moment the SFX AudioContext gets its own unlock.
+export function startMusic() {
+  const el = getMusicEl();
+  syncMusicMute();
+  el.play().catch(() => {
+    // Autoplay can still be refused in some contexts (e.g. no real
+    // gesture yet) -- harmless, the next user gesture will retry via the
+    // same startMusic() call.
+  });
 }
 
 // A single ramp-up-then-decay shape reused by every sound below.
