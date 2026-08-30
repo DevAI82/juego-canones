@@ -103,6 +103,53 @@ def color_key(im, bg, tol=32, open_iters=2):
     return Image.fromarray(rgba, mode="RGBA")
 
 
+def color_key_textured(im, bg, tol=32, open_iters=1, var_thresh=20):
+    """Like color_key(), but a pixel only counts as background if it's ALSO
+    locally smooth (low variance in a small window around it), not just
+    close in color to `bg`.
+
+    Needed for the shell/projectile source photo specifically: it sits on
+    a smooth grey studio-lighting gradient, and the metal's own specular
+    highlight streak happens to hit almost the exact same brightness as
+    that gradient at the same image position -- plain color distance
+    genuinely can't tell them apart there (verified: tightening `tol`
+    alone just shrinks/grows the same hole in the highlight, it doesn't
+    move it). But the true background is a smooth gradient (near-zero
+    local variance), while the highlight sits within the metal's surface
+    texture (real local variance, even where it's momentarily just as
+    bright) -- so requiring low variance in addition to color closeness
+    keys out the gradient without eating the highlight.
+    """
+    im = im.convert("RGB")
+    arr = np.array(im).astype(float)
+    gray = arr.mean(axis=2)
+
+    bg_arr = np.array(bg, dtype=int)
+    if bg_arr.ndim == 1:
+        bg_arr = bg_arr[None, :]
+    dists = np.abs(arr.astype(int)[:, :, None, :] - bg_arr[None, None, :, :]).sum(axis=3)
+    close = dists.min(axis=2) < tol * 3
+
+    win = 5
+    mean = ndimage.uniform_filter(gray, size=win)
+    mean_sq = ndimage.uniform_filter(gray**2, size=win)
+    local_var = np.clip(mean_sq - mean**2, 0, None)
+    close = close & (local_var < var_thresh)
+
+    structure = np.ones((3, 3), dtype=bool)
+    opened = ndimage.binary_opening(close, structure=structure, iterations=open_iters)
+    labeled, _ = ndimage.label(opened)
+    border_labels = set(labeled[0, :]) | set(labeled[-1, :]) | set(labeled[:, 0]) | set(labeled[:, -1])
+    border_labels.discard(0)
+    bg_mask = np.isin(labeled, list(border_labels))
+    bg_mask = ndimage.binary_dilation(bg_mask, structure=structure, iterations=open_iters) & close
+
+    alpha = np.where(bg_mask, 0, 255).astype(np.uint8)
+    rgb = np.array(im)
+    rgb[bg_mask] = 0
+    return Image.fromarray(np.dstack([rgb, alpha]), mode="RGBA")
+
+
 def clear_regions(rgba_im, boxes):
     """Force alpha=0 in the given (x0,y0,x1,y1) boxes, in image-local
     coordinates. Used to erase known baked-in label text regardless of
@@ -269,6 +316,36 @@ def extract_new_enemies():
     downscale(rocket).save(OUT / "enemy_rocket.png")
 
 
+def extract_projectile():
+    """A tank-shell/APFSDS-round sprite, from the user's reference image
+    (enemigos/proyectil.jpg) -- used in-game for the two cannon towers
+    (basic/double) and the tank/rocket enemies (game/js/simulate.js tags
+    each shot's `style`; main.js draws "shell"-styled shots with this
+    sprite and everything else as a lightweight tracer streak).
+
+    The source photo shows the round tilted diagonally with its sabot
+    petals mid-separation. Crop to just the intact rod+nose (the petals
+    fall away at the muzzle in real life, so a shell mid-flight showing
+    just the dart is the more accurate frame anyway), then rotate it
+    level so it matches the game's angle=0 -> +x convention the same way
+    every other directional sprite does.
+    """
+    im = Image.open(ROOT / "enemigos" / "proyectil.jpg").convert("RGB")
+    crop = im.crop((1480, 480, 2888, 1080))
+    # Source tilts down-to-the-right; rotating the crop +23 deg (PIL's
+    # rotate() is counter-clockwise) levels the rod horizontally instead
+    # of leaving the game's own angle=0 rotation doubling up on a tilt
+    # that's already baked into the pixels.
+    rotated = crop.rotate(23, expand=True, fillcolor=(200, 200, 200))
+    leveled = rotated.crop((0, 440, 1090, 970))
+
+    w, h = leveled.size
+    bg_colors = [leveled.getpixel((w - 5, 5)), leveled.getpixel((w - 5, h - 5)),
+                 leveled.getpixel((w // 2, 5)), leveled.getpixel((5, 5))]
+    keyed = color_key_textured(leveled, bg_colors, tol=40, open_iters=1, var_thresh=20)
+    downscale(keyed, max_edge=160).save(OUT / "projectile.png")
+
+
 def extract_explosion():
     im = Image.open(ROOT / "explosiones.jpg").convert("RGB")
     # bottom trimmed from 600->575->572: the reference sheet has a baked-in
@@ -354,6 +431,7 @@ if __name__ == "__main__":
     extract_towers()
     extract_enemies()
     extract_new_enemies()
+    extract_projectile()
     extract_explosion()
     extract_map()
     print("Assets written to", OUT)

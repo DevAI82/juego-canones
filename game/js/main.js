@@ -10,6 +10,7 @@ import {
   repairTower,
   sellTower,
   skipWave,
+  togglePause,
 } from "./simulate.js";
 
 const canvas = document.getElementById("game-canvas");
@@ -48,6 +49,7 @@ const sprites = {
   enemy_motorcycle: loadImage("assets/enemy_motorcycle.png"),
   enemy_rocket: loadImage("assets/enemy_rocket.png"),
   explosion: loadImage("assets/explosion.png"),
+  projectile: loadImage("assets/projectile.png"),
 };
 
 function ready(img) {
@@ -117,6 +119,20 @@ const actions = {
       return;
     }
     skipWave(state);
+  },
+  pause() {
+    if (networked) {
+      postAction({ type: "pause" });
+      return;
+    }
+    togglePause(state);
+  },
+  reset() {
+    if (networked) {
+      postAction({ type: "restart" });
+      return;
+    }
+    state = createGameState();
   },
 };
 
@@ -309,11 +325,66 @@ function drawBeam(b) {
   ctx.restore();
 }
 
-function drawProjectile(p) {
-  ctx.fillStyle = "#ff0";
+function projectileDirection(p) {
+  const dx = p.target.x - p.x;
+  const dy = p.target.y - p.y;
+  const dist = Math.hypot(dx, dy) || 1;
+  return { dirX: dx / dist, dirY: dy / dist, angle: Math.atan2(dy, dx) };
+}
+
+// Lightweight tracer streak (fading trail + bright tip) for the smaller
+// infantry/vehicle weapons (soldier, buggy, motorcycle) -- oriented toward
+// the current target, the same direction stepProjectile itself moves along.
+function drawTracer(p) {
+  const { dirX, dirY } = projectileDirection(p);
+  const trailLen = 16;
+  const tailX = p.x - dirX * trailLen;
+  const tailY = p.y - dirY * trailLen;
+
+  ctx.save();
+  const grad = ctx.createLinearGradient(tailX, tailY, p.x, p.y);
+  grad.addColorStop(0, "rgba(255,180,60,0)");
+  grad.addColorStop(1, "rgba(255,235,170,0.95)");
+  ctx.strokeStyle = grad;
+  ctx.lineWidth = 2.5;
+  ctx.lineCap = "round";
   ctx.beginPath();
-  ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+  ctx.moveTo(tailX, tailY);
+  ctx.lineTo(p.x, p.y);
+  ctx.stroke();
+
+  ctx.fillStyle = "#fff8d8";
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, 2.3, 0, Math.PI * 2);
   ctx.fill();
+  ctx.restore();
+}
+
+// Tank-shell sprite for the two cannon towers (basic/double) and the
+// tank/rocket enemies -- rotated to face its direction of travel, same as
+// every other directional sprite in the game.
+function drawShell(p) {
+  const img = sprites.projectile;
+  if (!ready(img)) {
+    drawTracer(p);
+    return;
+  }
+  const { angle } = projectileDirection(p);
+  const h = 10;
+  const w = h * (img.naturalWidth / img.naturalHeight);
+  ctx.save();
+  ctx.translate(p.x, p.y);
+  ctx.rotate(angle);
+  ctx.drawImage(img, -w / 2, -h / 2, w, h);
+  ctx.restore();
+}
+
+function drawProjectile(p) {
+  if (p.style === "shell") {
+    drawShell(p);
+  } else {
+    drawTracer(p);
+  }
 }
 
 function drawHud() {
@@ -330,6 +401,13 @@ function drawHud() {
     ctx.font = "13px sans-serif";
     ctx.fillStyle = "#8f8";
     ctx.fillText("Multijugador conectado", 20, CANVAS_HEIGHT - 12);
+  }
+  if (state.paused && !state.gameOver && !state.win) {
+    ctx.font = "36px sans-serif";
+    ctx.fillStyle = "#ffd700";
+    ctx.textAlign = "center";
+    ctx.fillText("PAUSA", CANVAS_WIDTH / 2, 50);
+    ctx.textAlign = "left";
   }
   if (state.gameOver || state.win) {
     ctx.font = "48px sans-serif";
@@ -374,6 +452,19 @@ const skipWaveBtn = document.getElementById("skip-wave-btn");
 skipWaveBtn.addEventListener("click", () => {
   if (state.gameOver || state.win) return;
   actions.skip();
+});
+
+const pauseBtn = document.getElementById("pause-btn");
+pauseBtn.addEventListener("click", () => {
+  if (state.gameOver || state.win) return;
+  actions.pause();
+});
+
+const resetBtn = document.getElementById("reset-btn");
+resetBtn.addEventListener("click", () => {
+  actions.reset();
+  selectedTowerId = null;
+  selectedBuildType = null;
 });
 
 function canvasPos(evt) {
@@ -502,6 +593,9 @@ function loop(now) {
   if (selectedTowerId != null && !selectedTower) selectedTowerId = null; // sold/destroyed
   updateUpgradePanel(upgradePanelEl, selectedTower);
   skipWaveBtn.classList.toggle("hidden", !(state.interWaveTimer > 0 && !state.gameOver && !state.win));
+  pauseBtn.textContent = state.paused ? "▶" : "⏸";
+  pauseBtn.title = state.paused ? "Reanudar" : "Pausar";
+  pauseBtn.classList.toggle("active", state.paused);
 
   requestAnimationFrame(loop);
 }

@@ -31,6 +31,7 @@ import {
   repairTower,
   sellTower,
   skipWave,
+  togglePause,
 } from "./js/simulate.js";
 
 const PORT = 8420;
@@ -61,6 +62,7 @@ const ACTION_HANDLERS = {
   repair: (body) => repairTower(state, body.towerId),
   sell: (body) => sellTower(state, body.towerId),
   skip: () => skipWave(state),
+  pause: () => togglePause(state),
   restart: () => {
     state = createGameState();
     return { ok: true };

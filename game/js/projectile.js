@@ -1,5 +1,8 @@
-export function createProjectile(x, y, target, damage, speed = 400) {
-  return { x, y, target, damage, speed, alive: true };
+// `style` is purely cosmetic (main.js's draw dispatch reads it to pick a
+// tank-shell sprite vs. a lightweight tracer streak) -- stepProjectile
+// itself never looks at it.
+export function createProjectile(x, y, target, damage, speed = 400, style = "tracer") {
+  return { x, y, target, damage, speed, style, alive: true };
 }
 
 export function stepProjectile(proj, dt) {

@@ -8,6 +8,7 @@ import {
   repairTower,
   sellTower,
   skipWave,
+  togglePause,
   MIN_PLACEMENT_DIST_FROM_PATH,
 } from "./simulate.js";
 import { PATH } from "./map.js";
@@ -102,4 +103,23 @@ test("skipWave zeroes the inter-wave timer", () => {
 
 test("MIN_PLACEMENT_DIST_FROM_PATH matches main.js's constant (38px)", () => {
   assert.equal(MIN_PLACEMENT_DIST_FROM_PATH, 38);
+});
+
+test("togglePause flips state.paused and stepSimulation no-ops while paused", () => {
+  const s = createGameState();
+  assert.equal(s.paused, false);
+
+  const r1 = togglePause(s);
+  assert.equal(r1.ok, true);
+  assert.equal(r1.paused, true);
+  assert.equal(s.paused, true);
+
+  const clockBefore = s.waveClock;
+  stepSimulation(s, 1);
+  assert.equal(s.waveClock, clockBefore); // nothing advanced while paused
+
+  togglePause(s);
+  assert.equal(s.paused, false);
+  stepSimulation(s, 1);
+  assert.ok(s.waveClock > clockBefore); // resumes normally
 });

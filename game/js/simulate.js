@@ -42,6 +42,11 @@ export function createGameState() {
     beams: [],
     gameOver: false,
     win: false,
+    // A shared pause: stepSimulation() below no-ops entirely while this is
+    // true, so in networked mode pausing stops the server's own tick loop
+    // -- global for every connected player, not a local "hide the game"
+    // toggle that leaves the shared board running for everyone else.
+    paused: false,
   };
 }
 
@@ -74,7 +79,7 @@ function nextWaveIfDone(state) {
 // its array properties via filter, matching the pattern main.js's loop()
 // used before this module existed).
 export function stepSimulation(state, dt) {
-  if (state.gameOver || state.win) return;
+  if (state.gameOver || state.win || state.paused) return;
 
   if (state.interWaveTimer > 0) {
     state.interWaveTimer = Math.max(0, state.interWaveTimer - dt);
@@ -106,10 +111,16 @@ export function stepSimulation(state, dt) {
           // Offset each shot perpendicular to the barrel so the double
           // tower's two rounds are visibly two separate bullets from its
           // twin barrels, not one bullet drawn on top of the other.
-          const spread = shot.projectilesPerShot > 1 ? (i - (shot.projectilesPerShot - 1) / 2) * 6 : 0;
+          // 14px (was 6): at the towers' current draw size the old gap read
+          // as one thick dot rather than two distinct shots -- per user
+          // feedback wanting the double tower's twin barrels clearly visible.
+          const spread = shot.projectilesPerShot > 1 ? (i - (shot.projectilesPerShot - 1) / 2) * 14 : 0;
           const px = shot.x - Math.sin(t.angle) * spread;
           const py = shot.y + Math.cos(t.angle) * spread;
-          state.projectiles.push(createProjectile(px, py, shot.target, shot.damage));
+          // Both cannon towers (basic/double) fire the tank-shell sprite
+          // per user request; only the laser (handled above, a beam) is
+          // visually different among player towers.
+          state.projectiles.push(createProjectile(px, py, shot.target, shot.damage, 400, "shell"));
         }
       }
     }
@@ -118,7 +129,11 @@ export function stepSimulation(state, dt) {
   for (const e of state.enemies) {
     const shot = stepEnemyFire(e, state.towers, dt);
     if (shot) {
-      state.projectiles.push(createProjectile(shot.x, shot.y, shot.target, shot.damage, 300));
+      // Tank/rocket fire the same tank-shell sprite as the player's cannon
+      // towers (per user request); the lighter infantry/vehicle weapons
+      // (soldier, buggy, motorcycle) keep the small tracer streak.
+      const style = e.type === "tank" || e.type === "rocket" ? "shell" : "tracer";
+      state.projectiles.push(createProjectile(shot.x, shot.y, shot.target, shot.damage, 300, style));
     }
   }
 
@@ -221,4 +236,9 @@ export function skipWave(state) {
   if (state.gameOver || state.win) return { ok: false, reason: "game-over" };
   state.interWaveTimer = 0;
   return { ok: true };
+}
+
+export function togglePause(state) {
+  state.paused = !state.paused;
+  return { ok: true, paused: state.paused };
 }
