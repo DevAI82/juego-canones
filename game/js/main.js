@@ -1,31 +1,16 @@
-import { CANVAS_WIDTH, CANVAS_HEIGHT, PATH, SOLDIER_PATH, drawMap, drawPathDebug, distanceToPath } from "./map.js";
-import { createEnemy, stepEnemy, damageEnemy, stepEnemyFire } from "./enemy.js";
-import { WAVES, buildSpawnQueue } from "./waves.js";
-import { createEconomy, earn, loseLife, spend } from "./economy.js";
-import { createTower, stepTower, damageTower, TOWER_TYPES } from "./tower.js";
-import { createProjectile, stepProjectile } from "./projectile.js";
+import { CANVAS_WIDTH, CANVAS_HEIGHT, PATH, drawMap, drawPathDebug } from "./map.js";
+import { WAVES } from "./waves.js";
+import { TOWER_TYPES } from "./tower.js";
 import { initBuildMenu, updateBuildMenu, initUpgradePanel, updateUpgradePanel } from "./ui.js";
-import { applyUpgrade, upgradeCost, canUpgrade } from "./upgrades.js";
-
-// Minimum distance (px) a new tower must keep from the road -- rejects
-// placement on or immediately next to the path. The trench itself reads
-// as ~30-50px wide on screen, and towers draw ~40px wide with a platform
-// pad, so this keeps them visually clear of the actual road surface, not
-// just the single-pixel-wide waypoint line down its middle. (The smooth
-// PATH curve blocks a much smaller, more accurate slice of the map than
-// the earlier zigzagging version did, so this can stay closer to the
-// road's actual visual width instead of needing extra padding to
-// compensate for an inaccurate path.)
-const MIN_PLACEMENT_DIST_FROM_PATH = 38;
-
-// Refund fraction paid back to the player when selling a tower via the
-// upgrade panel's "Vender" button.
-const SELL_REFUND_FRACTION = 0.6;
-
-// Pause between waves so the player has a moment to place/upgrade towers,
-// plus how long remains on that pause (ticked down each frame, skippable
-// via the "Siguiente oleada" fast-forward button).
-const INTER_WAVE_DELAY = 4;
+import {
+  createGameState,
+  stepSimulation,
+  placeTower,
+  upgradeTower,
+  repairTower,
+  sellTower,
+  skipWave,
+} from "./simulate.js";
 
 const canvas = document.getElementById("game-canvas");
 const ctx = canvas.getContext("2d");
@@ -69,60 +54,78 @@ function ready(img) {
   return img.complete && img.naturalWidth > 0;
 }
 
-const economy = createEconomy(150, 20);
-let waveIndex = 0;
-let spawnQueue = buildSpawnQueue(waveIndex);
-let waveClock = 0;
-let enemies = [];
-let towers = [];
+// --- Game state -------------------------------------------------------
+// `state` is exactly simulate.js's shape (economy/enemies/towers/etc).
+// In LOCAL mode this tab owns it and steps it itself every frame. In
+// NETWORKED mode (see connectToServer() below) it's replaced wholesale
+// by whatever the server's last polled snapshot was -- this tab never
+// mutates it directly, only sends actions and waits for the next poll.
+let state = createGameState();
+let networked = false; // set once, before the loop starts (see boot() below)
+
 let selectedBuildType = null;
-let selectedTower = null;
+// The selected tower is tracked by id, not object reference: in networked
+// mode `state` (and every tower object in it) is replaced wholesale on
+// every poll, so a direct reference would go stale within ~150ms.
+let selectedTowerId = null;
 const upgradePanelEl = document.getElementById("upgrade-panel");
 let mouseX = 0;
 let mouseY = 0;
-let projectiles = [];
-let explosions = [];
-// Laser hits are instant (no travel time, matching a beam of light rather
-// than a physical bullet) -- damage applies the moment the shot fires, and
-// `beams` holds only the brief visual flash, not something that needs to
-// "arrive" like a projectile.
-let beams = [];
-let gameOver = false;
-let win = false;
-
-// Inter-wave delay state: while > 0, the next wave's spawn queue has already
-// been built but trySpawn won't drain it yet (waveClock is held at 0), so
-// the player gets a calm moment between waves. The "Siguiente oleada" button
-// zeroes this to skip the wait immediately.
-let interWaveTimer = 0;
 
 // Running clock (seconds) used only for cosmetic animation phase (the
 // enemy walking bob) -- deliberately not gameplay state.
 let frameNow = 0;
 
-function trySpawn() {
-  if (interWaveTimer > 0) return;
-  while (spawnQueue.length && spawnQueue[0].time <= waveClock) {
-    const { type } = spawnQueue.shift();
-    // Vehicles are confined to the trench; only foot soldiers can duck out
-    // and cut across open ground on the shorter, more exposed SOLDIER_PATH.
-    enemies.push(createEnemy(type, type === "soldier" ? SOLDIER_PATH : PATH));
-  }
-}
-
-function nextWaveIfDone() {
-  if (interWaveTimer > 0) return;
-  if (spawnQueue.length === 0 && enemies.length === 0) {
-    if (waveIndex < WAVES.length - 1) {
-      waveIndex++;
-      economy.wave = waveIndex + 1;
-      spawnQueue = buildSpawnQueue(waveIndex);
-      waveClock = 0;
-      interWaveTimer = INTER_WAVE_DELAY;
-    } else if (!win) {
-      win = true;
+// --- Actions ------------------------------------------------------------
+// One call site per player action, used by every click/keydown handler
+// below. In local mode these apply directly to `state` (same as calling
+// simulate.js's functions inline used to). In networked mode they instead
+// POST to the host and return immediately -- the action's actual effect
+// (or rejection) shows up on the next state poll, not synchronously.
+const actions = {
+  place(towerType, x, y) {
+    if (networked) {
+      postAction({ type: "place", towerType, x, y });
+      return;
     }
-  }
+    placeTower(state, towerType, x, y);
+  },
+  upgrade(towerId, skill) {
+    if (networked) {
+      postAction({ type: "upgrade", towerId, skill });
+      return;
+    }
+    upgradeTower(state, towerId, skill);
+  },
+  repair(towerId) {
+    if (networked) {
+      postAction({ type: "repair", towerId });
+      return;
+    }
+    repairTower(state, towerId);
+  },
+  sell(towerId) {
+    if (networked) {
+      postAction({ type: "sell", towerId });
+      return;
+    }
+    sellTower(state, towerId);
+  },
+  skip() {
+    if (networked) {
+      postAction({ type: "skip" });
+      return;
+    }
+    skipWave(state);
+  },
+};
+
+function postAction(body) {
+  fetch("/api/action", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  }).catch(() => {}); // best-effort -- the next state poll is the real source of truth
 }
 
 // How fast the walking/driving bob cycles, in radians of sine-phase per
@@ -216,7 +219,7 @@ function drawTower(t) {
   }
   ctx.restore();
 
-  if (t === selectedTower) {
+  if (t.id === selectedTowerId) {
     ctx.save();
     ctx.strokeStyle = "#5af";
     ctx.beginPath();
@@ -237,24 +240,6 @@ function drawTower(t) {
   ctx.fillRect(t.x - w / 2, t.y - 38, w, 4);
   ctx.fillStyle = "#5af";
   ctx.fillRect(t.x - w / 2, t.y - 38, w * ammoPct, 4);
-}
-
-// A single flying debris speck, in polar coordinates around the blast
-// center -- position is derived from elapsed time (speed * age), not
-// stepped each frame, so nothing here needs its own update logic.
-function makeDebris() {
-  return {
-    angle: Math.random() * Math.PI * 2,
-    speed: 40 + Math.random() * 70,
-    size: 1.5 + Math.random() * 2.5,
-  };
-}
-
-function createExplosion(x, y) {
-  const count = 6 + Math.floor(Math.random() * 5);
-  const debris = [];
-  for (let i = 0; i < count; i++) debris.push(makeDebris());
-  return { x, y, age: 0, duration: 0.5, debris };
 }
 
 function drawExplosion(ex) {
@@ -335,15 +320,21 @@ function drawHud() {
   ctx.save();
   ctx.fillStyle = "#fff";
   ctx.font = "20px sans-serif";
-  ctx.fillText(`Oleada ${economy.wave}/${WAVES.length}`, 20, 30);
-  ctx.fillText(`Vidas: ${economy.lives}`, 20, 55);
-  ctx.fillText(`$${economy.money}`, 20, 80);
-  if (interWaveTimer > 0 && !gameOver && !win) {
-    ctx.fillText(`Siguiente oleada en ${Math.ceil(interWaveTimer)}s`, 20, 105);
+  ctx.fillText(`Oleada ${state.economy.wave}/${WAVES.length}`, 20, 30);
+  ctx.fillText(`Vidas: ${state.economy.lives}`, 20, 55);
+  ctx.fillText(`$${state.economy.money}`, 20, 80);
+  if (state.interWaveTimer > 0 && !state.gameOver && !state.win) {
+    ctx.fillText(`Siguiente oleada en ${Math.ceil(state.interWaveTimer)}s`, 20, 105);
   }
-  if (gameOver || win) {
+  if (networked) {
+    ctx.font = "13px sans-serif";
+    ctx.fillStyle = "#8f8";
+    ctx.fillText("Multijugador conectado", 20, CANVAS_HEIGHT - 12);
+  }
+  if (state.gameOver || state.win) {
     ctx.font = "48px sans-serif";
-    ctx.fillText(gameOver ? "GAME OVER" : "¡VICTORIA!", CANVAS_WIDTH / 2 - 150, CANVAS_HEIGHT / 2);
+    ctx.fillStyle = "#fff";
+    ctx.fillText(state.gameOver ? "GAME OVER" : "¡VICTORIA!", CANVAS_WIDTH / 2 - 150, CANVAS_HEIGHT / 2);
     ctx.font = "20px sans-serif";
     ctx.fillText("Pulsa R para reiniciar", CANVAS_WIDTH / 2 - 90, CANVAS_HEIGHT / 2 + 40);
   }
@@ -353,44 +344,36 @@ function drawHud() {
 const buildMenuEl = document.getElementById("build-menu");
 initBuildMenu(buildMenuEl, {
   onSelect: (type) => {
-    if (gameOver || win) return;
+    if (state.gameOver || state.win) return;
     selectedBuildType = selectedBuildType === type ? null : type;
   },
 });
 
 // Upgrade panel callbacks are defined once, here, and read the *current*
-// value of the module-level `selectedTower` variable at click time via
+// value of the module-level `selectedTowerId` variable at click time via
 // normal closure semantics -- they are never re-created per frame, which is
 // what makes the panel's buttons clickable in the first place (see
 // initUpgradePanel's comment in ui.js).
 initUpgradePanel(upgradePanelEl, {
   onUpgrade: (skill) => {
-    if (gameOver || win || !selectedTower) return;
-    if (!canUpgrade(selectedTower, skill)) return;
-    const cost = upgradeCost(skill, selectedTower.level[skill]);
-    if (!spend(economy, cost)) return;
-    applyUpgrade(selectedTower, skill, TOWER_TYPES[selectedTower.type]);
+    if (state.gameOver || state.win || selectedTowerId == null) return;
+    actions.upgrade(selectedTowerId, skill);
   },
   onRepair: () => {
-    if (gameOver || win || !selectedTower) return;
-    const cost = Math.round((selectedTower.maxHp - selectedTower.hp) * 0.5);
-    if (cost <= 0) return;
-    if (!spend(economy, cost)) return;
-    selectedTower.hp = selectedTower.maxHp;
+    if (state.gameOver || state.win || selectedTowerId == null) return;
+    actions.repair(selectedTowerId);
   },
   onSell: () => {
-    if (gameOver || win || !selectedTower) return;
-    earn(economy, Math.round(TOWER_TYPES[selectedTower.type].cost * SELL_REFUND_FRACTION));
-    damageTower(selectedTower, selectedTower.hp);
-    towers = towers.filter((t) => t !== selectedTower);
-    selectedTower = null;
+    if (state.gameOver || state.win || selectedTowerId == null) return;
+    actions.sell(selectedTowerId);
+    selectedTowerId = null;
   },
 });
 
 const skipWaveBtn = document.getElementById("skip-wave-btn");
 skipWaveBtn.addEventListener("click", () => {
-  if (gameOver || win) return;
-  interWaveTimer = 0;
+  if (state.gameOver || state.win) return;
+  actions.skip();
 });
 
 function canvasPos(evt) {
@@ -408,35 +391,67 @@ canvas.addEventListener("mousemove", (evt) => {
 });
 
 canvas.addEventListener("click", (evt) => {
-  if (gameOver || win) return;
+  if (state.gameOver || state.win) return;
   const pos = canvasPos(evt);
   if (selectedBuildType) {
-    const def = TOWER_TYPES[selectedBuildType];
-    const countOnField = towers.filter((t) => t.type === selectedBuildType && t.hp > 0).length;
-    if (countOnField >= def.maxCount) return;
-    if (distanceToPath(PATH, pos.x, pos.y) < MIN_PLACEMENT_DIST_FROM_PATH) return;
-    if (!spend(economy, def.cost)) return;
-    towers.push(createTower(selectedBuildType, pos.x, pos.y));
+    actions.place(selectedBuildType, pos.x, pos.y);
     selectedBuildType = null;
     return;
   }
   let nearestTower = null;
   let nearestDist = 38;
-  for (const t of towers) {
+  for (const t of state.towers) {
     const d = Math.hypot(t.x - pos.x, t.y - pos.y);
     if (d < nearestDist) {
       nearestDist = d;
       nearestTower = t;
     }
   }
-  selectedTower = nearestTower;
+  selectedTowerId = nearestTower ? nearestTower.id : null;
 });
 
 window.addEventListener("keydown", (evt) => {
   if (evt.key.toLowerCase() !== "r") return;
-  if (!gameOver && !win) return;
+  if (!state.gameOver && !state.win) return;
   location.reload();
 });
+
+// --- Networked (multiplayer) mode ---------------------------------------
+// Polls the host's /api/state every POLL_MS and replaces `state` wholesale
+// with whatever it returns; every player action goes out via postAction()
+// instead of touching `state` directly (see the `actions` object above).
+// Both players' browsers run this exact same client code -- there is no
+// separate "host" vs "guest" UI, only whichever machine happens to be
+// running server.js becomes the authority both browsers poll.
+const POLL_MS = 120;
+async function pollState() {
+  try {
+    const res = await fetch("/api/state");
+    if (res.ok) state = await res.json();
+  } catch {
+    // transient network hiccup on a LAN -- just try again next tick
+  }
+  setTimeout(pollState, POLL_MS);
+}
+
+// Detects, once at startup, whether this page is being served by
+// server.js (which exposes /api/state) or by a plain static file server
+// (python -m http.server, or any other host with no such route) -- solo
+// play keeps simulating locally exactly as it always has; only serving
+// via server.js turns on networked mode.
+async function boot() {
+  try {
+    const res = await fetch("/api/state");
+    if (res.ok) {
+      networked = true;
+      state = await res.json();
+      pollState();
+    }
+  } catch {
+    // no /api/state -- solo play, local simulation (the default)
+  }
+  requestAnimationFrame(loop);
+}
 
 let lastTime = performance.now();
 
@@ -445,78 +460,8 @@ function loop(now) {
   lastTime = now;
   frameNow = now / 1000;
 
-  if (!gameOver && !win) {
-    if (interWaveTimer > 0) {
-      interWaveTimer = Math.max(0, interWaveTimer - dt);
-    } else {
-      waveClock += dt;
-    }
-    trySpawn();
-
-    for (const e of enemies) {
-      const { reachedEnd } = stepEnemy(e, dt);
-      if (reachedEnd) {
-        e.alive = false;
-        if (loseLife(economy, e.damage)) gameOver = true;
-      }
-    }
-    enemies = enemies.filter((e) => e.alive);
-
-    for (const t of towers) {
-      const shot = stepTower(t, enemies, dt);
-      if (shot) {
-        if (t.type === "laser") {
-          // A railgun beam travels effectively instantly -- damage the
-          // target immediately rather than spawning a bullet that flies
-          // toward it, and leave only a brief visual flash behind.
-          damageEnemy(shot.target, shot.damage);
-          beams.push({ x1: shot.x, y1: shot.y, x2: shot.target.x, y2: shot.target.y, age: 0, duration: 0.15 });
-        } else {
-          for (let i = 0; i < shot.projectilesPerShot; i++) {
-            // Offset each shot perpendicular to the barrel so the double
-            // tower's two rounds are visibly two separate bullets from its
-            // twin barrels, not one bullet drawn on top of the other.
-            const spread = shot.projectilesPerShot > 1 ? (i - (shot.projectilesPerShot - 1) / 2) * 6 : 0;
-            const px = shot.x - Math.sin(t.angle) * spread;
-            const py = shot.y + Math.cos(t.angle) * spread;
-            projectiles.push(createProjectile(px, py, shot.target, shot.damage));
-          }
-        }
-      }
-    }
-
-    for (const e of enemies) {
-      const shot = stepEnemyFire(e, towers, dt);
-      if (shot) {
-        projectiles.push(createProjectile(shot.x, shot.y, shot.target, shot.damage, 300));
-      }
-    }
-
-    for (const p of projectiles) {
-      const hit = stepProjectile(p, dt);
-      if (hit) {
-        if ("maxHp" in p.target && "range" in p.target) {
-          damageTower(p.target, p.damage);
-        } else {
-          damageEnemy(p.target, p.damage);
-        }
-      }
-    }
-    projectiles = projectiles.filter((p) => p.alive);
-    for (const ex of explosions) ex.age += dt;
-    explosions = explosions.filter((ex) => ex.age < ex.duration);
-    for (const bm of beams) bm.age += dt;
-    beams = beams.filter((bm) => bm.age < bm.duration);
-    towers = towers.filter((t) => t.hp > 0);
-
-    const killedEnemies = enemies.filter((e) => !e.alive);
-    for (const e of killedEnemies) {
-      earn(economy, e.bounty);
-      explosions.push(createExplosion(e.x, e.y));
-    }
-    enemies = enemies.filter((e) => e.alive);
-
-    nextWaveIfDone();
+  if (!networked) {
+    stepSimulation(state, dt);
   }
 
   ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
@@ -527,11 +472,11 @@ function loop(now) {
     ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
   }
   drawPathDebug(ctx, PATH);
-  for (const t of towers) drawTower(t);
-  for (const e of enemies) drawEnemy(e);
-  for (const p of projectiles) drawProjectile(p);
-  for (const bm of beams) drawBeam(bm);
-  for (const ex of explosions) drawExplosion(ex);
+  for (const t of state.towers) drawTower(t);
+  for (const e of state.enemies) drawEnemy(e);
+  for (const p of state.projectiles) drawProjectile(p);
+  for (const bm of state.beams) drawBeam(bm);
+  for (const ex of state.explosions) drawExplosion(ex);
   drawHud();
 
   if (selectedBuildType) {
@@ -543,12 +488,13 @@ function loop(now) {
     ctx.fill();
     ctx.restore();
   }
-  updateBuildMenu(buildMenuEl, { towers, economy, selectedType: selectedBuildType });
-  if (selectedTower && selectedTower.hp <= 0) selectedTower = null;
+  updateBuildMenu(buildMenuEl, { towers: state.towers, economy: state.economy, selectedType: selectedBuildType });
+  const selectedTower = state.towers.find((t) => t.id === selectedTowerId) || null;
+  if (selectedTowerId != null && !selectedTower) selectedTowerId = null; // sold/destroyed
   updateUpgradePanel(upgradePanelEl, selectedTower);
-  skipWaveBtn.classList.toggle("hidden", !(interWaveTimer > 0 && !gameOver && !win));
+  skipWaveBtn.classList.toggle("hidden", !(state.interWaveTimer > 0 && !state.gameOver && !state.win));
 
   requestAnimationFrame(loop);
 }
 
-requestAnimationFrame(loop);
+boot();
