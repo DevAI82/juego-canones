@@ -60,6 +60,8 @@ const sprites = {
   enemy_soldier: loadImage("assets/enemy_soldier.png"),
   enemy_buggy: loadImage("assets/enemy_buggy.png"),
   enemy_tank: loadImage("assets/enemy_tank.png"),
+  enemy_motorcycle: loadImage("assets/enemy_motorcycle.png"),
+  enemy_rocket: loadImage("assets/enemy_rocket.png"),
   explosion: loadImage("assets/explosion.png"),
 };
 
@@ -144,7 +146,8 @@ function drawEnemy(e) {
     const w = h * (img.naturalWidth / img.naturalHeight);
     ctx.drawImage(img, -w / 2, -h / 2, w, h);
   } else {
-    ctx.fillStyle = e.type === "tank" ? "#7a3b3b" : e.type === "buggy" ? "#b8ab7a" : "#8a8f5c";
+    const FALLBACK_COLOR = { tank: "#7a3b3b", buggy: "#b8ab7a", soldier: "#8a8f5c", motorcycle: "#6b6b52", rocket: "#7a8060" };
+    ctx.fillStyle = FALLBACK_COLOR[e.type] || "#8a8f5c";
     ctx.beginPath();
     ctx.arc(0, 0, 10, 0, Math.PI * 2);
     ctx.fill();

@@ -10,6 +10,14 @@ export const ENEMY_TYPES = {
   soldier: { hp: 40, speed: 55, damage: 1, bounty: 8, fireRange: 90, fireDamage: 2, fireCooldown: 1.2 },
   buggy: { hp: 25, speed: 95, damage: 1, bounty: 10, fireRange: 100, fireDamage: 2, fireCooldown: 1.0 },
   tank: { hp: 120, speed: 30, damage: 2, bounty: 20, fireRange: 120, fireDamage: 5, fireCooldown: 2.0 },
+  // Vehicle, confined to PATH like buggy/tank. Faster and weaker than the
+  // buggy -- a glass cannon that closes distance fast but drops in a
+  // couple of hits.
+  motorcycle: { hp: 15, speed: 135, damage: 1, bounty: 9, fireRange: 90, fireDamage: 2, fireCooldown: 0.9 },
+  // Vehicle. Lighter/less armored than the tank but outranges and
+  // out-damages it -- a fire-support unit rather than a brawler, so it's
+  // worth killing at range before it gets to sit back and pepper towers.
+  rocket: { hp: 70, speed: 35, damage: 2, bounty: 25, fireRange: 170, fireDamage: 9, fireCooldown: 2.2 },
 };
 
 export function createEnemy(type, path) {

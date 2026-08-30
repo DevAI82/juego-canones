@@ -240,6 +240,35 @@ def extract_enemies():
     downscale(soldier_rgba).save(OUT / "enemy_soldier.png")
 
 
+def extract_new_enemies():
+    """Motorcycle and rocket-launcher-truck enemies, added per user request
+    (both are vehicles -- they use PATH, not SOLDIER_PATH, wired in
+    main.js). Sources are clean top-down crops from their own reference
+    sheets (enemigos/motocicletas.jpg, enemigos/lanzacohetes.jpg), each on
+    a uniform grey background -- no labels or neighboring-art bleed to
+    work around, same easy case as the tower turret renders.
+    """
+    moto_im = Image.open(ROOT / "enemigos" / "motocicletas.jpg").convert("RGB")
+    moto_bg = moto_im.getpixel((2, 2))
+    moto_box = (5, 50, 140, 275)
+    moto = color_key(moto_im.crop(moto_box), moto_bg)
+    # Source bike faces up (front wheel at the top); rotate it to the
+    # game's +x-facing convention the same way tower_double/tower_laser
+    # were (clockwise, i.e. PIL's -90, turns "up" into "right").
+    moto = moto.rotate(-90, expand=True)
+    downscale(moto).save(OUT / "enemy_motorcycle.png")
+
+    rocket_im = Image.open(ROOT / "enemigos" / "lanzacohetes.jpg").convert("RGB")
+    rocket_bg = rocket_im.getpixel((2, 2))
+    rocket_box = (15, 50, 505, 270)
+    rocket = color_key(rocket_im.crop(rocket_box), rocket_bg)
+    # Source truck faces left (cab on the left); mirror it rather than
+    # rotating 180, so "near/far side" stays up/down and only left-right
+    # flips, same treatment as tower_double's mirrored barrels.
+    rocket = rocket.transpose(Image.FLIP_LEFT_RIGHT)
+    downscale(rocket).save(OUT / "enemy_rocket.png")
+
+
 def extract_explosion():
     im = Image.open(ROOT / "explosiones.jpg").convert("RGB")
     # bottom trimmed from 600->575->572: the reference sheet has a baked-in
@@ -324,6 +353,7 @@ def extract_map():
 if __name__ == "__main__":
     extract_towers()
     extract_enemies()
+    extract_new_enemies()
     extract_explosion()
     extract_map()
     print("Assets written to", OUT)
