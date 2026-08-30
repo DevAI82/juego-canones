@@ -30,6 +30,22 @@ const INTER_WAVE_DELAY = 4;
 const canvas = document.getElementById("game-canvas");
 const ctx = canvas.getContext("2d");
 
+// Scales the whole 1200x750 game (canvas + every HTML overlay together,
+// see style.css's comment on #game-viewport) to fit the current window,
+// so it fills the screen on any monitor size or a phone in either
+// orientation instead of only ever rendering at a fixed 1200px.
+const gameViewport = document.getElementById("game-viewport");
+const gameContainer = document.getElementById("game-container");
+function resizeGame() {
+  const scale = Math.min(window.innerWidth / CANVAS_WIDTH, window.innerHeight / CANVAS_HEIGHT);
+  gameContainer.style.transform = `scale(${scale})`;
+  gameViewport.style.width = `${CANVAS_WIDTH * scale}px`;
+  gameViewport.style.height = `${CANVAS_HEIGHT * scale}px`;
+}
+resizeGame();
+window.addEventListener("resize", resizeGame);
+window.addEventListener("orientationchange", resizeGame);
+
 function loadImage(src) {
   const img = new Image();
   img.src = src;

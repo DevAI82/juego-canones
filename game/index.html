@@ -2,15 +2,18 @@
 <html lang="es">
 <head>
   <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <title>Tower Defense</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <div id="game-container">
-    <canvas id="game-canvas" width="1200" height="750"></canvas>
-    <button id="skip-wave-btn" class="hidden">▶</button>
-    <div id="build-menu"></div>
-    <div id="upgrade-panel" class="hidden"></div>
+  <div id="game-viewport">
+    <div id="game-container">
+      <canvas id="game-canvas" width="1200" height="750"></canvas>
+      <button id="skip-wave-btn" class="hidden">▶</button>
+      <div id="build-menu"></div>
+      <div id="upgrade-panel" class="hidden"></div>
+    </div>
   </div>
   <script type="module" src="js/main.js"></script>
 </body>

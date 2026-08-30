@@ -1,5 +1,30 @@
-html, body { margin: 0; padding: 0; background: #111; }
-#game-container { position: relative; width: 1200px; margin: 0 auto; }
+html, body { margin: 0; padding: 0; background: #111; height: 100%; overflow: hidden; }
+body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+}
+
+/* The whole game (canvas + every HTML overlay: build menu, upgrade panel,
+   skip-wave button) is built and laid out at a fixed 1200x750 -- every
+   game coordinate (PATH, canvasPos()'s click math, CSS px sizes on the
+   overlay buttons/cards) assumes that exact space. Rather than resize
+   each piece individually (which would desync the HTML overlays' fixed
+   px sizes from the canvas the moment they scaled differently),
+   #game-viewport is sized in JS (main.js's resizeGame()) to whatever the
+   1200x750 box becomes at the current window size, and #game-container is
+   scaled into that box with a single CSS transform -- so the canvas and
+   every overlay shrink/grow together, in lockstep, on any monitor or
+   phone screen. getBoundingClientRect() (which canvasPos() reads) already
+   reflects the post-transform size, so click/tap accuracy is unaffected. */
+#game-viewport { position: relative; overflow: hidden; }
+#game-container {
+  position: relative;
+  width: 1200px;
+  height: 750px;
+  transform-origin: top left;
+}
 #game-canvas { display: block; background: #222; }
 
 #skip-wave-btn {
