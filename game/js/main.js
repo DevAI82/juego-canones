@@ -413,7 +413,16 @@ canvas.addEventListener("click", (evt) => {
 window.addEventListener("keydown", (evt) => {
   if (evt.key.toLowerCase() !== "r") return;
   if (!state.gameOver && !state.win) return;
-  location.reload();
+  if (networked) {
+    // Reloading the page alone would just re-fetch the same (still
+    // game-over) state from the server -- the shared board only actually
+    // resets when the server itself is told to via this action. Every
+    // connected player sees the fresh game on their next poll, not just
+    // whoever pressed R.
+    postAction({ type: "restart" });
+  } else {
+    location.reload();
+  }
 });
 
 // --- Networked (multiplayer) mode ---------------------------------------
