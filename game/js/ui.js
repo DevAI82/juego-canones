@@ -1,5 +1,6 @@
 import { TOWER_TYPES } from "./tower.js";
 import { UPGRADE_DEFS, upgradeCost, canUpgrade } from "./upgrades.js";
+import { computeScoreBreakdown } from "./scoring.js";
 
 const LABELS = { basic: "Básica", double: "Doble", laser: "Láser" };
 const SKILL_LABELS = { damage: "Daño", range: "Alcance", fireRate: "Vel. disparo", armor: "Blindaje" };
@@ -136,6 +137,70 @@ export function initUpgradePanel(container, { onUpgrade, onRepair, onSell }) {
   // Stash element references on the container so updateUpgradePanel (called
   // every frame) can find them again without touching innerHTML.
   container._upgradePanelRefs = { cols, repairBtn, sellBtn };
+}
+
+// The end-of-game screen only needs to render once (when the match ends)
+// and again after a score save -- unlike the build menu/upgrade panel
+// above, nothing here needs a per-frame update, so this rebuilds innerHTML
+// freely rather than following their build-once/mutate-every-frame split.
+
+function scoreCell(text, extraClass) {
+  const td = document.createElement("td");
+  td.textContent = text;
+  if (extraClass) td.className = extraClass;
+  return td;
+}
+
+export function renderGameEndScreen(overlay, state) {
+  overlay.querySelector("#gameend-title").textContent = state.win ? "¡VICTORIA!" : "GAME OVER";
+
+  const { rows, total } = computeScoreBreakdown(state);
+  const table = overlay.querySelector("#gameend-breakdown");
+  table.innerHTML = "";
+
+  const info = document.createElement("tr");
+  info.className = "gameend-info-row";
+  info.append(scoreCell("Torretas construidas"), scoreCell(state.stats.towersBuilt));
+  table.appendChild(info);
+  const info2 = document.createElement("tr");
+  info2.className = "gameend-info-row";
+  info2.append(scoreCell("Dinero gastado en total"), scoreCell(`$${state.stats.moneySpent}`));
+  table.appendChild(info2);
+
+  const header = document.createElement("tr");
+  header.className = "gameend-header-row";
+  header.append(scoreCell("Concepto"), scoreCell("Cantidad"), scoreCell("Puntos c/u"), scoreCell("Subtotal"));
+  table.appendChild(header);
+
+  for (const row of rows) {
+    const tr = document.createElement("tr");
+    tr.className = "gameend-score-row";
+    if (row.subtotal < 0) tr.classList.add("negative");
+    const sign = (n) => (n > 0 ? `+${n}` : `${n}`);
+    tr.append(scoreCell(row.label), scoreCell(row.count), scoreCell(sign(row.pointsEach)), scoreCell(sign(row.subtotal)));
+    table.appendChild(tr);
+  }
+
+  overlay.querySelector("#gameend-total").textContent = `PUNTUACIÓN TOTAL: ${total}`;
+  return total;
+}
+
+export function renderRanking(overlay, entries, highlightIndex = -1) {
+  const list = overlay.querySelector("#gameend-ranking");
+  list.innerHTML = "";
+  if (!entries || entries.length === 0) {
+    const li = document.createElement("li");
+    li.className = "gameend-ranking-empty";
+    li.textContent = "Sin puntuaciones todavía -- ¡sé el primero!";
+    list.appendChild(li);
+    return;
+  }
+  entries.forEach((entry, i) => {
+    const li = document.createElement("li");
+    li.textContent = `${entry.name} — ${entry.score} pts`;
+    if (i === highlightIndex) li.classList.add("gameend-ranking-mine");
+    list.appendChild(li);
+  });
 }
 
 // Called every frame. Only mutates existing elements (text/disabled/hidden

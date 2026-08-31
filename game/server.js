@@ -18,7 +18,7 @@
 // package or hand-rolling the WebSocket wire protocol. On a home LAN the
 // added latency is imperceptible for a tower defense game's pace.
 import http from "node:http";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
@@ -76,6 +76,33 @@ async function readBody(req) {
   return JSON.parse(Buffer.concat(chunks).toString("utf-8") || "{}");
 }
 
+// Shared, persistent high-score table -- the whole point of running this
+// on the server rather than in each browser's localStorage is that all 3
+// co-op players save into the SAME ranking. Kept as a plain JSON file
+// (not a real database) to match the rest of this project's
+// dependency-free approach; survives server restarts, which localStorage
+// alone wouldn't need to but a shared multi-device ranking does.
+const LEADERBOARD_PATH = path.join(GAME_DIR, "data", "leaderboard.json");
+const LEADERBOARD_MAX_ENTRIES = 20;
+
+async function loadLeaderboard() {
+  try {
+    return JSON.parse(await readFile(LEADERBOARD_PATH, "utf-8"));
+  } catch {
+    return [];
+  }
+}
+
+async function addLeaderboardEntry(name, score) {
+  const entries = await loadLeaderboard();
+  entries.push({ name, score, date: new Date().toISOString() });
+  entries.sort((a, b) => b.score - a.score);
+  const trimmed = entries.slice(0, LEADERBOARD_MAX_ENTRIES);
+  await mkdir(path.dirname(LEADERBOARD_PATH), { recursive: true });
+  await writeFile(LEADERBOARD_PATH, JSON.stringify(trimmed, null, 2));
+  return trimmed;
+}
+
 async function serveStatic(req, res) {
   let urlPath = decodeURIComponent(new URL(req.url, "http://x").pathname);
   if (urlPath === "/") urlPath = "/index.html";
@@ -110,6 +137,28 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       const handler = ACTION_HANDLERS[body.type];
       result = handler ? handler(body) : { ok: false, reason: "unknown-action" };
+    } catch (err) {
+      result = { ok: false, reason: "bad-request" };
+    }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(result));
+    return;
+  }
+
+  if (urlPath === "/api/leaderboard" && req.method === "GET") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(await loadLeaderboard()));
+    return;
+  }
+
+  if (urlPath === "/api/leaderboard" && req.method === "POST") {
+    let result;
+    try {
+      const body = await readBody(req);
+      const name = String(body.name ?? "JUGADOR").trim().slice(0, 16) || "JUGADOR";
+      const score = Math.max(0, Math.round(Number(body.score) || 0));
+      const entries = await addLeaderboardEntry(name, score);
+      result = { ok: true, entries };
     } catch (err) {
       result = { ok: false, reason: "bad-request" };
     }

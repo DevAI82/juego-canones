@@ -1,7 +1,7 @@
 import { CANVAS_WIDTH, CANVAS_HEIGHT, drawMap } from "./map.js";
 import { WAVES } from "./waves.js";
 import { TOWER_TYPES } from "./tower.js";
-import { initBuildMenu, updateBuildMenu, initUpgradePanel, updateUpgradePanel } from "./ui.js";
+import { initBuildMenu, updateBuildMenu, initUpgradePanel, updateUpgradePanel, renderGameEndScreen, renderRanking } from "./ui.js";
 import {
   createGameState,
   stepSimulation,
@@ -528,6 +528,128 @@ resetBtn.addEventListener("click", () => {
   selectedBuildType = null;
 });
 
+// --- End-of-game stats/score screen -------------------------------------
+// Shown once per match, the tick state.gameOver/state.win first becomes
+// true (see checkGameEnd() below, called from loop()). Not just a local
+// concern: in networked co-op every connected player sees this on their
+// own screen the moment their poll picks up the ended state, and can save
+// a score to the SAME shared ranking (server.js persists it to disk) --
+// solo play (including the no-backend Vercel deploy) falls back to a
+// leaderboard kept in this browser's localStorage instead.
+const LOCAL_LEADERBOARD_KEY = "td_leaderboard";
+const LOCAL_NAME_KEY = "td_last_name";
+const LOCAL_LEADERBOARD_MAX = 20;
+
+const gameEndOverlay = document.getElementById("gameend-overlay");
+const gameEndNameInput = document.getElementById("gameend-name-input");
+const gameEndSaveBtn = document.getElementById("gameend-save-btn");
+const gameEndSaveStatus = document.getElementById("gameend-save-status");
+const gameEndCloseBtn = document.getElementById("gameend-close-btn");
+
+async function fetchLeaderboard() {
+  if (!networked) {
+    try {
+      return JSON.parse(localStorage.getItem(LOCAL_LEADERBOARD_KEY) || "[]");
+    } catch {
+      return [];
+    }
+  }
+  try {
+    const res = await fetch("/api/leaderboard");
+    return res.ok ? await res.json() : [];
+  } catch {
+    return [];
+  }
+}
+
+async function submitScore(name, score) {
+  if (!networked) {
+    let entries = [];
+    try {
+      entries = JSON.parse(localStorage.getItem(LOCAL_LEADERBOARD_KEY) || "[]");
+    } catch {
+      entries = [];
+    }
+    entries.push({ name, score, date: new Date().toISOString() });
+    entries.sort((a, b) => b.score - a.score);
+    entries = entries.slice(0, LOCAL_LEADERBOARD_MAX);
+    try {
+      localStorage.setItem(LOCAL_LEADERBOARD_KEY, JSON.stringify(entries));
+    } catch {
+      // Storage can be unavailable (private browsing, quota) -- the score
+      // still displayed for this match, it just won't persist.
+    }
+    return entries;
+  }
+  try {
+    const res = await fetch("/api/leaderboard", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, score }),
+    });
+    const result = await res.json();
+    return result.entries || [];
+  } catch {
+    return [];
+  }
+}
+
+let currentMatchScore = 0;
+let gameEndShown = false;
+
+async function showGameEndScreen() {
+  currentMatchScore = renderGameEndScreen(gameEndOverlay, state);
+  gameEndSaveStatus.textContent = "";
+  gameEndSaveBtn.disabled = false;
+  gameEndNameInput.disabled = false;
+  try {
+    gameEndNameInput.value = localStorage.getItem(LOCAL_NAME_KEY) || "";
+  } catch {
+    gameEndNameInput.value = "";
+  }
+  gameEndOverlay.classList.remove("hidden");
+  renderRanking(gameEndOverlay, await fetchLeaderboard());
+}
+
+gameEndSaveBtn.addEventListener("click", async () => {
+  const name = (gameEndNameInput.value || "").trim().toUpperCase().slice(0, 16) || "JUGADOR";
+  gameEndSaveBtn.disabled = true;
+  gameEndNameInput.disabled = true;
+  gameEndSaveStatus.textContent = "Guardando...";
+  try {
+    localStorage.setItem(LOCAL_NAME_KEY, name);
+  } catch {
+    // Non-fatal -- just means the name field won't be pre-filled next time.
+  }
+  const entries = await submitScore(name, currentMatchScore);
+  const myIndex = entries.findIndex((e) => e.name === name && e.score === currentMatchScore);
+  renderRanking(gameEndOverlay, entries, myIndex);
+  gameEndSaveStatus.textContent = "¡Puntuación guardada!";
+});
+
+gameEndCloseBtn.addEventListener("click", () => {
+  gameEndOverlay.classList.add("hidden");
+  gameEndShown = false;
+  actions.reset();
+  selectedTowerId = null;
+  selectedBuildType = null;
+});
+
+// Watches state.gameOver/state.win the same "react only on the transition"
+// way syncMusicToPause() above watches state.paused -- fires the screen
+// exactly once per match end, and auto-hides it if the match resets out
+// from under it (a networked co-op teammate hit R while it was open).
+function checkGameEnd() {
+  const ended = state.gameOver || state.win;
+  if (ended && !gameEndShown) {
+    gameEndShown = true;
+    showGameEndScreen();
+  } else if (!ended && gameEndShown) {
+    gameEndShown = false;
+    gameEndOverlay.classList.add("hidden");
+  }
+}
+
 function canvasPos(evt) {
   const rect = canvas.getBoundingClientRect();
   return {
@@ -626,6 +748,7 @@ function loop(now) {
   }
   playNewShotSounds();
   syncMusicToPause();
+  checkGameEnd();
 
   ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
   if (ready(mapImage)) {

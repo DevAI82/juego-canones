@@ -1,1 +1,4 @@
 .vercel
+# Runtime-generated shared leaderboard (server.js writes/reads this) --
+# not source, and each host's own scores shouldn't overwrite a teammate's.
+data/leaderboard.json

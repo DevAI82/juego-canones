@@ -18,6 +18,21 @@
       </div>
       <div id="build-menu"></div>
       <div id="upgrade-panel" class="hidden"></div>
+      <div id="gameend-overlay" class="hidden">
+        <div id="gameend-modal">
+          <div id="gameend-title"></div>
+          <table id="gameend-breakdown"></table>
+          <div id="gameend-total"></div>
+          <div id="gameend-save-row">
+            <input id="gameend-name-input" type="text" maxlength="16" placeholder="TU NOMBRE" autocomplete="off" />
+            <button id="gameend-save-btn">Guardar puntuación</button>
+          </div>
+          <div id="gameend-save-status"></div>
+          <div id="gameend-ranking-title">Ranking</div>
+          <ol id="gameend-ranking"></ol>
+          <button id="gameend-close-btn">Jugar de nuevo</button>
+        </div>
+      </div>
     </div>
   </div>
   <script type="module" src="js/main.js"></script>

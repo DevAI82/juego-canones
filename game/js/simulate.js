@@ -42,6 +42,16 @@ export function createGameState() {
     beams: [],
     gameOver: false,
     win: false,
+    // Feeds the end-of-game stats screen and scoring.js's score breakdown.
+    // Deliberately NOT reset by anything mid-match -- these accumulate for
+    // the whole game, including through the sell/repair/upgrade economy,
+    // so "total money spent" really means total, not net.
+    stats: {
+      kills: { soldier: 0, buggy: 0, tank: 0, motorcycle: 0, rocket: 0 },
+      towersBuilt: 0,
+      towersLost: 0,
+      moneySpent: 0,
+    },
     // A shared pause: stepSimulation() below no-ops entirely while this is
     // true, so in networked mode pausing stops the server's own tick loop
     // -- global for every connected player, not a local "hide the game"
@@ -156,11 +166,16 @@ export function stepSimulation(state, dt) {
   state.explosions = state.explosions.filter((ex) => ex.age < ex.duration);
   for (const bm of state.beams) bm.age += dt;
   state.beams = state.beams.filter((bm) => bm.age < bm.duration);
+  // Counted here, before the filter removes them, so a tower that died in
+  // combat this tick is tallied -- sellTower() removes towers by its own
+  // reference filter instead, so a voluntary sale never lands here.
+  state.stats.towersLost += state.towers.filter((t) => t.hp <= 0).length;
   state.towers = state.towers.filter((t) => t.hp > 0);
 
   const killedEnemies = state.enemies.filter((e) => !e.alive);
   for (const e of killedEnemies) {
     earn(state.economy, e.bounty);
+    state.stats.kills[e.type] = (state.stats.kills[e.type] || 0) + 1;
     state.explosions.push(createExplosion(e.x, e.y));
   }
   state.enemies = state.enemies.filter((e) => e.alive);
@@ -195,6 +210,8 @@ export function placeTower(state, towerType, x, y) {
   if (countOnField >= def.maxCount) return { ok: false, reason: "max-count" };
   if (distanceToPath(PATH, x, y) < MIN_PLACEMENT_DIST_FROM_PATH) return { ok: false, reason: "on-road" };
   if (!spend(state.economy, def.cost)) return { ok: false, reason: "cant-afford" };
+  state.stats.towersBuilt++;
+  state.stats.moneySpent += def.cost;
   const tower = assignId(createTower(towerType, x, y));
   state.towers.push(tower);
   return { ok: true, towerId: tower.id };
@@ -211,6 +228,7 @@ export function upgradeTower(state, towerId, skill) {
   if (!canUpgrade(tower, skill)) return { ok: false, reason: "maxed" };
   const cost = upgradeCost(skill, tower.level[skill]);
   if (!spend(state.economy, cost)) return { ok: false, reason: "cant-afford" };
+  state.stats.moneySpent += cost;
   applyUpgrade(tower, skill, TOWER_TYPES[tower.type]);
   return { ok: true };
 }
@@ -222,6 +240,7 @@ export function repairTower(state, towerId) {
   const cost = Math.round((tower.maxHp - tower.hp) * 0.5);
   if (cost <= 0) return { ok: false, reason: "already-full" };
   if (!spend(state.economy, cost)) return { ok: false, reason: "cant-afford" };
+  state.stats.moneySpent += cost;
   tower.hp = tower.maxHp;
   return { ok: true };
 }

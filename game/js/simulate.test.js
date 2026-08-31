@@ -93,6 +93,44 @@ test("upgradeTower/repairTower/sellTower operate on the tower by id", () => {
   assert.ok(s.economy.money > moneyBefore);
 });
 
+test("stats.towersBuilt/moneySpent track placeTower/upgradeTower/repairTower, but selling doesn't touch either", () => {
+  const s = createGameState();
+  s.economy.money = 10000;
+  const { towerId } = placeTower(s, "basic", 100, 700);
+  assert.equal(s.stats.towersBuilt, 1);
+  assert.equal(s.stats.moneySpent, 50);
+
+  upgradeTower(s, towerId, "damage");
+  assert.equal(s.stats.moneySpent, 50 + 75);
+
+  const tower = s.towers.find((t) => t.id === towerId);
+  tower.hp = 1;
+  repairTower(s, towerId);
+  assert.ok(s.stats.moneySpent > 50 + 75);
+
+  const spentBeforeSell = s.stats.moneySpent;
+  sellTower(s, towerId);
+  assert.equal(s.stats.moneySpent, spentBeforeSell);
+  assert.equal(s.stats.towersBuilt, 1);
+  assert.equal(s.stats.towersLost, 0); // a voluntary sale is not a "destroyed" tower
+});
+
+test("stats.kills increments by enemy type on a kill, stats.towersLost increments on a tower dying in combat", () => {
+  const s = createGameState();
+  // A minimal enemy that a same-tick projectile (positioned exactly on top
+  // of it, so stepProjectile's distance check hits immediately) kills
+  // during this tick -- exercises the real killedEnemies path in
+  // stepSimulation, not just a pre-set alive:false object (which would be
+  // swept by the earlier reachedEnd filter before ever being counted).
+  const enemy = { type: "tank", alive: true, hp: 1, x: 500, y: 500, bounty: 20, path: [{ x: 500, y: 500 }, { x: 500, y: 500 }], waypointIndex: 0, speed: 50 };
+  s.enemies.push(enemy);
+  s.projectiles.push({ x: 500, y: 500, target: enemy, damage: 999, speed: 400, alive: true });
+  s.towers.push({ id: 1, hp: 0, maxHp: 80 });
+  stepSimulation(s, 0.016);
+  assert.equal(s.stats.kills.tank, 1);
+  assert.equal(s.stats.towersLost, 1);
+});
+
 test("skipWave zeroes the inter-wave timer", () => {
   const s = createGameState();
   s.interWaveTimer = 4;
