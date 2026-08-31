@@ -115,7 +115,21 @@ async function serveStatic(req, res) {
   try {
     const data = await readFile(filePath);
     const ext = path.extname(filePath);
-    res.writeHead(200, { "Content-Type": CONTENT_TYPES[ext] || "application/octet-stream" });
+    const headers = { "Content-Type": CONTENT_TYPES[ext] || "application/octet-stream" };
+    // This project ships game code updates by editing files on disk and
+    // restarting this server -- there's no cache-busting query string or
+    // build hash in the URL a browser would treat as "this changed" on
+    // its own. Without this, a browser (especially a phone's) can keep
+    // serving a stale index.html/js/css from its disk cache even across
+    // a manual reload, silently running old game logic against the
+    // current server (this is exactly what happened: a family member's
+    // reload still didn't show the new end-of-game screen). Images/audio
+    // are excluded -- those are large, don't change per-edit the way code
+    // does, and normal caching for them is what you want.
+    if (ext === ".html" || ext === ".js" || ext === ".css") {
+      headers["Cache-Control"] = "no-store";
+    }
+    res.writeHead(200, headers);
     res.end(data);
   } catch {
     res.writeHead(404).end("Not found");
