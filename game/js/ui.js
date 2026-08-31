@@ -161,7 +161,18 @@ function scoreCell(text, extraClass) {
 }
 
 export function renderGameEndScreen(overlay, state) {
-  overlay.querySelector("#gameend-title").textContent = state.win ? "¡VICTORIA!" : "GAME OVER";
+  const title = overlay.querySelector("#gameend-title");
+  if (state.levelComplete) title.textContent = `¡NIVEL ${state.level} SUPERADO!`;
+  else title.textContent = state.win ? "¡VICTORIA!" : "GAME OVER";
+
+  // The save/ranking sections only make sense at a true match end (a
+  // loss, or beating the FINAL level) -- clearing an earlier level is
+  // just a checkpoint on the way there, so those are hidden and only the
+  // stats-so-far/score breakdown shows.
+  overlay.querySelector("#gameend-save-row").classList.toggle("hidden", state.levelComplete);
+  overlay.querySelector("#gameend-save-status").classList.toggle("hidden", state.levelComplete);
+  overlay.querySelector("#gameend-ranking-title").classList.toggle("hidden", state.levelComplete);
+  overlay.querySelector("#gameend-ranking").classList.toggle("hidden", state.levelComplete);
 
   const { rows, total } = computeScoreBreakdown(state);
   const table = overlay.querySelector("#gameend-breakdown");

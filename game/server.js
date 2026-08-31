@@ -25,6 +25,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   createGameState,
+  startNextLevel,
   stepSimulation,
   placeTower,
   upgradeTower,
@@ -64,9 +65,18 @@ const ACTION_HANDLERS = {
   sell: (body) => sellTower(state, body.towerId),
   skip: () => skipWave(state),
   pause: () => togglePause(state),
-  restart: () => {
-    state = createGameState();
+  restart: (body) => {
+    // Backs the level-select start menu -- every connected player's next
+    // poll sees the fresh campaign on whichever map was chosen, not just
+    // whoever clicked.
+    state = createGameState(body.level || 1);
     return { ok: true };
+  },
+  nextLevel: () => {
+    const fresh = startNextLevel(state);
+    if (!fresh) return { ok: false, reason: "cannot-advance" };
+    state = fresh;
+    return { ok: true, level: fresh.level };
   },
 };
 

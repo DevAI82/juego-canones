@@ -4,6 +4,7 @@ import { TOWER_TYPES } from "./tower.js";
 import { initBuildMenu, updateBuildMenu, initUpgradePanel, updateUpgradePanel, renderGameEndScreen, renderRanking } from "./ui.js";
 import {
   createGameState,
+  startNextLevel,
   stepSimulation,
   placeTower,
   upgradeTower,
@@ -12,6 +13,7 @@ import {
   skipWave,
   togglePause,
 } from "./simulate.js";
+import { MAX_LEVEL, levelData } from "./levels.js";
 import { playSound, toggleMuted, startMusic, pauseMusic, resumeMusic } from "./audio.js";
 
 // Browsers refuse to start any audio (synthesized SFX or the background
@@ -50,7 +52,12 @@ function loadImage(src) {
   return img;
 }
 
-const mapImage = loadImage("assets/map_bg.png");
+// Every level's own background, preloaded up front (a handful of extra
+// KB) so switching levels never has to wait on a fresh image load.
+const mapImages = {
+  1: loadImage(levelData(1).mapImage),
+  2: loadImage(levelData(2).mapImage),
+};
 const sprites = {
   tower_basic: loadImage("assets/tower_basic.png"),
   tower_double: loadImage("assets/tower_double.png"),
@@ -107,7 +114,7 @@ let soundedIds = new Set();
 // three, but never touched audio on its own.
 let lastMusicPaused = false;
 function syncMusicToPause() {
-  const shouldPause = state.paused || state.gameOver || state.win;
+  const shouldPause = state.paused || state.gameOver || state.win || state.levelComplete;
   if (shouldPause === lastMusicPaused) return;
   lastMusicPaused = shouldPause;
   if (shouldPause) pauseMusic();
@@ -187,6 +194,14 @@ const actions = {
       return;
     }
     state = createGameState();
+  },
+  nextLevel() {
+    if (networked) {
+      postAction({ type: "nextLevel" });
+      return;
+    }
+    const fresh = startNextLevel(state);
+    if (fresh) state = fresh;
   },
 };
 
@@ -445,10 +460,10 @@ function drawHud() {
   ctx.save();
   ctx.fillStyle = "#fff";
   ctx.font = "20px sans-serif";
-  ctx.fillText(`Oleada ${state.economy.wave}/${WAVES.length}`, 20, 30);
+  ctx.fillText(`Nivel ${state.level}/${MAX_LEVEL} — Oleada ${state.economy.wave}/${WAVES.length}`, 20, 30);
   ctx.fillText(`Vidas: ${state.economy.lives}`, 20, 55);
   ctx.fillText(`$${state.economy.money}`, 20, 80);
-  if (state.interWaveTimer > 0 && !state.gameOver && !state.win) {
+  if (state.interWaveTimer > 0 && !state.gameOver && !state.win && !state.levelComplete) {
     ctx.fillText(`Siguiente oleada en ${Math.ceil(state.interWaveTimer)}s`, 20, 105);
   }
   if (networked) {
@@ -456,7 +471,7 @@ function drawHud() {
     ctx.fillStyle = "#8f8";
     ctx.fillText("Multijugador conectado", 20, CANVAS_HEIGHT - 12);
   }
-  if (state.paused && !state.gameOver && !state.win) {
+  if (state.paused && !state.gameOver && !state.win && !state.levelComplete) {
     ctx.font = "36px sans-serif";
     ctx.fillStyle = "#ffd700";
     ctx.textAlign = "center";
@@ -469,6 +484,12 @@ function drawHud() {
     ctx.fillText(state.gameOver ? "GAME OVER" : "¡VICTORIA!", CANVAS_WIDTH / 2 - 150, CANVAS_HEIGHT / 2);
     ctx.font = "20px sans-serif";
     ctx.fillText("Pulsa R para reiniciar", CANVAS_WIDTH / 2 - 90, CANVAS_HEIGHT / 2 + 40);
+  } else if (state.levelComplete) {
+    ctx.font = "44px sans-serif";
+    ctx.fillStyle = "#ffe27a";
+    ctx.textAlign = "center";
+    ctx.fillText(`¡NIVEL ${state.level} SUPERADO!`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
+    ctx.textAlign = "left";
   }
   ctx.restore();
 }
@@ -476,7 +497,7 @@ function drawHud() {
 const buildMenuEl = document.getElementById("build-menu");
 initBuildMenu(buildMenuEl, {
   onSelect: (type) => {
-    if (state.gameOver || state.win) return;
+    if (state.gameOver || state.win || state.levelComplete) return;
     selectedBuildType = selectedBuildType === type ? null : type;
   },
 });
@@ -488,15 +509,15 @@ initBuildMenu(buildMenuEl, {
 // initUpgradePanel's comment in ui.js).
 initUpgradePanel(upgradePanelEl, {
   onUpgrade: (skill) => {
-    if (state.gameOver || state.win || selectedTowerId == null) return;
+    if (state.gameOver || state.win || state.levelComplete || selectedTowerId == null) return;
     actions.upgrade(selectedTowerId, skill);
   },
   onRepair: () => {
-    if (state.gameOver || state.win || selectedTowerId == null) return;
+    if (state.gameOver || state.win || state.levelComplete || selectedTowerId == null) return;
     actions.repair(selectedTowerId);
   },
   onSell: () => {
-    if (state.gameOver || state.win || selectedTowerId == null) return;
+    if (state.gameOver || state.win || state.levelComplete || selectedTowerId == null) return;
     actions.sell(selectedTowerId);
     selectedTowerId = null;
   },
@@ -504,7 +525,7 @@ initUpgradePanel(upgradePanelEl, {
 
 const skipWaveBtn = document.getElementById("skip-wave-btn");
 skipWaveBtn.addEventListener("click", () => {
-  if (state.gameOver || state.win) return;
+  if (state.gameOver || state.win || state.levelComplete) return;
   actions.skip();
 });
 
@@ -517,16 +538,60 @@ muteBtn.addEventListener("click", () => {
 
 const pauseBtn = document.getElementById("pause-btn");
 pauseBtn.addEventListener("click", () => {
-  if (state.gameOver || state.win) return;
+  if (state.gameOver || state.win || state.levelComplete) return;
   actions.pause();
 });
 
-const resetBtn = document.getElementById("reset-btn");
-resetBtn.addEventListener("click", () => {
-  actions.reset();
+// --- Level-select start screen -------------------------------------------
+// Shown before any campaign begins -- first load, and again any time the
+// player starts a fresh one (the reset button, R after a true match end,
+// or the game-end screen's "Jugar de nuevo") -- so they pick which map to
+// start on, per user request. `started` gates stepSimulation in LOCAL
+// mode only: a fresh createGameState() is NOT gameOver/win/levelComplete,
+// so without this the level-1 campaign would silently start ticking
+// (enemies spawning) underneath the menu the moment the page loads,
+// before the player has chosen anything. Networked mode never needs this
+// gate -- the server ticks on its own regardless, and a client that
+// joins an already-running co-op match should see it immediately, not a
+// menu forced on top of what everyone else is already playing.
+let started = false;
+const startMenuOverlay = document.getElementById("start-menu");
+function showStartMenu() {
+  startMenuOverlay.classList.remove("hidden");
+}
+function hideStartMenu() {
+  startMenuOverlay.classList.add("hidden");
+}
+function chooseLevel(level) {
+  hideStartMenu();
   selectedTowerId = null;
   selectedBuildType = null;
-});
+  if (networked) {
+    postAction({ type: "restart", level });
+  } else {
+    state = createGameState(level);
+  }
+  started = true;
+}
+for (const btn of document.querySelectorAll(".start-level-btn")) {
+  btn.addEventListener("click", () => chooseLevel(Number(btn.dataset.level)));
+}
+
+// Used by every "start a new campaign" entry point below (not a plain
+// mid-match restart, which doesn't exist as a separate concept here --
+// resetting always means starting over) to bring back the level picker
+// instead of silently defaulting to level 1.
+function restartToLevelSelect() {
+  selectedTowerId = null;
+  selectedBuildType = null;
+  gameEndOverlay.classList.add("hidden");
+  gameEndShown = false;
+  started = false;
+  showStartMenu();
+}
+
+const resetBtn = document.getElementById("reset-btn");
+resetBtn.addEventListener("click", restartToLevelSelect);
 
 // --- End-of-game stats/score screen -------------------------------------
 // Shown once per match, the tick state.gameOver/state.win first becomes
@@ -599,6 +664,11 @@ let gameEndShown = false;
 
 async function showGameEndScreen() {
   currentMatchScore = renderGameEndScreen(gameEndOverlay, state);
+  const interim = state.levelComplete;
+  gameEndCloseBtn.textContent = interim ? `Continuar al Nivel ${state.level + 1} ▶` : "Jugar de nuevo";
+  gameEndOverlay.classList.remove("hidden");
+  if (interim) return; // no save/ranking UI to prep -- ui.js already hid that section
+
   gameEndSaveStatus.textContent = "";
   gameEndSaveBtn.disabled = false;
   gameEndNameInput.disabled = false;
@@ -607,7 +677,6 @@ async function showGameEndScreen() {
   } catch {
     gameEndNameInput.value = "";
   }
-  gameEndOverlay.classList.remove("hidden");
   renderRanking(gameEndOverlay, await fetchLeaderboard());
 }
 
@@ -628,19 +697,27 @@ gameEndSaveBtn.addEventListener("click", async () => {
 });
 
 gameEndCloseBtn.addEventListener("click", () => {
-  gameEndOverlay.classList.add("hidden");
-  gameEndShown = false;
-  actions.reset();
-  selectedTowerId = null;
-  selectedBuildType = null;
+  if (state.levelComplete) {
+    gameEndOverlay.classList.add("hidden");
+    gameEndShown = false;
+    actions.nextLevel();
+    selectedTowerId = null;
+    selectedBuildType = null;
+  } else {
+    // A true match end (loss, or beating the final level) -- start a new
+    // campaign via the level picker rather than defaulting to level 1.
+    restartToLevelSelect();
+  }
 });
 
-// Watches state.gameOver/state.win the same "react only on the transition"
-// way syncMusicToPause() above watches state.paused -- fires the screen
-// exactly once per match end, and auto-hides it if the match resets out
-// from under it (a networked co-op teammate hit R while it was open).
+// Watches state.gameOver/state.win/state.levelComplete the same "react
+// only on the transition" way syncMusicToPause() above watches
+// state.paused -- fires the screen exactly once per match end (or level
+// clear), and auto-hides it if the match resets out from under it (a
+// networked co-op teammate hit R -- or picked a new level -- while it
+// was open).
 function checkGameEnd() {
-  const ended = state.gameOver || state.win;
+  const ended = state.gameOver || state.win || state.levelComplete;
   if (ended && !gameEndShown) {
     gameEndShown = true;
     showGameEndScreen();
@@ -665,7 +742,7 @@ canvas.addEventListener("mousemove", (evt) => {
 });
 
 canvas.addEventListener("click", (evt) => {
-  if (state.gameOver || state.win) return;
+  if (state.gameOver || state.win || state.levelComplete) return;
   const pos = canvasPos(evt);
   if (selectedBuildType) {
     actions.place(selectedBuildType, pos.x, pos.y);
@@ -687,16 +764,11 @@ canvas.addEventListener("click", (evt) => {
 window.addEventListener("keydown", (evt) => {
   if (evt.key.toLowerCase() !== "r") return;
   if (!state.gameOver && !state.win) return;
-  if (networked) {
-    // Reloading the page alone would just re-fetch the same (still
-    // game-over) state from the server -- the shared board only actually
-    // resets when the server itself is told to via this action. Every
-    // connected player sees the fresh game on their next poll, not just
-    // whoever pressed R.
-    postAction({ type: "restart" });
-  } else {
-    location.reload();
-  }
+  // Same as the reset button and the game-end screen's "Jugar de
+  // nuevo" -- back to the level picker rather than silently defaulting
+  // to level 1 (or, in networked mode, re-fetching the same still-ended
+  // shared state instead of actually resetting it).
+  restartToLevelSelect();
 });
 
 // --- Networked (multiplayer) mode ---------------------------------------
@@ -733,6 +805,14 @@ async function boot() {
   } catch {
     // no /api/state -- solo play, local simulation (the default)
   }
+  if (networked) {
+    // Joining an already-running (or already-ended) shared match --
+    // show it immediately rather than forcing a level picker on top of
+    // whatever the other players are already looking at.
+    started = true;
+  } else {
+    showStartMenu();
+  }
   requestAnimationFrame(loop);
 }
 
@@ -743,7 +823,7 @@ function loop(now) {
   lastTime = now;
   frameNow = now / 1000;
 
-  if (!networked) {
+  if (!networked && started) {
     stepSimulation(state, dt);
   }
   playNewShotSounds();
@@ -751,8 +831,9 @@ function loop(now) {
   checkGameEnd();
 
   ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-  if (ready(mapImage)) {
-    drawMap(ctx, mapImage);
+  const currentMapImage = mapImages[state.level] || mapImages[1];
+  if (ready(currentMapImage)) {
+    drawMap(ctx, currentMapImage);
   } else {
     ctx.fillStyle = "#3a4a2f";
     ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
@@ -781,7 +862,7 @@ function loop(now) {
   const selectedTower = state.towers.find((t) => t.id === selectedTowerId) || null;
   if (selectedTowerId != null && !selectedTower) selectedTowerId = null; // sold/destroyed
   updateUpgradePanel(upgradePanelEl, selectedTower);
-  skipWaveBtn.classList.toggle("hidden", !(state.interWaveTimer > 0 && !state.gameOver && !state.win));
+  skipWaveBtn.classList.toggle("hidden", !(state.interWaveTimer > 0 && !state.gameOver && !state.win && !state.levelComplete));
   pauseBtn.textContent = state.paused ? "▶" : "⏸";
   pauseBtn.title = state.paused ? "Reanudar" : "Pausar";
   pauseBtn.classList.toggle("active", state.paused);

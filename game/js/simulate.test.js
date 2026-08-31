@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   createGameState,
+  startNextLevel,
   stepSimulation,
   placeTower,
   upgradeTower,
@@ -12,16 +13,86 @@ import {
   MIN_PLACEMENT_DIST_FROM_PATH,
 } from "./simulate.js";
 import { PATH } from "./map.js";
+import { MAX_LEVEL, LEVELS } from "./levels.js";
+import { WAVES } from "./waves.js";
 
 test("createGameState starts with the expected shape", () => {
   const s = createGameState();
+  assert.equal(s.level, 1);
   assert.equal(s.economy.money, 150);
   assert.equal(s.economy.lives, 20);
   assert.equal(s.waveIndex, 0);
+  assert.equal(s.totalWavesCleared, 0);
   assert.deepEqual(s.enemies, []);
   assert.deepEqual(s.towers, []);
   assert.equal(s.gameOver, false);
   assert.equal(s.win, false);
+  assert.equal(s.levelComplete, false);
+});
+
+test("createGameState(2) starts directly on level 2", () => {
+  const s = createGameState(2);
+  assert.equal(s.level, 2);
+});
+
+test("clearing the final wave sets levelComplete (not win) when another level remains", () => {
+  const s = createGameState(1);
+  assert.ok(MAX_LEVEL > 1, "this test assumes a level 2 exists");
+  s.waveIndex = WAVES.length - 1;
+  s.spawnQueue = [];
+  s.enemies = [];
+  stepSimulation(s, 0.016);
+  assert.equal(s.levelComplete, true);
+  assert.equal(s.win, false);
+  assert.equal(s.totalWavesCleared, 1); // the final wave counted too
+});
+
+test("clearing the final wave of the FINAL level sets win, not levelComplete", () => {
+  const s = createGameState(MAX_LEVEL);
+  s.waveIndex = WAVES.length - 1;
+  s.spawnQueue = [];
+  s.enemies = [];
+  stepSimulation(s, 0.016);
+  assert.equal(s.win, true);
+  assert.equal(s.levelComplete, false);
+});
+
+test("stepSimulation no-ops while levelComplete, same as gameOver/win", () => {
+  const s = createGameState();
+  s.levelComplete = true;
+  const clockBefore = s.waveClock;
+  stepSimulation(s, 1);
+  assert.equal(s.waveClock, clockBefore);
+});
+
+test("startNextLevel returns null unless levelComplete is true, or past MAX_LEVEL", () => {
+  const notComplete = createGameState();
+  assert.equal(startNextLevel(notComplete), null);
+
+  const atMax = createGameState(MAX_LEVEL);
+  atMax.levelComplete = true;
+  assert.equal(startNextLevel(atMax), null);
+});
+
+test("startNextLevel advances the level and carries stats/totalWavesCleared forward, resetting everything else", () => {
+  const s = createGameState(1);
+  s.levelComplete = true;
+  s.totalWavesCleared = 40;
+  s.stats.kills.tank = 12;
+  s.stats.moneySpent = 999;
+  s.economy.money = 5;
+  s.towers.push({ id: 1, hp: 1 });
+
+  const fresh = startNextLevel(s);
+  assert.ok(fresh);
+  assert.equal(fresh.level, 2);
+  assert.equal(fresh.levelComplete, false);
+  assert.equal(fresh.totalWavesCleared, 40); // carried forward
+  assert.equal(fresh.stats.kills.tank, 12); // carried forward
+  assert.equal(fresh.stats.moneySpent, 999); // carried forward
+  assert.equal(fresh.economy.money, 150); // reset to the starting amount
+  assert.deepEqual(fresh.towers, []); // reset
+  assert.equal(fresh.waveIndex, 0); // reset
 });
 
 test("stepSimulation spawns the first wave's enemies over time", () => {
@@ -39,6 +110,16 @@ test("placeTower succeeds off-road and deducts cost", () => {
   assert.equal(result.ok, true);
   assert.equal(s.towers.length, 1);
   assert.equal(s.economy.money, 100); // 150 - 50
+});
+
+test("placeTower on level 2 rejects a point on EITHER fork of the road, not just the first", () => {
+  const s = createGameState(2);
+  s.economy.money = 10000;
+  const onLeftBranch = LEVELS[2].paths[0][2];
+  const onRightBranch = LEVELS[2].paths[1][1];
+  assert.equal(placeTower(s, "basic", onLeftBranch.x, onLeftBranch.y).reason, "on-road");
+  assert.equal(placeTower(s, "basic", onRightBranch.x, onRightBranch.y).reason, "on-road");
+  assert.equal(s.towers.length, 0);
 });
 
 test("placeTower rejects a point too close to the road", () => {

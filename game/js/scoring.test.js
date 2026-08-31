@@ -2,7 +2,6 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { computeScore, computeScoreBreakdown, wavesCleared, KILL_POINTS } from "./scoring.js";
 import { createGameState } from "./simulate.js";
-import { WAVES } from "./waves.js";
 
 function stateWithKills(kills) {
   const s = createGameState();
@@ -10,14 +9,10 @@ function stateWithKills(kills) {
   return s;
 }
 
-test("wavesCleared is waveIndex on a loss, WAVES.length on a win", () => {
-  const loss = createGameState();
-  loss.waveIndex = 7;
-  assert.equal(wavesCleared(loss), 7);
-
-  const win = createGameState();
-  win.win = true;
-  assert.equal(wavesCleared(win), WAVES.length);
+test("wavesCleared reads state.totalWavesCleared directly (campaign-wide, not per-level)", () => {
+  const s = createGameState();
+  s.totalWavesCleared = 47; // e.g. all 40 of level 1 plus 7 of level 2
+  assert.equal(wavesCleared(s), 47);
 });
 
 test("computeScore applies the per-type kill points from the user's request", () => {
@@ -36,7 +31,7 @@ test("computeScore subtracts a penalty for towers lost and never goes negative",
 
 test("computeScoreBreakdown rows sum to the same total computeScore returns", () => {
   const s = stateWithKills({ soldier: 4, buggy: 2 });
-  s.waveIndex = 3;
+  s.totalWavesCleared = 3;
   s.economy.lives = 15;
   s.stats.towersLost = 1;
   const { rows, total } = computeScoreBreakdown(s);

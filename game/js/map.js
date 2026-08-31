@@ -63,29 +63,30 @@ export const PATH = [
   { x: 1240, y: 140 },
 ];
 
-// Vehicles (buggy, tank, motorcycle, rocket) are too wide/loud to leave the
-// trench and always follow PATH. Foot soldiers don't: per user request,
-// each one gets its own randomly generated route wandering anywhere across
-// the open map, not a fixed corridor -- trading the trench's cover for
-// unpredictability that's much harder to wall off with a tower choke
-// point than a single shared line ever was.
-const SOLDIER_ENTRY = { x: -40, y: 10 };
-const SOLDIER_EXIT = { x: 1240, y: 140 };
+// Vehicles (buggy, tank, motorcycle, rocket) are too wide/loud to leave
+// their road(s) and always follow one of the current level's paths (see
+// levels.js). Foot soldiers don't: per user request, each one gets its
+// own randomly generated route wandering anywhere across the open map,
+// not a fixed corridor -- trading the road's cover for unpredictability
+// that's much harder to wall off with a tower choke point than a single
+// shared line ever was. Takes entry/exit explicitly (rather than a fixed
+// constant) so every level's soldiers can roam that level's own map
+// between that level's own entry/exit points.
 const SOLDIER_MARGIN = 50; // keep waypoints off the very top/bottom edge
 
-export function randomSoldierPath() {
+export function randomPath(entry, exit) {
   const waypointCount = 3 + Math.floor(Math.random() * 2); // 3-4 interior stops
-  const points = [{ x: SOLDIER_ENTRY.x, y: SOLDIER_ENTRY.y + (Math.random() - 0.5) * 60 }];
+  const points = [{ x: entry.x, y: entry.y + (Math.random() - 0.5) * 60 }];
   for (let i = 1; i <= waypointCount; i++) {
     const t = i / (waypointCount + 1);
     points.push({
-      x: SOLDIER_ENTRY.x + (SOLDIER_EXIT.x - SOLDIER_ENTRY.x) * t,
-      // Full vertical freedom across the map, not just near the trench --
+      x: entry.x + (exit.x - entry.x) * t,
+      // Full vertical freedom across the map, not just near the road --
       // this is what makes each soldier's route genuinely unpredictable.
       y: SOLDIER_MARGIN + Math.random() * (CANVAS_HEIGHT - SOLDIER_MARGIN * 2),
     });
   }
-  points.push({ x: SOLDIER_EXIT.x, y: SOLDIER_EXIT.y + (Math.random() - 0.5) * 60 });
+  points.push({ x: exit.x, y: exit.y + (Math.random() - 0.5) * 60 });
   return points;
 }
 

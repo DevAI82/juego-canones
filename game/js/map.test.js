@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { PATH, randomSoldierPath, offsetPath, pathPointAt, distanceToPath, CANVAS_HEIGHT } from "./map.js";
+import { PATH, randomPath, offsetPath, pathPointAt, distanceToPath, CANVAS_HEIGHT } from "./map.js";
 
 test("PATH has at least 2 waypoints", () => {
   assert.ok(PATH.length >= 2);
@@ -28,9 +28,9 @@ test("distanceToPath returns a large distance for a point far from any segment",
   assert.ok(d > 4000);
 });
 
-test("randomSoldierPath enters/exits near PATH's entry/exit but wanders freely (and differently) in between", () => {
-  const a = randomSoldierPath();
-  const b = randomSoldierPath();
+test("randomPath enters/exits near the given entry/exit but wanders freely (and differently) in between", () => {
+  const a = randomPath(PATH[0], PATH.at(-1));
+  const b = randomPath(PATH[0], PATH.at(-1));
   assert.ok(a.length >= 4);
   assert.ok(Math.abs(a[0].x - PATH[0].x) < 40);
   assert.ok(Math.abs(a.at(-1).x - PATH.at(-1).x) < 40);

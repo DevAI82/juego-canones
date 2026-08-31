@@ -292,6 +292,12 @@ body {
   gap: 8px;
   margin-bottom: 6px;
 }
+#gameend-save-row.hidden,
+#gameend-save-status.hidden,
+#gameend-ranking-title.hidden,
+#gameend-ranking.hidden {
+  display: none;
+}
 #gameend-name-input {
   flex: 1;
   padding: 8px 10px;
@@ -362,3 +368,72 @@ body {
   border: 1px solid #6fd8e6;
 }
 #gameend-close-btn:hover { filter: brightness(1.2); }
+
+/* Level-select start screen -- shown before any campaign begins (first
+   load, and again after "Jugar de nuevo"/game over/victory) so the
+   player picks which map to start on. Same holographic language as the
+   other overlays; each level's own button previews that level's real
+   map background. */
+#start-menu {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.78);
+  font-family: sans-serif;
+  z-index: 20;
+}
+#start-menu.hidden { display: none; }
+
+#start-menu-modal {
+  padding: 24px 30px;
+  background: #060a0c;
+  border: 1px solid #6fd8e6;
+  border-radius: 6px;
+  box-shadow: 0 0 24px rgba(111, 216, 230, 0.5), inset 0 0 30px rgba(0, 0, 0, 0.7);
+  text-align: center;
+}
+#start-menu-title {
+  font-size: 24px;
+  font-weight: bold;
+  letter-spacing: 2px;
+  color: #ffe27a;
+  text-shadow: 0 0 12px rgba(255, 226, 122, 0.7);
+  margin-bottom: 18px;
+}
+#start-menu-levels {
+  display: flex;
+  gap: 20px;
+}
+.start-level-btn {
+  width: 220px;
+  height: 160px;
+  padding: 0;
+  border: 1px solid #6fd8e6;
+  border-radius: 6px;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  background-size: cover;
+  background-position: center;
+  box-shadow: 0 0 10px rgba(111, 216, 230, 0.4);
+}
+.start-level-btn[data-level="1"] { background-image: url(assets/map_bg.png); }
+.start-level-btn[data-level="2"] { background-image: url(assets/map_bg_level2.png); }
+.start-level-btn::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.85) 0%, rgba(0, 0, 0, 0.15) 55%, rgba(0, 0, 0, 0.35) 100%);
+}
+.start-level-btn:hover { filter: brightness(1.2); }
+.start-level-name,
+.start-level-subtitle {
+  position: relative;
+  display: block;
+  color: #dffcff;
+  text-shadow: 0 1px 4px #000;
+}
+.start-level-name { font-size: 18px; font-weight: bold; margin-top: 108px; }
+.start-level-subtitle { font-size: 13px; color: #ffe27a; }

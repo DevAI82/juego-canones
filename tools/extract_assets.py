@@ -455,6 +455,37 @@ def extract_map():
     out_img.save(OUT / "map_bg.png")
 
 
+def extract_map_level2():
+    """Level 2's map ("mapas/mapa level 2.jpg", 1024x765) has two inset
+    boxes baked in -- a blank reference square (bottom-left) and a
+    minimap showing the road's Y-fork (bottom-right) -- that read as
+    stray UI floating over the terrain once the map is actually on
+    screen, the same problem extract_map() solves for the original map's
+    legend/minimap. Same fix: clone real texture from directly above
+    each box over it, no color-keying needed since there's no line to
+    remove here (this map's route was traced by hand from the image
+    directly, not drawn on it -- see levels.js).
+    """
+    im = Image.open(ROOT / "mapas" / "mapa level 2.jpg").convert("RGB")
+    arr = np.array(im)
+
+    def clone_patch(dest_box, src_origin):
+        dx0, dy0, dx1, dy1 = dest_box
+        w, h = dx1 - dx0, dy1 - dy0
+        sx0, sy0 = src_origin
+        arr[dy0:dy1, dx0:dx1] = arr[sy0:sy0 + h, sx0:sx0 + w]
+
+    # Both boxes run to the bottom edge (they include a caption strip
+    # above the inset itself), so the source patch has to come from
+    # directly above rather than the more usual "adjacent strip" -- there
+    # is no "below."
+    clone_patch((0, 540, 200, 765), (0, 315))
+    clone_patch((895, 540, 1024, 750), (895, 330))
+
+    out_img = Image.fromarray(arr).resize((MAP_WIDTH, MAP_HEIGHT), Image.Resampling.LANCZOS)
+    out_img.save(OUT / "map_bg_level2.png")
+
+
 def extract_armor_icon():
     """The original 3-skill upgrade panel (diseño mejoras.jpg -> ui_icon_
     damage/range/firerate.png) was cropped by hand in an earlier session
@@ -477,5 +508,6 @@ if __name__ == "__main__":
     extract_projectile()
     extract_explosion()
     extract_map()
+    extract_map_level2()
     extract_armor_icon()
     print("Assets written to", OUT)

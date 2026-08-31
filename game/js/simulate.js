@@ -10,7 +10,8 @@
 // Every action function returns { ok: boolean, reason?: string } instead of
 // throwing, so a caller (a click handler, an HTTP request handler) can
 // report *why* an action was rejected without a try/catch.
-import { PATH, randomSoldierPath, offsetPath, distanceToPath } from "./map.js";
+import { randomPath, offsetPath, distanceToPath } from "./map.js";
+import { MAX_LEVEL, levelData } from "./levels.js";
 import { createEnemy, stepEnemy, damageEnemy, stepEnemyFire } from "./enemy.js";
 import { WAVES, buildSpawnQueue } from "./waves.js";
 import { createEconomy, earn, loseLife, spend } from "./economy.js";
@@ -46,10 +47,14 @@ function assignId(obj) {
   return obj;
 }
 
-function pathForSpawn(type) {
-  if (type === "soldier") return randomSoldierPath();
+function pathForSpawn(type, level) {
+  const level_ = levelData(level);
+  if (type === "soldier") return randomPath(level_.soldierEntry, level_.soldierExit);
+  // Levels can offer more than one road (level 2's fork) -- each vehicle
+  // spawn picks one at random, then gets its own lane offset within it.
+  const basePath = level_.paths[Math.floor(Math.random() * level_.paths.length)];
   const laneOffset = (Math.random() * 2 - 1) * VEHICLE_LANE_HALF_WIDTH;
-  return offsetPath(PATH, laneOffset);
+  return offsetPath(basePath, laneOffset);
 }
 
 // Nudges any two alive enemies closer than ENEMY_SEPARATION_DIST directly
@@ -106,8 +111,9 @@ function separateEnemies(enemies, dt) {
   }
 }
 
-export function createGameState() {
+export function createGameState(level = 1) {
   return {
+    level,
     economy: createEconomy(150, 20),
     waveIndex: 0,
     spawnQueue: buildSpawnQueue(0),
@@ -119,11 +125,22 @@ export function createGameState() {
     explosions: [],
     beams: [],
     gameOver: false,
+    // Only ever true once the FINAL level's waves are all cleared -- a
+    // true campaign victory. Clearing an earlier level sets
+    // levelComplete instead (see nextWaveIfDone), so main.js can offer
+    // "continue to the next level" rather than ending the match.
     win: false,
+    levelComplete: false,
+    // Waves cleared across the WHOLE campaign so far, not just the
+    // current level -- each level restarts waveIndex at 0 (same 40-wave
+    // difficulty curve, fresh), but scoring.js wants a number that keeps
+    // counting through a level transition.
+    totalWavesCleared: 0,
     // Feeds the end-of-game stats screen and scoring.js's score breakdown.
-    // Deliberately NOT reset by anything mid-match -- these accumulate for
-    // the whole game, including through the sell/repair/upgrade economy,
-    // so "total money spent" really means total, not net.
+    // Deliberately NOT reset by anything mid-match (including a level
+    // transition, see startNextLevel) -- these accumulate for the whole
+    // campaign, including through the sell/repair/upgrade economy, so
+    // "total money spent" really means total, not net.
     stats: {
       kills: { soldier: 0, buggy: 0, tank: 0, motorcycle: 0, rocket: 0 },
       towersBuilt: 0,
@@ -138,14 +155,32 @@ export function createGameState() {
   };
 }
 
+// Builds the fresh state for the next level once the current one's been
+// cleared, preserving the campaign-wide stats/totalWavesCleared instead
+// of restarting them -- returns null if there's no level to advance to
+// (called before state.levelComplete is true, or already at MAX_LEVEL).
+// Mirrors how a full restart is handled: the caller (main.js/server.js)
+// reassigns its own `state` variable to whatever this returns, the same
+// way they already do for createGameState() on a plain restart.
+export function startNextLevel(state) {
+  if (!state.levelComplete) return null;
+  if (state.level >= MAX_LEVEL) return null;
+  const fresh = createGameState(state.level + 1);
+  fresh.stats = state.stats;
+  fresh.totalWavesCleared = state.totalWavesCleared;
+  return fresh;
+}
+
 function trySpawn(state) {
   if (state.interWaveTimer > 0) return;
   while (state.spawnQueue.length && state.spawnQueue[0].time <= state.waveClock) {
     const { type } = state.spawnQueue.shift();
-    // Vehicles are confined to the trench (in their own randomized lane,
-    // see pathForSpawn); only foot soldiers roam the whole map.
-    // waveIndex drives the tank/rocket's progressive armor/range (enemy.js).
-    state.enemies.push(assignId(createEnemy(type, pathForSpawn(type), state.waveIndex)));
+    // Vehicles are confined to the current level's road(s) (in their own
+    // randomized lane, see pathForSpawn); only foot soldiers roam the
+    // whole map. waveIndex drives the tank/rocket's progressive
+    // armor/range (enemy.js) -- resets with each new level, same as the
+    // wave curve itself.
+    state.enemies.push(assignId(createEnemy(type, pathForSpawn(type, state.level), state.waveIndex)));
   }
 }
 
@@ -154,12 +189,18 @@ function nextWaveIfDone(state) {
   if (state.spawnQueue.length === 0 && state.enemies.length === 0) {
     if (state.waveIndex < WAVES.length - 1) {
       state.waveIndex++;
+      state.totalWavesCleared++;
       state.economy.wave = state.waveIndex + 1;
       state.spawnQueue = buildSpawnQueue(state.waveIndex);
       state.waveClock = 0;
       state.interWaveTimer = INTER_WAVE_DELAY;
-    } else if (!state.win) {
-      state.win = true;
+    } else if (!state.win && !state.levelComplete) {
+      state.totalWavesCleared++; // the final wave counts too
+      if (state.level < MAX_LEVEL) {
+        state.levelComplete = true;
+      } else {
+        state.win = true;
+      }
     }
   }
 }
@@ -168,7 +209,7 @@ function nextWaveIfDone(state) {
 // its array properties via filter, matching the pattern main.js's loop()
 // used before this module existed).
 export function stepSimulation(state, dt) {
-  if (state.gameOver || state.win || state.paused) return;
+  if (state.gameOver || state.win || state.levelComplete || state.paused) return;
 
   if (state.interWaveTimer > 0) {
     state.interWaveTimer = Math.max(0, state.interWaveTimer - dt);
@@ -283,12 +324,15 @@ export function createExplosion(x, y) {
 // (each connected player's click, relayed over the network). ---
 
 export function placeTower(state, towerType, x, y) {
-  if (state.gameOver || state.win) return { ok: false, reason: "game-over" };
+  if (state.gameOver || state.win || state.levelComplete) return { ok: false, reason: "game-over" };
   const def = TOWER_TYPES[towerType];
   if (!def) return { ok: false, reason: "unknown-type" };
   const countOnField = state.towers.filter((t) => t.type === towerType && t.hp > 0).length;
   if (countOnField >= def.maxCount) return { ok: false, reason: "max-count" };
-  if (distanceToPath(PATH, x, y) < MIN_PLACEMENT_DIST_FROM_PATH) return { ok: false, reason: "on-road" };
+  // A level can have more than one road (level 2's fork) -- too close to
+  // ANY of them counts as on-road.
+  const onRoad = levelData(state.level).paths.some((p) => distanceToPath(p, x, y) < MIN_PLACEMENT_DIST_FROM_PATH);
+  if (onRoad) return { ok: false, reason: "on-road" };
   const tooCloseToTower = state.towers.some((t) => t.hp > 0 && Math.hypot(t.x - x, t.y - y) < MIN_TOWER_SPACING);
   if (tooCloseToTower) return { ok: false, reason: "too-close-to-tower" };
   if (!spend(state.economy, def.cost)) return { ok: false, reason: "cant-afford" };
@@ -304,7 +348,7 @@ function findTower(state, towerId) {
 }
 
 export function upgradeTower(state, towerId, skill) {
-  if (state.gameOver || state.win) return { ok: false, reason: "game-over" };
+  if (state.gameOver || state.win || state.levelComplete) return { ok: false, reason: "game-over" };
   const tower = findTower(state, towerId);
   if (!tower) return { ok: false, reason: "no-such-tower" };
   if (!canUpgrade(tower, skill)) return { ok: false, reason: "maxed" };
@@ -316,7 +360,7 @@ export function upgradeTower(state, towerId, skill) {
 }
 
 export function repairTower(state, towerId) {
-  if (state.gameOver || state.win) return { ok: false, reason: "game-over" };
+  if (state.gameOver || state.win || state.levelComplete) return { ok: false, reason: "game-over" };
   const tower = findTower(state, towerId);
   if (!tower) return { ok: false, reason: "no-such-tower" };
   const cost = Math.round((tower.maxHp - tower.hp) * 0.5);
@@ -328,7 +372,7 @@ export function repairTower(state, towerId) {
 }
 
 export function sellTower(state, towerId) {
-  if (state.gameOver || state.win) return { ok: false, reason: "game-over" };
+  if (state.gameOver || state.win || state.levelComplete) return { ok: false, reason: "game-over" };
   const tower = findTower(state, towerId);
   if (!tower) return { ok: false, reason: "no-such-tower" };
   earn(state.economy, Math.round(TOWER_TYPES[tower.type].cost * SELL_REFUND_FRACTION));
@@ -338,7 +382,7 @@ export function sellTower(state, towerId) {
 }
 
 export function skipWave(state) {
-  if (state.gameOver || state.win) return { ok: false, reason: "game-over" };
+  if (state.gameOver || state.win || state.levelComplete) return { ok: false, reason: "game-over" };
   state.interWaveTimer = 0;
   return { ok: true };
 }

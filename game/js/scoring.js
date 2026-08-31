@@ -2,7 +2,6 @@
 // both main.js (to show the live end-of-game breakdown) and server.js (to
 // persist a score to the shared leaderboard) can import just this, without
 // pulling in the whole simulation.
-import { WAVES } from "./waves.js";
 
 // Per-user request: point value per enemy type killed, roughly matching
 // how threatening/tough each one is.
@@ -11,12 +10,13 @@ export const WAVE_CLEAR_POINTS = 50;
 export const LIFE_BONUS_POINTS = 10;
 export const TOWER_LOST_PENALTY = 20;
 
-// waveIndex counts *fully cleared* waves while a match is still running
-// (simulate.js's nextWaveIfDone only increments it once the current wave's
-// spawn queue and enemies are both empty) -- so it's already the right
-// number on a loss. On a win, every wave was cleared.
+// state.totalWavesCleared (simulate.js) already counts fully-cleared
+// waves across the WHOLE campaign, not just the current level -- it
+// keeps counting through a level transition (startNextLevel carries it
+// forward), so it's correct here with no win/level-aware branching
+// needed.
 export function wavesCleared(state) {
-  return state.win ? WAVES.length : state.waveIndex;
+  return state.totalWavesCleared;
 }
 
 const ENEMY_LABELS = { soldier: "Soldados", motorcycle: "Motos", buggy: "Buggies", tank: "Tanques", rocket: "Lanzacohetes" };
