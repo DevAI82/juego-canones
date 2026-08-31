@@ -10,36 +10,49 @@
 // Every action function returns { ok: boolean, reason?: string } instead of
 // throwing, so a caller (a click handler, an HTTP request handler) can
 // report *why* an action was rejected without a try/catch.
-import { randomPath, offsetPath, distanceToPath } from "./map.js";
+import { randomPath, offsetPath } from "./map.js";
 import { MAX_LEVEL, levelData } from "./levels.js";
 import { createEnemy, stepEnemy, damageEnemy, stepEnemyFire } from "./enemy.js";
 import { WAVES, buildSpawnQueue } from "./waves.js";
-import { createEconomy, earn, loseLife, spend } from "./economy.js";
+import { createEconomy, earn, loseLife, spend, canAfford } from "./economy.js";
 import { createTower, stepTower, damageTower, TOWER_TYPES } from "./tower.js";
 import { createProjectile, stepProjectile } from "./projectile.js";
 import { applyUpgrade, upgradeCost, canUpgrade } from "./upgrades.js";
 
-export const MIN_PLACEMENT_DIST_FROM_PATH = 38;
-// Roughly matches the towers' drawn platform radius (main.js draws it at
-// 38px) so two platforms can't visually overlap -- per user request, no
-// more towers stacked on top of each other.
-export const MIN_TOWER_SPACING = 80;
 export const SELL_REFUND_FRACTION = 0.6;
 export const INTER_WAVE_DELAY = 4;
 
 // Half-width of the "road" vehicles are allowed to spread across, per
 // user request -- each vehicle gets its own randomized lane offset
 // (map.js's offsetPath) instead of every buggy/tank/motorcycle/rocket
-// riding the exact same centerline. Comfortably inside
-// MIN_PLACEMENT_DIST_FROM_PATH (38) so a lane never reaches close enough
-// to the road's edge to make the on-road placement check inconsistent
-// with what's actually drivable.
+// riding the exact same centerline.
 const VEHICLE_LANE_HALF_WIDTH = 24;
 
 // Two enemies (of any type/lane) closer than this get gently pushed apart
 // after moving each tick -- per user request, no more enemies rendered
 // stacked exactly on top of each other.
 const ENEMY_SEPARATION_DIST = 14;
+
+// Every level builds only at its own fixed slots (levels.js's
+// buildSlots, per user request): a click within this radius of a slot
+// snaps to it; a slot within this radius of an existing live tower
+// counts as occupied. Wide enough that clicking doesn't need to be
+// pixel-precise.
+const SLOT_SNAP_RADIUS = 45;
+const SLOT_OCCUPIED_RADIUS = 20;
+
+function nearestSlot(slots, x, y) {
+  let best = null;
+  let bestDist = Infinity;
+  for (const slot of slots) {
+    const d = Math.hypot(slot.x - x, slot.y - y);
+    if (d < bestDist) {
+      bestDist = d;
+      best = slot;
+    }
+  }
+  return best && bestDist <= SLOT_SNAP_RADIUS ? best : null;
+}
 
 let nextId = 1;
 function assignId(obj) {
@@ -323,22 +336,39 @@ export function createExplosion(x, y) {
 // own click handler (solo play) or from server.js's HTTP action endpoint
 // (each connected player's click, relayed over the network). ---
 
-export function placeTower(state, towerType, x, y) {
+// Pure validity check -- no mutation, no spending -- shared by placeTower
+// (the real action) and main.js (to color the placement ghost green/red
+// and decide whether to play the error sound, live as the mouse moves,
+// without needing a round trip to the server in networked mode). Returns
+// { ok: true, x, y } with the ACTUAL position to place at -- the snapped
+// slot center, not the raw click -- or { ok: false, reason }. Per user
+// request, applied to both maps: every level restricts building to its
+// own fixed, marked slots (levels.js's buildSlots) rather than free
+// placement anywhere off-road.
+export function canPlaceTower(state, towerType, x, y) {
   if (state.gameOver || state.win || state.levelComplete) return { ok: false, reason: "game-over" };
   const def = TOWER_TYPES[towerType];
   if (!def) return { ok: false, reason: "unknown-type" };
   const countOnField = state.towers.filter((t) => t.type === towerType && t.hp > 0).length;
   if (countOnField >= def.maxCount) return { ok: false, reason: "max-count" };
-  // A level can have more than one road (level 2's fork) -- too close to
-  // ANY of them counts as on-road.
-  const onRoad = levelData(state.level).paths.some((p) => distanceToPath(p, x, y) < MIN_PLACEMENT_DIST_FROM_PATH);
-  if (onRoad) return { ok: false, reason: "on-road" };
-  const tooCloseToTower = state.towers.some((t) => t.hp > 0 && Math.hypot(t.x - x, t.y - y) < MIN_TOWER_SPACING);
-  if (tooCloseToTower) return { ok: false, reason: "too-close-to-tower" };
-  if (!spend(state.economy, def.cost)) return { ok: false, reason: "cant-afford" };
+
+  const slot = nearestSlot(levelData(state.level).buildSlots, x, y);
+  if (!slot) return { ok: false, reason: "no-slot" };
+  const occupied = state.towers.some((t) => t.hp > 0 && Math.hypot(t.x - slot.x, t.y - slot.y) < SLOT_OCCUPIED_RADIUS);
+  if (occupied) return { ok: false, reason: "slot-occupied" };
+
+  if (!canAfford(state.economy, def.cost)) return { ok: false, reason: "cant-afford" };
+  return { ok: true, x: slot.x, y: slot.y };
+}
+
+export function placeTower(state, towerType, x, y) {
+  const check = canPlaceTower(state, towerType, x, y);
+  if (!check.ok) return check;
+  const def = TOWER_TYPES[towerType];
+  spend(state.economy, def.cost); // already confirmed affordable by canPlaceTower
   state.stats.towersBuilt++;
   state.stats.moneySpent += def.cost;
-  const tower = assignId(createTower(towerType, x, y));
+  const tower = assignId(createTower(towerType, check.x, check.y));
   state.towers.push(tower);
   return { ok: true, towerId: tower.id };
 }

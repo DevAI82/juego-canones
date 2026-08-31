@@ -6,6 +6,7 @@ import {
   createGameState,
   startNextLevel,
   stepSimulation,
+  canPlaceTower,
   placeTower,
   upgradeTower,
   repairTower,
@@ -745,7 +746,17 @@ canvas.addEventListener("click", (evt) => {
   if (state.gameOver || state.win || state.levelComplete) return;
   const pos = canvasPos(evt);
   if (selectedBuildType) {
-    actions.place(selectedBuildType, pos.x, pos.y);
+    // Checked locally first (same check the ghost preview already used
+    // to color itself red/green) so an invalid click gets an immediate
+    // sound/feedback without waiting on a server round trip in networked
+    // mode -- and per user request, a rejected click does NOT clear the
+    // selection, so they can just click again at a better spot.
+    const check = canPlaceTower(state, selectedBuildType, pos.x, pos.y);
+    if (!check.ok) {
+      playSound("error");
+      return;
+    }
+    actions.place(selectedBuildType, check.x, check.y);
     selectedBuildType = null;
     return;
   }
@@ -850,11 +861,37 @@ function loop(now) {
   drawHud();
 
   if (selectedBuildType) {
+    // A slot-based level (levels.js's buildSlots) only allows building at
+    // fixed points -- show every unoccupied one faintly while placing so
+    // it's clear where those are at a glance, not just wherever the mouse
+    // happens to be hovering.
+    const slots = levelData(state.level).buildSlots;
+    if (slots) {
+      ctx.save();
+      ctx.globalAlpha = 0.35;
+      ctx.fillStyle = "#5fd8e6";
+      for (const slot of slots) {
+        const occupied = state.towers.some((t) => t.hp > 0 && Math.hypot(t.x - slot.x, t.y - slot.y) < 20);
+        if (occupied) continue;
+        ctx.beginPath();
+        ctx.arc(slot.x, slot.y, 18, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+    // Per user request: green where a click would actually place the
+    // tower (snapped to the nearest build slot on a level that has
+    // them), red anywhere it would be rejected -- live, as the mouse
+    // moves, using the exact same check the click handler uses so the
+    // preview is never lying about what a click will do.
+    const check = canPlaceTower(state, selectedBuildType, mouseX, mouseY);
+    const ghostX = check.ok ? check.x : mouseX;
+    const ghostY = check.ok ? check.y : mouseY;
     ctx.save();
     ctx.globalAlpha = 0.5;
-    ctx.fillStyle = "#5af";
+    ctx.fillStyle = check.ok ? "#5f5" : "#f55";
     ctx.beginPath();
-    ctx.arc(mouseX, mouseY, 32, 0, Math.PI * 2);
+    ctx.arc(ghostX, ghostY, 32, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
   }

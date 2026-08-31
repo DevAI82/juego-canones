@@ -184,13 +184,32 @@ function playLaser() {
   osc.stop(now + 0.15);
 }
 
-const PLAYERS = { machinegun: playMachineGun, cannon: playCannon, missile: playMissile, laser: playLaser };
+// Short descending buzz -- per user request, plays when the player tries
+// to place a tower somewhere invalid (off a build slot, too close to
+// another tower, on the road, unaffordable...). Deliberately harsh/flat
+// (square wave, no harmonic richness like the weapon sounds) so it reads
+// unambiguously as "denied," not as another weapon effect.
+function playError() {
+  const ac = getCtx();
+  const now = ac.currentTime;
+  const osc = ac.createOscillator();
+  osc.type = "square";
+  osc.frequency.setValueAtTime(180, now);
+  osc.frequency.exponentialRampToValueAtTime(90, now + 0.15);
+  const gain = ac.createGain();
+  envelope(gain, ac, 0.002, 0.15, 0.22);
+  osc.connect(gain).connect(ac.destination);
+  osc.start(now);
+  osc.stop(now + 0.17);
+}
+
+const PLAYERS = { machinegun: playMachineGun, cannon: playCannon, missile: playMissile, laser: playLaser, error: playError };
 
 // Minimum time (ms) between two plays of the same sound category. Late
 // waves can have dozens of units firing at once; without this a real
 // machine-gun-fire wall of overlapping noise becomes unpleasant static
 // rather than reading as "lots of gunfire."
-const MIN_INTERVAL_MS = { machinegun: 40, cannon: 90, missile: 140, laser: 60 };
+const MIN_INTERVAL_MS = { machinegun: 40, cannon: 90, missile: 140, laser: 60, error: 200 };
 const lastPlayedAt = {};
 
 export function playSound(name) {

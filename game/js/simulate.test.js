@@ -4,17 +4,19 @@ import {
   createGameState,
   startNextLevel,
   stepSimulation,
+  canPlaceTower,
   placeTower,
   upgradeTower,
   repairTower,
   sellTower,
   skipWave,
   togglePause,
-  MIN_PLACEMENT_DIST_FROM_PATH,
 } from "./simulate.js";
 import { PATH } from "./map.js";
 import { MAX_LEVEL, LEVELS } from "./levels.js";
 import { WAVES } from "./waves.js";
+
+const SLOTS_1 = LEVELS[1].buildSlots;
 
 test("createGameState starts with the expected shape", () => {
   const s = createGameState();
@@ -103,49 +105,73 @@ test("stepSimulation spawns the first wave's enemies over time", () => {
   assert.ok(s.enemies.length > 0 || s.economy.wave > 1);
 });
 
-test("placeTower succeeds off-road and deducts cost", () => {
+test("placeTower succeeds at a build slot and deducts cost", () => {
   const s = createGameState();
-  // pick a point far from every PATH segment
-  const result = placeTower(s, "basic", 100, 700);
+  const slot = SLOTS_1[0];
+  const result = placeTower(s, "basic", slot.x, slot.y);
   assert.equal(result.ok, true);
   assert.equal(s.towers.length, 1);
   assert.equal(s.economy.money, 100); // 150 - 50
 });
 
-test("placeTower on level 2 rejects a point on EITHER fork of the road, not just the first", () => {
+test("placeTower on level 2 (fixed build slots) snaps a nearby click to the slot's exact position", () => {
+  const s = createGameState(2);
+  s.economy.money = 10000;
+  const slot = LEVELS[2].buildSlots[0];
+  const result = placeTower(s, "basic", slot.x + 10, slot.y - 8); // close but not exact
+  assert.equal(result.ok, true);
+  const tower = s.towers.find((t) => t.id === result.towerId);
+  assert.equal(tower.x, slot.x);
+  assert.equal(tower.y, slot.y);
+});
+
+test("placeTower on level 2 rejects a point with no build slot nearby (e.g. on the road)", () => {
   const s = createGameState(2);
   s.economy.money = 10000;
   const onLeftBranch = LEVELS[2].paths[0][2];
-  const onRightBranch = LEVELS[2].paths[1][1];
-  assert.equal(placeTower(s, "basic", onLeftBranch.x, onLeftBranch.y).reason, "on-road");
-  assert.equal(placeTower(s, "basic", onRightBranch.x, onRightBranch.y).reason, "on-road");
+  const result = placeTower(s, "basic", onLeftBranch.x, onLeftBranch.y);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "no-slot");
   assert.equal(s.towers.length, 0);
 });
 
-test("placeTower rejects a point too close to the road", () => {
+test("placeTower on level 2 rejects a slot that's already occupied", () => {
+  const s = createGameState(2);
+  s.economy.money = 10000;
+  const slot = LEVELS[2].buildSlots[0];
+  const first = placeTower(s, "basic", slot.x, slot.y);
+  assert.equal(first.ok, true);
+  const second = placeTower(s, "double", slot.x, slot.y);
+  assert.equal(second.ok, false);
+  assert.equal(second.reason, "slot-occupied");
+  assert.equal(s.towers.length, 1);
+});
+
+test("placeTower rejects a point with no build slot nearby (e.g. on the road)", () => {
   const s = createGameState();
   const onRoad = PATH[5];
   const result = placeTower(s, "basic", onRoad.x, onRoad.y);
   assert.equal(result.ok, false);
-  assert.equal(result.reason, "on-road");
+  assert.equal(result.reason, "no-slot");
   assert.equal(s.towers.length, 0);
   assert.equal(s.economy.money, 150); // unchanged
 });
 
-test("placeTower rejects a point too close to an existing tower", () => {
+test("placeTower rejects a slot that's already occupied", () => {
   const s = createGameState();
-  const first = placeTower(s, "basic", 100, 700);
+  const slot = SLOTS_1[0];
+  const first = placeTower(s, "basic", slot.x, slot.y);
   assert.equal(first.ok, true);
-  const second = placeTower(s, "basic", 130, 700); // 30px away, under MIN_TOWER_SPACING
+  const second = placeTower(s, "basic", slot.x, slot.y);
   assert.equal(second.ok, false);
-  assert.equal(second.reason, "too-close-to-tower");
+  assert.equal(second.reason, "slot-occupied");
   assert.equal(s.towers.length, 1);
 });
 
-test("placeTower allows a second tower once it's far enough from the first", () => {
+test("placeTower allows a second tower at a different slot", () => {
   const s = createGameState();
-  placeTower(s, "basic", 100, 700);
-  const second = placeTower(s, "basic", 300, 700); // well clear of MIN_TOWER_SPACING
+  placeTower(s, "basic", SLOTS_1[0].x, SLOTS_1[0].y);
+  const second = placeTower(s, "basic", SLOTS_1[1].x, SLOTS_1[1].y);
   assert.equal(second.ok, true);
   assert.equal(s.towers.length, 2);
 });
@@ -153,7 +179,8 @@ test("placeTower allows a second tower once it's far enough from the first", () 
 test("placeTower rejects when unaffordable", () => {
   const s = createGameState();
   s.economy.money = 10;
-  const result = placeTower(s, "laser", 100, 700);
+  const slot = SLOTS_1[0];
+  const result = placeTower(s, "laser", slot.x, slot.y);
   assert.equal(result.ok, false);
   assert.equal(result.reason, "cant-afford");
 });
@@ -162,18 +189,30 @@ test("placeTower rejects past a type's max count", () => {
   const s = createGameState();
   s.economy.money = 10000;
   for (let i = 0; i < 6; i++) {
-    const r = placeTower(s, "basic", 100 + i * 90, 700); // > MIN_TOWER_SPACING apart
+    const r = placeTower(s, "basic", SLOTS_1[i].x, SLOTS_1[i].y);
     assert.equal(r.ok, true);
   }
-  const seventh = placeTower(s, "basic", 100 + 6 * 90, 700);
+  const seventh = placeTower(s, "basic", SLOTS_1[6].x, SLOTS_1[6].y);
   assert.equal(seventh.ok, false);
   assert.equal(seventh.reason, "max-count");
+});
+
+test("canPlaceTower predicts the same result as placeTower without mutating state", () => {
+  const s = createGameState();
+  const slot = SLOTS_1[0];
+  const check = canPlaceTower(s, "basic", slot.x + 5, slot.y - 3);
+  assert.equal(check.ok, true);
+  assert.equal(check.x, slot.x);
+  assert.equal(check.y, slot.y);
+  assert.deepEqual(s.towers, []); // unchanged -- canPlaceTower never mutates
+  assert.equal(s.economy.money, 150); // unchanged
 });
 
 test("upgradeTower/repairTower/sellTower operate on the tower by id", () => {
   const s = createGameState();
   s.economy.money = 10000;
-  const { towerId } = placeTower(s, "basic", 100, 700);
+  const slot = SLOTS_1[0];
+  const { towerId } = placeTower(s, "basic", slot.x, slot.y);
 
   const up = upgradeTower(s, towerId, "damage");
   assert.equal(up.ok, true);
@@ -195,7 +234,8 @@ test("upgradeTower/repairTower/sellTower operate on the tower by id", () => {
 test("stats.towersBuilt/moneySpent track placeTower/upgradeTower/repairTower, but selling doesn't touch either", () => {
   const s = createGameState();
   s.economy.money = 10000;
-  const { towerId } = placeTower(s, "basic", 100, 700);
+  const slot = SLOTS_1[0];
+  const { towerId } = placeTower(s, "basic", slot.x, slot.y);
   assert.equal(s.stats.towersBuilt, 1);
   assert.equal(s.stats.moneySpent, 50);
 
@@ -247,10 +287,6 @@ test("skipWave zeroes the inter-wave timer", () => {
   const r = skipWave(s);
   assert.equal(r.ok, true);
   assert.equal(s.interWaveTimer, 0);
-});
-
-test("MIN_PLACEMENT_DIST_FROM_PATH matches main.js's constant (38px)", () => {
-  assert.equal(MIN_PLACEMENT_DIST_FROM_PATH, 38);
 });
 
 test("togglePause flips state.paused and stepSimulation no-ops while paused", () => {
