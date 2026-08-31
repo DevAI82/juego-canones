@@ -54,7 +54,12 @@ body {
 }
 #pause-btn.active { border-color: #ffd700; color: #ffd700; }
 
-#build-menu { position: absolute; bottom: 0; left: 0; width: 100%; display: flex; gap: 8px; padding: 8px; background: rgba(0,0,0,0.5); box-sizing: border-box; }
+/* Moved to the top per user request, so the bottom of the map (where the
+   action often is -- level 2's fortified base, for one) isn't permanently
+   covered by the build bar. Sits below the HUD text/skip-wave button
+   (both top-left, tallest at ~125px) and #top-controls (top-right,
+   ~60px) with margin to spare, so nothing else needed to move. */
+#build-menu { position: absolute; top: 140px; left: 0; width: 100%; display: flex; gap: 8px; padding: 8px; background: rgba(0,0,0,0.5); box-sizing: border-box; }
 /* Same premium hologram-card look as .upgrade-card: the tower's own render
    fills the top of the button (contain, not stretched/cropped) and the
    live cost/count label sits in the dark strip below it. */
@@ -93,7 +98,10 @@ body {
    pip bar, buttons) is built in CSS so it can reflect live game state. */
 #upgrade-panel {
   position: absolute;
-  bottom: 118px;
+  /* Build menu moved to the top -- the upgrade panel (only shown while a
+     tower is selected, not a permanent fixture) now uses the bottom
+     space that freed up instead of stacking under the build menu. */
+  bottom: 20px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
