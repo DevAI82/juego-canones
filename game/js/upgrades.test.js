@@ -38,6 +38,14 @@ test("applyUpgrade increases range as level rises", () => {
   assert.ok(t.range > before);
 });
 
+test("applyUpgrade decreases armorMult (less damage taken) as level rises", () => {
+  const t = createTower("basic", 0, 0);
+  const before = t.armorMult;
+  applyUpgrade(t, "armor", TOWER_TYPES.basic);
+  assert.ok(t.armorMult < before);
+  assert.equal(t.level.armor, 1);
+});
+
 test("applyUpgrade returns false past max level", () => {
   const t = createTower("basic", 0, 0);
   for (let i = 0; i < UPGRADE_DEFS.damage.levels; i++) applyUpgrade(t, "damage", TOWER_TYPES.basic);

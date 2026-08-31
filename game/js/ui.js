@@ -2,7 +2,7 @@ import { TOWER_TYPES } from "./tower.js";
 import { UPGRADE_DEFS, upgradeCost, canUpgrade } from "./upgrades.js";
 
 const LABELS = { basic: "Básica", double: "Doble", laser: "Láser" };
-const SKILL_LABELS = { damage: "Daño", range: "Alcance", fireRate: "Vel. disparo" };
+const SKILL_LABELS = { damage: "Daño", range: "Alcance", fireRate: "Vel. disparo", armor: "Blindaje" };
 // Reuse each tower's own premium render (game/assets/tower_*.png, extracted
 // from the user's "diseño torres" reference images) as the build menu's
 // icon, instead of a plain text button -- per user request for a more
@@ -59,6 +59,9 @@ const SKILL_ICON = {
   damage: "assets/ui_icon_damage.png",
   range: "assets/ui_icon_range.png",
   fireRate: "assets/ui_icon_firerate.png",
+  // Cropped from the follow-up mockup (Mejoras/diseño mejoras ampliado.jpg)
+  // that added this 4th skill, not the original 3-skill one above.
+  armor: "assets/ui_icon_armor.png",
 };
 
 export function initUpgradePanel(container, { onUpgrade, onRepair, onSell }) {

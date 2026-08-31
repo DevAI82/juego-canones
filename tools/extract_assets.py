@@ -455,6 +455,21 @@ def extract_map():
     out_img.save(OUT / "map_bg.png")
 
 
+def extract_armor_icon():
+    """The original 3-skill upgrade panel (diseño mejoras.jpg -> ui_icon_
+    damage/range/firerate.png) was cropped by hand in an earlier session
+    and those crop boxes were never recorded here -- so this only adds
+    the new 4th skill ("Blindaje") added on top, from the user's
+    follow-up mockup (Mejoras/diseño mejoras ampliado.jpg), without
+    touching the other three. Like those, this is a plain crop (no
+    color-keying): the card's own blurred background art is meant to
+    show through, matching game/js/ui.js's .upgrade-card treatment
+    (icon image on top, dark card fill blending in below).
+    """
+    im = Image.open(ROOT / "Mejoras" / "diseño mejoras ampliado.jpg").convert("RGB")
+    im.crop((757, 63, 967, 157)).save(OUT / "ui_icon_armor.png")
+
+
 if __name__ == "__main__":
     extract_towers()
     extract_enemies()
@@ -462,4 +477,5 @@ if __name__ == "__main__":
     extract_projectile()
     extract_explosion()
     extract_map()
+    extract_armor_icon()
     print("Assets written to", OUT)
