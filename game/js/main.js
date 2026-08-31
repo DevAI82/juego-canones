@@ -37,11 +37,70 @@ const ctx = canvas.getContext("2d");
 // orientation instead of only ever rendering at a fixed 1200px.
 const gameViewport = document.getElementById("game-viewport");
 const gameContainer = document.getElementById("game-container");
+// #build-menu lives outside #game-container (see index.html's comment on
+// it) specifically so it can be parked in the black letterbox margin on
+// a wide window instead of covering the map, per user request. Since it's
+// no longer a scaled descendant of #game-container, its own position/size
+// (and, in the fallback case, its own independent scale) have to be
+// computed here in JS against the real measured margin -- CSS alone can't
+// know how much dead space resizeGame()'s scale left on the sides.
+const BUILD_MENU_SIDEBAR_WIDTH = 160;
+const BUILD_MENU_SIDEBAR_GAP = 16;
+
+function positionBuildMenu(scale) {
+  const buildMenuEl = document.getElementById("build-menu");
+  const scaledW = CANVAS_WIDTH * scale;
+  const scaledH = CANVAS_HEIGHT * scale;
+  const gameLeft = (window.innerWidth - scaledW) / 2;
+  const gameTop = (window.innerHeight - scaledH) / 2;
+  const marginNeeded = BUILD_MENU_SIDEBAR_WIDTH + BUILD_MENU_SIDEBAR_GAP * 2;
+
+  if (gameLeft >= marginNeeded) {
+    // Enough dead space on the sides -- vertical sidebar in the left
+    // margin, at a fixed readable size regardless of the game's own scale.
+    buildMenuEl.classList.add("sidebar-mode");
+    buildMenuEl.style.transform = "none";
+    buildMenuEl.style.left = `${Math.round((gameLeft - BUILD_MENU_SIDEBAR_WIDTH) / 2)}px`;
+    buildMenuEl.style.top = `${Math.round(gameTop)}px`;
+    buildMenuEl.style.width = `${BUILD_MENU_SIDEBAR_WIDTH}px`;
+    buildMenuEl.style.height = `${Math.round(scaledH)}px`;
+  } else {
+    // Not enough margin (narrow window/phone) -- fall back to its
+    // original spot overlapping the top of the map, scaled down with it
+    // (own CSS transform, since it's no longer a scaled descendant of
+    // #game-container to inherit that from).
+    buildMenuEl.classList.remove("sidebar-mode");
+    buildMenuEl.style.transform = `scale(${scale})`;
+    buildMenuEl.style.transformOrigin = "top left";
+    buildMenuEl.style.left = `${Math.round(gameLeft)}px`;
+    buildMenuEl.style.top = `${Math.round(gameTop + 140 * scale)}px`;
+    buildMenuEl.style.width = `${CANVAS_WIDTH}px`;
+    buildMenuEl.style.height = "";
+  }
+}
+
+// Same reasoning as #build-menu above, simpler since these never need a
+// sidebar mode -- just pinned near the map's actual top-right corner at
+// a fixed, comfortably tappable size (was shrinking to ~20x20px on a
+// short phone landscape screen otherwise, per user request to optimize
+// that).
+function positionTopControls(scale) {
+  const topControlsEl = document.getElementById("top-controls");
+  const scaledW = CANVAS_WIDTH * scale;
+  const scaledH = CANVAS_HEIGHT * scale;
+  const gameLeft = (window.innerWidth - scaledW) / 2;
+  const gameTop = (window.innerHeight - scaledH) / 2;
+  topControlsEl.style.top = `${Math.round(gameTop + 12)}px`;
+  topControlsEl.style.right = `${Math.round(window.innerWidth - (gameLeft + scaledW) + 12)}px`;
+}
+
 function resizeGame() {
   const scale = Math.min(window.innerWidth / CANVAS_WIDTH, window.innerHeight / CANVAS_HEIGHT);
   gameContainer.style.transform = `scale(${scale})`;
   gameViewport.style.width = `${CANVAS_WIDTH * scale}px`;
   gameViewport.style.height = `${CANVAS_HEIGHT * scale}px`;
+  positionBuildMenu(scale);
+  positionTopControls(scale);
 }
 resizeGame();
 window.addEventListener("resize", resizeGame);

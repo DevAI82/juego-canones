@@ -11,12 +11,6 @@
     <div id="game-container">
       <canvas id="game-canvas" width="1200" height="750"></canvas>
       <button id="skip-wave-btn" class="hidden">▶</button>
-      <div id="top-controls">
-        <button id="mute-btn" title="Silenciar sonido">🔊</button>
-        <button id="pause-btn" title="Pausar">⏸</button>
-        <button id="reset-btn" title="Reiniciar partida">⟲</button>
-      </div>
-      <div id="build-menu"></div>
       <div id="upgrade-panel" class="hidden"></div>
       <div id="start-menu" class="hidden">
         <div id="start-menu-modal">
@@ -48,6 +42,18 @@
           <button id="gameend-close-btn">Jugar de nuevo</button>
         </div>
       </div>
+    </div>
+    <!-- Outside #game-container (which has the JS-driven transform:scale)
+         so position:fixed here is relative to the real viewport, not the
+         scaled game -- lets main.js's resizeGame() park this in the black
+         letterbox margin on a wide window instead of covering the map,
+         per user request, falling back to overlapping the top of the map
+         (like the old layout) when the window's too narrow for a margin. -->
+    <div id="build-menu"></div>
+    <div id="top-controls">
+      <button id="mute-btn" title="Silenciar sonido">🔊</button>
+      <button id="pause-btn" title="Pausar">⏸</button>
+      <button id="reset-btn" title="Reiniciar partida">⟲</button>
     </div>
   </div>
   <script type="module" src="js/main.js"></script>

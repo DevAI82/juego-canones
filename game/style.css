@@ -41,7 +41,12 @@ body {
 }
 #skip-wave-btn.hidden { display: none; }
 
-#top-controls { position: absolute; top: 20px; right: 20px; display: flex; gap: 8px; }
+/* Outside #game-container (see index.html's comment on #build-menu for
+   why) and positioned in JS -- per user request to optimize mobile
+   landscape play, these stay a fixed, comfortably tappable size instead
+   of shrinking with the map on a short phone screen, while still tracking
+   the map's actual top-right corner at any scale. */
+#top-controls { position: fixed; display: flex; gap: 8px; }
 #top-controls button {
   width: 40px;
   height: 40px;
@@ -54,12 +59,19 @@ body {
 }
 #pause-btn.active { border-color: #ffd700; color: #ffd700; }
 
-/* Moved to the top per user request, so the bottom of the map (where the
-   action often is -- level 2's fortified base, for one) isn't permanently
-   covered by the build bar. Sits below the HUD text/skip-wave button
-   (both top-left, tallest at ~125px) and #top-controls (top-right,
-   ~60px) with margin to spare, so nothing else needed to move. */
-#build-menu { position: absolute; top: 140px; left: 0; width: 100%; display: flex; gap: 8px; padding: 8px; background: rgba(0,0,0,0.5); box-sizing: border-box; }
+/* Positioned entirely in JS (main.js's resizeGame()/positionBuildMenu()):
+   #build-menu lives outside #game-container (which has the transform:scale
+   that would otherwise turn position:fixed here into "fixed relative to
+   the scaled game" instead of the real viewport), so it can be parked in
+   the black letterbox margin on a wide window -- per user request, using
+   that dead space instead of covering the map -- and falls back to
+   overlapping the top of the map (its original spot, full-width/
+   horizontal) when the window's too narrow for a side margin. The
+   .sidebar-mode class (added by that same JS) switches it to a narrower
+   vertical stack; sizing/position themselves are inline styles set per
+   frame-resize, not CSS, since they depend on real measured margins. */
+#build-menu { position: fixed; display: flex; gap: 8px; padding: 8px; background: rgba(0,0,0,0.5); box-sizing: border-box; border-radius: 4px; }
+#build-menu.sidebar-mode { flex-direction: column; }
 /* Same premium hologram-card look as .upgrade-card: the tower's own render
    fills the top of the button (contain, not stretched/cropped) and the
    live cost/count label sits in the dark strip below it. */
@@ -80,6 +92,7 @@ body {
   box-shadow: 0 0 8px rgba(111, 216, 230, 0.4), inset 0 0 16px rgba(0, 0, 0, 0.6);
   cursor: pointer;
 }
+#build-menu.sidebar-mode .build-btn { flex: none; width: 100%; }
 .build-btn-label {
   color: #dffcff;
   font-family: sans-serif;
