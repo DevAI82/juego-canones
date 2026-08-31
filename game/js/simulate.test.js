@@ -51,6 +51,24 @@ test("placeTower rejects a point too close to the road", () => {
   assert.equal(s.economy.money, 150); // unchanged
 });
 
+test("placeTower rejects a point too close to an existing tower", () => {
+  const s = createGameState();
+  const first = placeTower(s, "basic", 100, 700);
+  assert.equal(first.ok, true);
+  const second = placeTower(s, "basic", 130, 700); // 30px away, under MIN_TOWER_SPACING
+  assert.equal(second.ok, false);
+  assert.equal(second.reason, "too-close-to-tower");
+  assert.equal(s.towers.length, 1);
+});
+
+test("placeTower allows a second tower once it's far enough from the first", () => {
+  const s = createGameState();
+  placeTower(s, "basic", 100, 700);
+  const second = placeTower(s, "basic", 300, 700); // well clear of MIN_TOWER_SPACING
+  assert.equal(second.ok, true);
+  assert.equal(s.towers.length, 2);
+});
+
 test("placeTower rejects when unaffordable", () => {
   const s = createGameState();
   s.economy.money = 10;
@@ -63,10 +81,10 @@ test("placeTower rejects past a type's max count", () => {
   const s = createGameState();
   s.economy.money = 10000;
   for (let i = 0; i < 6; i++) {
-    const r = placeTower(s, "basic", 100 + i * 60, 700);
+    const r = placeTower(s, "basic", 100 + i * 90, 700); // > MIN_TOWER_SPACING apart
     assert.equal(r.ok, true);
   }
-  const seventh = placeTower(s, "basic", 100 + 6 * 60, 700);
+  const seventh = placeTower(s, "basic", 100 + 6 * 90, 700);
   assert.equal(seventh.ok, false);
   assert.equal(seventh.reason, "max-count");
 });
@@ -129,6 +147,17 @@ test("stats.kills increments by enemy type on a kill, stats.towersLost increment
   stepSimulation(s, 0.016);
   assert.equal(s.stats.kills.tank, 1);
   assert.equal(s.stats.towersLost, 1);
+});
+
+test("stepSimulation pushes apart two enemies that end up on the exact same spot", () => {
+  const s = createGameState();
+  const path = [{ x: 500, y: 500 }, { x: 500, y: 500 }]; // stays put, so overlap persists
+  const a = { type: "buggy", alive: true, hp: 25, x: 500, y: 500, path, waypointIndex: 0, speed: 0, fireTimer: 999, fireRange: 0 };
+  const b = { type: "buggy", alive: true, hp: 25, x: 500, y: 500, path, waypointIndex: 0, speed: 0, fireTimer: 999, fireRange: 0 };
+  s.enemies.push(a, b);
+  stepSimulation(s, 0.016);
+  const dist = Math.hypot(a.x - b.x, a.y - b.y);
+  assert.ok(dist > 0, "two enemies spawned on the same point should no longer be exactly overlapping");
 });
 
 test("skipWave zeroes the inter-wave timer", () => {

@@ -10,7 +10,7 @@
 // Every action function returns { ok: boolean, reason?: string } instead of
 // throwing, so a caller (a click handler, an HTTP request handler) can
 // report *why* an action was rejected without a try/catch.
-import { PATH, randomSoldierPath, distanceToPath } from "./map.js";
+import { PATH, randomSoldierPath, offsetPath, distanceToPath } from "./map.js";
 import { createEnemy, stepEnemy, damageEnemy, stepEnemyFire } from "./enemy.js";
 import { WAVES, buildSpawnQueue } from "./waves.js";
 import { createEconomy, earn, loseLife, spend } from "./economy.js";
@@ -19,13 +19,76 @@ import { createProjectile, stepProjectile } from "./projectile.js";
 import { applyUpgrade, upgradeCost, canUpgrade } from "./upgrades.js";
 
 export const MIN_PLACEMENT_DIST_FROM_PATH = 38;
+// Roughly matches the towers' drawn platform radius (main.js draws it at
+// 38px) so two platforms can't visually overlap -- per user request, no
+// more towers stacked on top of each other.
+export const MIN_TOWER_SPACING = 80;
 export const SELL_REFUND_FRACTION = 0.6;
 export const INTER_WAVE_DELAY = 4;
+
+// Half-width of the "road" vehicles are allowed to spread across, per
+// user request -- each vehicle gets its own randomized lane offset
+// (map.js's offsetPath) instead of every buggy/tank/motorcycle/rocket
+// riding the exact same centerline. Comfortably inside
+// MIN_PLACEMENT_DIST_FROM_PATH (38) so a lane never reaches close enough
+// to the road's edge to make the on-road placement check inconsistent
+// with what's actually drivable.
+const VEHICLE_LANE_HALF_WIDTH = 24;
+
+// Two enemies (of any type/lane) closer than this get gently pushed apart
+// after moving each tick -- per user request, no more enemies rendered
+// stacked exactly on top of each other.
+const ENEMY_SEPARATION_DIST = 14;
 
 let nextId = 1;
 function assignId(obj) {
   obj.id = nextId++;
   return obj;
+}
+
+function pathForSpawn(type) {
+  if (type === "soldier") return randomSoldierPath();
+  const laneOffset = (Math.random() * 2 - 1) * VEHICLE_LANE_HALF_WIDTH;
+  return offsetPath(PATH, laneOffset);
+}
+
+// Nudges any two alive enemies closer than ENEMY_SEPARATION_DIST directly
+// apart from each other, split evenly. O(n^2), but n is the number of
+// enemies simultaneously on screen (spawn intervals stagger the much
+// larger per-wave totals), not the wave's full count -- cheap in
+// practice at this game's scale.
+function separateEnemies(enemies) {
+  for (let i = 0; i < enemies.length; i++) {
+    const a = enemies[i];
+    if (!a.alive) continue;
+    for (let j = i + 1; j < enemies.length; j++) {
+      const b = enemies[j];
+      if (!b.alive) continue;
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const distSq = dx * dx + dy * dy;
+      if (distSq >= ENEMY_SEPARATION_DIST * ENEMY_SEPARATION_DIST) continue;
+      if (distSq > 0) {
+        const dist = Math.sqrt(distSq);
+        const push = (ENEMY_SEPARATION_DIST - dist) / 2;
+        const nx = dx / dist;
+        const ny = dy / dist;
+        a.x -= nx * push;
+        a.y -= ny * push;
+        b.x += nx * push;
+        b.y += ny * push;
+      } else {
+        // Exact same point (e.g. two enemies spawned at the same instant)
+        // -- nudge apart in a random direction since there's no direction
+        // to push "away from" yet.
+        const angle = Math.random() * Math.PI * 2;
+        a.x -= Math.cos(angle);
+        a.y -= Math.sin(angle);
+        b.x += Math.cos(angle);
+        b.y += Math.sin(angle);
+      }
+    }
+  }
 }
 
 export function createGameState() {
@@ -64,10 +127,10 @@ function trySpawn(state) {
   if (state.interWaveTimer > 0) return;
   while (state.spawnQueue.length && state.spawnQueue[0].time <= state.waveClock) {
     const { type } = state.spawnQueue.shift();
-    // Vehicles are confined to the trench; only foot soldiers can roam --
-    // each one gets its own randomly generated route (see map.js).
+    // Vehicles are confined to the trench (in their own randomized lane,
+    // see pathForSpawn); only foot soldiers roam the whole map.
     // waveIndex drives the tank/rocket's progressive armor/range (enemy.js).
-    state.enemies.push(assignId(createEnemy(type, type === "soldier" ? randomSoldierPath() : PATH, state.waveIndex)));
+    state.enemies.push(assignId(createEnemy(type, pathForSpawn(type), state.waveIndex)));
   }
 }
 
@@ -107,6 +170,7 @@ export function stepSimulation(state, dt) {
     }
   }
   state.enemies = state.enemies.filter((e) => e.alive);
+  separateEnemies(state.enemies);
 
   for (const t of state.towers) {
     const shot = stepTower(t, state.enemies, dt);
@@ -210,6 +274,8 @@ export function placeTower(state, towerType, x, y) {
   const countOnField = state.towers.filter((t) => t.type === towerType && t.hp > 0).length;
   if (countOnField >= def.maxCount) return { ok: false, reason: "max-count" };
   if (distanceToPath(PATH, x, y) < MIN_PLACEMENT_DIST_FROM_PATH) return { ok: false, reason: "on-road" };
+  const tooCloseToTower = state.towers.some((t) => t.hp > 0 && Math.hypot(t.x - x, t.y - y) < MIN_TOWER_SPACING);
+  if (tooCloseToTower) return { ok: false, reason: "too-close-to-tower" };
   if (!spend(state.economy, def.cost)) return { ok: false, reason: "cant-afford" };
   state.stats.towersBuilt++;
   state.stats.moneySpent += def.cost;

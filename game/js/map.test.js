@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { PATH, randomSoldierPath, pathPointAt, distanceToPath, CANVAS_HEIGHT } from "./map.js";
+import { PATH, randomSoldierPath, offsetPath, pathPointAt, distanceToPath, CANVAS_HEIGHT } from "./map.js";
 
 test("PATH has at least 2 waypoints", () => {
   assert.ok(PATH.length >= 2);
@@ -40,4 +40,26 @@ test("randomSoldierPath enters/exits near PATH's entry/exit but wanders freely (
   // two soldiers shouldn't get the identical route -- that's the whole point
   const differs = a.some((p, i) => !b[i] || p.x !== b[i].x || p.y !== b[i].y);
   assert.ok(differs);
+});
+
+test("offsetPath returns the same path unchanged for a zero offset", () => {
+  const path = [{ x: 0, y: 0 }, { x: 100, y: 0 }];
+  assert.equal(offsetPath(path, 0), path);
+});
+
+test("offsetPath shifts a straight horizontal path sideways by exactly the offset", () => {
+  const path = [{ x: 0, y: 0 }, { x: 100, y: 0 }];
+  const shifted = offsetPath(path, 20);
+  // moving along +x, "sideways" is the y axis
+  for (const p of shifted) assert.ok(Math.abs(Math.abs(p.y) - 20) < 0.01);
+  // still spans the same x range -- only pushed sideways, not shortened
+  assert.ok(Math.abs(shifted[0].x - path[0].x) < 0.01);
+  assert.ok(Math.abs(shifted[1].x - path[1].x) < 0.01);
+});
+
+test("offsetPath in opposite directions shifts to opposite sides", () => {
+  const path = [{ x: 0, y: 0 }, { x: 100, y: 0 }];
+  const left = offsetPath(path, 20);
+  const right = offsetPath(path, -20);
+  assert.ok((left[0].y > 0) !== (right[0].y > 0));
 });

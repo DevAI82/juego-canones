@@ -93,6 +93,30 @@ export function pathPointAt(path, index) {
   return path[index];
 }
 
+// Returns a copy of `path` shifted sideways by `offset` px, perpendicular
+// to the path's local direction at each waypoint (estimated from its
+// neighbors). Used to give each vehicle its own "lane" across the road's
+// width instead of every buggy/tank/motorcycle/rocket queuing along the
+// exact same centerline and stacking on top of each other -- per user
+// request, so the road reads as something with real width, not a thin
+// wire everyone rides single-file.
+export function offsetPath(path, offset) {
+  if (offset === 0) return path;
+  const out = [];
+  for (let i = 0; i < path.length; i++) {
+    const prev = path[Math.max(0, i - 1)];
+    const next = path[Math.min(path.length - 1, i + 1)];
+    const dx = next.x - prev.x;
+    const dy = next.y - prev.y;
+    const len = Math.hypot(dx, dy) || 1;
+    // Rotate the local direction 90 degrees to get the perpendicular.
+    const px = -dy / len;
+    const py = dx / len;
+    out.push({ x: path[i].x + px * offset, y: path[i].y + py * offset });
+  }
+  return out;
+}
+
 export function drawMap(ctx, mapImage) {
   ctx.drawImage(mapImage, 0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 }
