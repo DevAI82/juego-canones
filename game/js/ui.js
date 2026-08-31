@@ -9,6 +9,15 @@ const SKILL_LABELS = { damage: "Daño", range: "Alcance", fireRate: "Vel. dispar
 // icon, instead of a plain text button -- per user request for a more
 // premium look here too.
 const TOWER_ICON = { basic: "assets/tower_basic.png", double: "assets/tower_double.png", laser: "assets/tower_laser.png" };
+// Reuse each enemy's own in-game sprite as the score breakdown's row icon
+// -- per user request for a more visual stats screen.
+const ENEMY_ICON = {
+  soldier: "assets/enemy_soldier.png",
+  motorcycle: "assets/enemy_motorcycle.png",
+  buggy: "assets/enemy_buggy.png",
+  tank: "assets/enemy_tank.png",
+  rocket: "assets/enemy_rocket.png",
+};
 
 export function initBuildMenu(container, { onSelect }) {
   container.innerHTML = "";
@@ -177,7 +186,19 @@ export function renderGameEndScreen(overlay, state) {
     tr.className = "gameend-score-row";
     if (row.subtotal < 0) tr.classList.add("negative");
     const sign = (n) => (n > 0 ? `+${n}` : `${n}`);
-    tr.append(scoreCell(row.label), scoreCell(row.count), scoreCell(sign(row.pointsEach)), scoreCell(sign(row.subtotal)));
+
+    const conceptCell = document.createElement("td");
+    conceptCell.className = "gameend-concept-cell";
+    if (row.type && ENEMY_ICON[row.type]) {
+      const icon = document.createElement("img");
+      icon.src = ENEMY_ICON[row.type];
+      icon.alt = "";
+      icon.className = "gameend-enemy-icon";
+      conceptCell.appendChild(icon);
+    }
+    conceptCell.appendChild(document.createTextNode(row.label));
+
+    tr.append(conceptCell, scoreCell(row.count), scoreCell(sign(row.pointsEach)), scoreCell(sign(row.subtotal)));
     table.appendChild(tr);
   }
 

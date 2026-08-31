@@ -31,7 +31,10 @@ export function computeScoreBreakdown(state) {
   const rows = [];
   for (const [type, points] of Object.entries(KILL_POINTS)) {
     const count = state.stats.kills[type] || 0;
-    rows.push({ label: ENEMY_LABELS[type], count, pointsEach: points, subtotal: count * points });
+    // `type` lets ui.js look up that enemy's own sprite for the row's
+    // icon -- the three rows below (waves/lives/towers) have no `type`,
+    // so ui.js knows not to look for one there.
+    rows.push({ type, label: ENEMY_LABELS[type], count, pointsEach: points, subtotal: count * points });
   }
   const waves = wavesCleared(state);
   rows.push({ label: "Oleadas superadas", count: waves, pointsEach: WAVE_CLEAR_POINTS, subtotal: waves * WAVE_CLEAR_POINTS });

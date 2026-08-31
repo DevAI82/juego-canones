@@ -265,6 +265,19 @@ body {
   color: #ff8a80;
 }
 
+.gameend-concept-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.gameend-enemy-icon {
+  width: 24px;
+  height: 20px;
+  object-fit: contain;
+  flex-shrink: 0;
+  filter: drop-shadow(0 0 3px rgba(111, 216, 230, 0.5));
+}
+
 #gameend-total {
   text-align: center;
   font-size: 20px;
