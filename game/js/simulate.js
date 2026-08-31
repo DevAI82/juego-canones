@@ -57,7 +57,21 @@ function pathForSpawn(type) {
 // enemies simultaneously on screen (spawn intervals stagger the much
 // larger per-wave totals), not the wave's full count -- cheap in
 // practice at this game's scale.
-function separateEnemies(enemies) {
+//
+// The push is rate-limited to SEPARATION_SPEED px/s (scaled by dt), not
+// applied as a full instant correction -- a dense cluster of slow enemies
+// (several tanks bunched together, worse once escorts started spawning
+// right behind them) could otherwise get pushed apart *faster* than the
+// tank's own 30px/s forward speed, permanently overpowering its path
+// progress and jamming the whole group at the spawn point instead of just
+// easing them apart over a couple of seconds. SEPARATION_SPEED is kept
+// below every enemy type's speed (enemy.js's slowest is the tank's 30) so
+// forward path movement always wins out eventually, no matter how
+// crowded the spawn gets.
+const SEPARATION_SPEED = 20;
+
+function separateEnemies(enemies, dt) {
+  const maxPush = SEPARATION_SPEED * dt;
   for (let i = 0; i < enemies.length; i++) {
     const a = enemies[i];
     if (!a.alive) continue;
@@ -70,7 +84,7 @@ function separateEnemies(enemies) {
       if (distSq >= ENEMY_SEPARATION_DIST * ENEMY_SEPARATION_DIST) continue;
       if (distSq > 0) {
         const dist = Math.sqrt(distSq);
-        const push = (ENEMY_SEPARATION_DIST - dist) / 2;
+        const push = Math.min(ENEMY_SEPARATION_DIST - dist, maxPush) / 2;
         const nx = dx / dist;
         const ny = dy / dist;
         a.x -= nx * push;
@@ -82,10 +96,11 @@ function separateEnemies(enemies) {
         // -- nudge apart in a random direction since there's no direction
         // to push "away from" yet.
         const angle = Math.random() * Math.PI * 2;
-        a.x -= Math.cos(angle);
-        a.y -= Math.sin(angle);
-        b.x += Math.cos(angle);
-        b.y += Math.sin(angle);
+        const push = maxPush / 2;
+        a.x -= Math.cos(angle) * push;
+        a.y -= Math.sin(angle) * push;
+        b.x += Math.cos(angle) * push;
+        b.y += Math.sin(angle) * push;
       }
     }
   }
@@ -170,7 +185,7 @@ export function stepSimulation(state, dt) {
     }
   }
   state.enemies = state.enemies.filter((e) => e.alive);
-  separateEnemies(state.enemies);
+  separateEnemies(state.enemies, dt);
 
   for (const t of state.towers) {
     const shot = stepTower(t, state.enemies, dt);
