@@ -10,7 +10,7 @@
 // Every action function returns { ok: boolean, reason?: string } instead of
 // throwing, so a caller (a click handler, an HTTP request handler) can
 // report *why* an action was rejected without a try/catch.
-import { PATH, SOLDIER_PATH, distanceToPath } from "./map.js";
+import { PATH, randomSoldierPath, distanceToPath } from "./map.js";
 import { createEnemy, stepEnemy, damageEnemy, stepEnemyFire } from "./enemy.js";
 import { WAVES, buildSpawnQueue } from "./waves.js";
 import { createEconomy, earn, loseLife, spend } from "./economy.js";
@@ -64,9 +64,10 @@ function trySpawn(state) {
   if (state.interWaveTimer > 0) return;
   while (state.spawnQueue.length && state.spawnQueue[0].time <= state.waveClock) {
     const { type } = state.spawnQueue.shift();
-    // Vehicles are confined to the trench; only foot soldiers can duck out
-    // and cut across open ground on the shorter, more exposed SOLDIER_PATH.
-    state.enemies.push(assignId(createEnemy(type, type === "soldier" ? SOLDIER_PATH : PATH)));
+    // Vehicles are confined to the trench; only foot soldiers can roam --
+    // each one gets its own randomly generated route (see map.js).
+    // waveIndex drives the tank/rocket's progressive armor/range (enemy.js).
+    state.enemies.push(assignId(createEnemy(type, type === "soldier" ? randomSoldierPath() : PATH, state.waveIndex)));
   }
 }
 

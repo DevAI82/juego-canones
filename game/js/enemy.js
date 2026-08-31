@@ -20,11 +20,29 @@ export const ENEMY_TYPES = {
   rocket: { hp: 70, speed: 35, damage: 2, bounty: 25, fireRange: 170, fireDamage: 9, fireCooldown: 2.2 },
 };
 
-export function createEnemy(type, path) {
+// Per user request, the tank and rocket launcher aren't static threats --
+// they escalate as the waves progress, the same 5-level/compounding shape
+// as the player towers' own armor/range upgrades (upgrades.js), just
+// driven by waveIndex instead of money. One level every WAVES_PER_LEVEL
+// waves, capping at level 5 with room to sit at max for the last several
+// waves of a 40-wave run (floor(39/7) = 5).
+const WAVES_PER_LEVEL = 7;
+const MAX_PROGRESSIVE_LEVEL = 5;
+const TANK_ARMOR_MULT_PER_LEVEL = 0.85; // damage-taken multiplier, mirrors tower armor
+const ROCKET_RANGE_MULT_PER_LEVEL = 1.2; // mirrors tower range
+
+function progressiveLevel(waveIndex) {
+  return Math.min(MAX_PROGRESSIVE_LEVEL, Math.floor(waveIndex / WAVES_PER_LEVEL));
+}
+
+export function createEnemy(type, path, waveIndex = 0) {
   const def = ENEMY_TYPES[type];
   // +/-10% per-instance speed variation so a wave of identical enemies
   // doesn't move in a perfectly uniform, robotic block.
   const speedJitter = 0.9 + Math.random() * 0.2;
+  const level = progressiveLevel(waveIndex);
+  const armorMult = type === "tank" ? Math.pow(TANK_ARMOR_MULT_PER_LEVEL, level) : 1;
+  const fireRange = type === "rocket" ? def.fireRange * Math.pow(ROCKET_RANGE_MULT_PER_LEVEL, level) : def.fireRange;
   return {
     type,
     hp: def.hp,
@@ -32,10 +50,11 @@ export function createEnemy(type, path) {
     speed: def.speed * speedJitter,
     damage: def.damage,
     bounty: def.bounty,
-    fireRange: def.fireRange,
+    fireRange,
     fireDamage: def.fireDamage,
     fireCooldown: def.fireCooldown,
     fireTimer: def.fireCooldown,
+    armorMult,
     path,
     waypointIndex: 0,
     x: path[0].x,
@@ -71,7 +90,7 @@ export function stepEnemy(enemy, dt) {
 }
 
 export function damageEnemy(enemy, amount) {
-  enemy.hp -= amount;
+  enemy.hp -= amount * (enemy.armorMult ?? 1);
   if (enemy.hp <= 0) {
     enemy.hp = 0;
     enemy.alive = false;

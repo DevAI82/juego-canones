@@ -65,15 +65,48 @@ export const WAVES = [
   { enemies: [{ type: "soldier", count: 32, interval: 0.06 }, { type: "buggy", count: 26, interval: 0.06 }, { type: "motorcycle", count: 26, interval: 0.05 }, { type: "tank", count: 20, interval: 0.2 }, { type: "rocket", count: 20, interval: 0.4 }] },
 ];
 
+// Motorcycles/buggies spawn this long after "their" tank, in the same
+// wave, rather than on their own independent interval.
+const ESCORT_DELAY = 0.35;
+
 export function buildSpawnQueue(waveIndex) {
   const wave = WAVES[waveIndex];
   const queue = [];
+
+  const tankGroup = wave.enemies.find((g) => g.type === "tank");
+  const tankTimes = [];
+  if (tankGroup) {
+    let t = 0;
+    for (let i = 0; i < tankGroup.count; i++) {
+      tankTimes.push(t);
+      t += tankGroup.interval;
+    }
+  }
+
   for (const group of wave.enemies) {
+    if (group.type === "tank") {
+      for (const t of tankTimes) queue.push({ type: "tank", time: t });
+      continue;
+    }
+    // Per user request: motorcycles and buggies ride just behind a tank
+    // when the wave has any, cycling through each tank in turn (a small
+    // extra delay per lap so repeats don't all land on the exact same
+    // instant) -- so they spend the wave shielded by whichever tank a
+    // tower is already focused on (tower.js's findTarget gives tanks
+    // targeting priority) instead of arriving as an easy, undefended
+    // target on their own.
+    const isEscort = (group.type === "buggy" || group.type === "motorcycle") && tankTimes.length > 0;
     let t = 0;
     for (let i = 0; i < group.count; i++) {
-      queue.push({ type: group.type, time: t });
+      if (isEscort) {
+        const lap = Math.floor(i / tankTimes.length);
+        queue.push({ type: group.type, time: tankTimes[i % tankTimes.length] + ESCORT_DELAY + lap * 0.25 });
+      } else {
+        queue.push({ type: group.type, time: t });
+      }
       t += group.interval;
     }
   }
+
   return queue.sort((a, b) => a.time - b.time);
 }

@@ -52,6 +52,31 @@ test("stepEnemyFire targets the nearest tower in range and respects cooldown", (
   assert.ok(e.fireTimer > 0);
 });
 
+test("createEnemy scales tank armorMult and rocket fireRange with waveIndex, capping at level 5", () => {
+  const earlyTank = createEnemy("tank", PATH, 0);
+  const midTank = createEnemy("tank", PATH, 14); // level 2
+  const maxTank = createEnemy("tank", PATH, 999); // way past the cap
+  assert.equal(earlyTank.armorMult, 1);
+  assert.ok(midTank.armorMult < 1 && midTank.armorMult > maxTank.armorMult);
+  assert.ok(Math.abs(maxTank.armorMult - 0.85 ** 5) < 1e-9);
+
+  const earlyRocket = createEnemy("rocket", PATH, 0);
+  const maxRocket = createEnemy("rocket", PATH, 999);
+  assert.equal(earlyRocket.fireRange, ENEMY_TYPES.rocket.fireRange);
+  assert.ok(Math.abs(maxRocket.fireRange - ENEMY_TYPES.rocket.fireRange * 1.2 ** 5) < 1e-6);
+
+  // Non-tank/rocket types are untouched by waveIndex.
+  const lateSoldier = createEnemy("soldier", PATH, 999);
+  assert.equal(lateSoldier.armorMult, 1);
+});
+
+test("damageEnemy scales incoming damage by armorMult", () => {
+  const e = createEnemy("tank", PATH, 999); // max level, armorMult = 0.85^5
+  const before = e.hp;
+  damageEnemy(e, 100);
+  assert.ok(Math.abs(before - e.hp - 100 * 0.85 ** 5) < 1e-6);
+});
+
 test("stepEnemyFire returns null when no tower in range", () => {
   const e = createEnemy("soldier", PATH);
   e.x = 0; e.y = 0;

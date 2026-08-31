@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { PATH, SOLDIER_PATH, pathPointAt, distanceToPath } from "./map.js";
+import { PATH, randomSoldierPath, pathPointAt, distanceToPath, CANVAS_HEIGHT } from "./map.js";
 
 test("PATH has at least 2 waypoints", () => {
   assert.ok(PATH.length >= 2);
@@ -28,10 +28,16 @@ test("distanceToPath returns a large distance for a point far from any segment",
   assert.ok(d > 4000);
 });
 
-test("SOLDIER_PATH has at least 2 waypoints and starts/ends near PATH's entry/exit", () => {
-  assert.ok(SOLDIER_PATH.length >= 2);
-  // both routes should enter and exit at roughly the same map edges, even
-  // though they take different ways through the middle
-  assert.ok(Math.abs(SOLDIER_PATH[0].x - PATH[0].x) < 5);
-  assert.ok(Math.abs(SOLDIER_PATH.at(-1).x - PATH.at(-1).x) < 5);
+test("randomSoldierPath enters/exits near PATH's entry/exit but wanders freely (and differently) in between", () => {
+  const a = randomSoldierPath();
+  const b = randomSoldierPath();
+  assert.ok(a.length >= 4);
+  assert.ok(Math.abs(a[0].x - PATH[0].x) < 40);
+  assert.ok(Math.abs(a.at(-1).x - PATH.at(-1).x) < 40);
+  // the interior waypoints (not the entry/exit, which jitter slightly
+  // past the edge like PATH's own entry does) stay on-canvas vertically
+  for (const p of a.slice(1, -1)) assert.ok(p.y >= 0 && p.y <= CANVAS_HEIGHT);
+  // two soldiers shouldn't get the identical route -- that's the whole point
+  const differs = a.some((p, i) => !b[i] || p.x !== b[i].x || p.y !== b[i].y);
+  assert.ok(differs);
 });

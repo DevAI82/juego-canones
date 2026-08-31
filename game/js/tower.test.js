@@ -28,6 +28,21 @@ test("findTarget returns null when nothing is in range", () => {
   assert.equal(target, null);
 });
 
+test("findTarget always prefers a tank in range over a closer non-tank, so the tank draws fire away from its escorts", () => {
+  const t = createTower("basic", 0, 0);
+  const closeBuggy = { ...fakeEnemy(10, 0), type: "buggy" };
+  const fartherTank = { ...fakeEnemy(60, 0), type: "tank" };
+  const target = findTarget(t, [closeBuggy, fartherTank]);
+  assert.equal(target, fartherTank);
+});
+
+test("findTarget still picks the nearest enemy among non-tanks, and among multiple tanks", () => {
+  const t = createTower("basic", 0, 0);
+  const nearTank = { ...fakeEnemy(20, 0), type: "tank" };
+  const farTank = { ...fakeEnemy(80, 0), type: "tank" };
+  assert.equal(findTarget(t, [farTank, nearTank]), nearTank);
+});
+
 test("stepTower fires when a target is in range and cooldown is ready", () => {
   const t = createTower("basic", 0, 0);
   t.fireTimer = 0;

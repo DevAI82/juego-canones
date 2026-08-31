@@ -42,14 +42,26 @@ export function createTower(type, x, y) {
   };
 }
 
+// Per user request, a tank in range draws a tower's fire away from
+// whatever's riding behind it (motorcycles/buggies) -- it always
+// outranks any non-tank target regardless of distance, so towers keep
+// hammering the tank instead of splitting attention to the lighter
+// escorted units. Nothing else gets elevated priority: only the tank's
+// specific role as an escort's "shield" changes targeting.
+const TARGET_PRIORITY = { tank: 2 };
+
 export function findTarget(tower, enemies) {
   let best = null;
+  let bestPriority = -Infinity;
   let bestDist = Infinity;
   for (const e of enemies) {
     if (!e.alive) continue;
     const d = Math.hypot(e.x - tower.x, e.y - tower.y);
-    if (d <= tower.range && d < bestDist) {
+    if (d > tower.range) continue;
+    const priority = TARGET_PRIORITY[e.type] || 1;
+    if (priority > bestPriority || (priority === bestPriority && d < bestDist)) {
       best = e;
+      bestPriority = priority;
       bestDist = d;
     }
   }
