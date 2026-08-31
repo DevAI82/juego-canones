@@ -74,7 +74,12 @@ export const PATH = [
 // between that level's own entry/exit points.
 const SOLDIER_MARGIN = 50; // keep waypoints off the very top/bottom edge
 
-export function randomPath(entry, exit) {
+// worldHeight defaults to the viewport's own height for every level that
+// doesn't scroll (levels 1/2, whose world IS the 1200x750 viewport).
+// Level 3's much taller scrollable world (see levels.js's worldHeight)
+// passes its own real height here so soldiers can roam its full vertical
+// extent instead of being stuck pacing within just the first 750px.
+export function randomPath(entry, exit, worldHeight = CANVAS_HEIGHT) {
   const waypointCount = 3 + Math.floor(Math.random() * 2); // 3-4 interior stops
   const points = [{ x: entry.x, y: entry.y + (Math.random() - 0.5) * 60 }];
   for (let i = 1; i <= waypointCount; i++) {
@@ -83,7 +88,7 @@ export function randomPath(entry, exit) {
       x: entry.x + (exit.x - entry.x) * t,
       // Full vertical freedom across the map, not just near the road --
       // this is what makes each soldier's route genuinely unpredictable.
-      y: SOLDIER_MARGIN + Math.random() * (CANVAS_HEIGHT - SOLDIER_MARGIN * 2),
+      y: SOLDIER_MARGIN + Math.random() * (worldHeight - SOLDIER_MARGIN * 2),
     });
   }
   points.push({ x: exit.x, y: exit.y + (Math.random() - 0.5) * 60 });
@@ -118,8 +123,13 @@ export function offsetPath(path, offset) {
   return out;
 }
 
-export function drawMap(ctx, mapImage) {
-  ctx.drawImage(mapImage, 0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+// width/height default to the viewport's own size (levels 1/2, whose map
+// image already IS exactly 1200x750). Level 3's background is shipped at
+// its own real (much larger) size instead -- see levels.js's
+// worldWidth/worldHeight and main.js's camera, which scrolls a
+// 1200x750 window over it rather than squashing the whole thing to fit.
+export function drawMap(ctx, mapImage, width = CANVAS_WIDTH, height = CANVAS_HEIGHT) {
+  ctx.drawImage(mapImage, 0, 0, width, height);
 }
 
 // Point-to-segment distance from (x, y) to the segment (x1,y1)-(x2,y2).

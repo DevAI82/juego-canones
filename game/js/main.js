@@ -117,6 +117,7 @@ function loadImage(src) {
 const mapImages = {
   1: loadImage(levelData(1).mapImage),
   2: loadImage(levelData(2).mapImage),
+  3: loadImage(levelData(3).mapImage),
 };
 const sprites = {
   tower_basic: loadImage("assets/tower_basic.png"),
@@ -152,6 +153,45 @@ let selectedTowerId = null;
 const upgradePanelEl = document.getElementById("upgrade-panel");
 let mouseX = 0;
 let mouseY = 0;
+
+// --- Camera (level 3's scrollable world) --------------------------------
+// Deliberately NOT part of simulate.js's shared state: in networked co-op
+// every connected player polls the same board, but each one should be
+// free to scroll around a big map independently -- exactly like
+// selectedBuildType/mouseX/mouseY above, this is local-only, per-tab
+// state that main.js's own render/input code reads, never sent to or
+// read from the server.
+const camera = { x: 0, y: 0 };
+
+function worldSize(level) {
+  const d = levelData(level);
+  return { w: d.worldWidth || CANVAS_WIDTH, h: d.worldHeight || CANVAS_HEIGHT };
+}
+
+// Levels 1/2's world is exactly the viewport (worldWidth/Height ==
+// CANVAS_WIDTH/HEIGHT), so w - CANVAS_WIDTH <= 0 there and this always
+// pins the camera back to (0,0) -- i.e. every scroll/pan/drag input
+// below is automatically a no-op on a non-scrollable level, with no
+// separate "is this level scrollable" branch needed anywhere else.
+function clampCamera(level) {
+  const { w, h } = worldSize(level);
+  camera.x = Math.max(0, Math.min(w - CANVAS_WIDTH, camera.x));
+  camera.y = Math.max(0, Math.min(h - CANVAS_HEIGHT, camera.y));
+}
+
+// Recenters the camera on a level's "base" (its soldierExit -- the point
+// every road ultimately leads to) whenever the current level changes
+// (first load, level-select, level transition, or a networked client
+// simply polling into a level someone else already switched to -- see
+// this being driven from loop() below by watching state.level).
+function recenterCamera(level) {
+  const d = levelData(level);
+  const anchor = d.soldierExit || { x: worldSize(level).w / 2, y: worldSize(level).h / 2 };
+  camera.x = anchor.x - CANVAS_WIDTH / 2;
+  camera.y = anchor.y - CANVAS_HEIGHT / 2;
+  clampCamera(level);
+}
+let lastCameraLevel = null;
 
 // Running clock (seconds) used only for cosmetic animation phase (the
 // enemy walking bob) -- deliberately not gameplay state.
@@ -526,6 +566,14 @@ function drawHud() {
   if (state.interWaveTimer > 0 && !state.gameOver && !state.win && !state.levelComplete) {
     ctx.fillText(`Siguiente oleada en ${Math.ceil(state.interWaveTimer)}s`, 20, 105);
   }
+  const { w: hudWorldW, h: hudWorldH } = worldSize(state.level);
+  if ((hudWorldW > CANVAS_WIDTH || hudWorldH > CANVAS_HEIGHT) && !state.gameOver && !state.win && !state.levelComplete) {
+    ctx.font = "13px sans-serif";
+    ctx.fillStyle = "rgba(255,255,255,0.65)";
+    ctx.textAlign = "right";
+    ctx.fillText("Arrastra el mapa o usa las flechas / WASD para desplazarte", CANVAS_WIDTH - 16, CANVAS_HEIGHT - 12);
+    ctx.textAlign = "left";
+  }
   if (networked) {
     ctx.font = "13px sans-serif";
     ctx.fillStyle = "#8f8";
@@ -626,6 +674,11 @@ function chooseLevel(level) {
   hideStartMenu();
   selectedTowerId = null;
   selectedBuildType = null;
+  // Forces loop()'s "state.level changed" check to re-fire even when
+  // picking the SAME level number again (e.g. replaying level 3 after a
+  // loss) -- otherwise the camera would just stay wherever it had been
+  // scrolled to last time instead of recentering on the fresh game.
+  lastCameraLevel = null;
   if (networked) {
     postAction({ type: "restart", level });
   } else {
@@ -787,23 +840,20 @@ function checkGameEnd() {
   }
 }
 
-function canvasPos(evt) {
+// Screen pixel -> WORLD coordinate (adds the camera offset) -- every
+// gameplay position (towers, enemies, build slots) lives in world space,
+// same as before the camera existed for levels 1/2 where camera is
+// always (0,0) and this is identical to the old canvas-space conversion.
+function worldPos(evt) {
   const rect = canvas.getBoundingClientRect();
   return {
-    x: ((evt.clientX - rect.left) / rect.width) * CANVAS_WIDTH,
-    y: ((evt.clientY - rect.top) / rect.height) * CANVAS_HEIGHT,
+    x: ((evt.clientX - rect.left) / rect.width) * CANVAS_WIDTH + camera.x,
+    y: ((evt.clientY - rect.top) / rect.height) * CANVAS_HEIGHT + camera.y,
   };
 }
 
-canvas.addEventListener("mousemove", (evt) => {
-  const pos = canvasPos(evt);
-  mouseX = pos.x;
-  mouseY = pos.y;
-});
-
-canvas.addEventListener("click", (evt) => {
+function handleClick(pos) {
   if (state.gameOver || state.win || state.levelComplete) return;
-  const pos = canvasPos(evt);
   if (selectedBuildType) {
     // Checked locally first (same check the ghost preview already used
     // to color itself red/green) so an invalid click gets an immediate
@@ -829,17 +879,90 @@ canvas.addEventListener("click", (evt) => {
     }
   }
   selectedTowerId = nearestTower ? nearestTower.id : null;
+}
+
+// Pointer-based (not separate mouse/touch handlers) so this works
+// identically with a mouse drag and a touch drag. A press-and-drag pans
+// the camera (per user request, "que se pueda hacer scroll arriba y
+// abajo e izquierda a derecha" for level 3's big map); a press that
+// never moves past DRAG_THRESHOLD is a plain click/tap and runs
+// handleClick() exactly as the old click listener did. On levels 1/2
+// clampCamera() pins the camera to (0,0) regardless, so a drag there
+// simply has no visual effect -- it doesn't need its own "is this level
+// scrollable" check, and a real drag gesture correctly not placing a
+// tower is the right behavior there too.
+const DRAG_THRESHOLD = 6; // screen px before a press counts as a drag, not a click
+let dragState = null; // { startClientX, startClientY, startCamX, startCamY, moved }
+
+canvas.addEventListener("pointerdown", (evt) => {
+  dragState = { startClientX: evt.clientX, startClientY: evt.clientY, startCamX: camera.x, startCamY: camera.y, moved: false };
 });
 
-window.addEventListener("keydown", (evt) => {
-  if (evt.key.toLowerCase() !== "r") return;
-  if (!state.gameOver && !state.win) return;
-  // Same as the reset button and the game-end screen's "Jugar de
-  // nuevo" -- back to the level picker rather than silently defaulting
-  // to level 1 (or, in networked mode, re-fetching the same still-ended
-  // shared state instead of actually resetting it).
-  restartToLevelSelect();
+canvas.addEventListener("pointermove", (evt) => {
+  const pos = worldPos(evt);
+  mouseX = pos.x;
+  mouseY = pos.y;
+  if (!dragState) return;
+  const dxScreen = evt.clientX - dragState.startClientX;
+  const dyScreen = evt.clientY - dragState.startClientY;
+  if (!dragState.moved && Math.hypot(dxScreen, dyScreen) < DRAG_THRESHOLD) return;
+  dragState.moved = true;
+  const rect = canvas.getBoundingClientRect();
+  const scale = CANVAS_WIDTH / rect.width; // screen px -> world px, same units mouseX/Y use
+  camera.x = dragState.startCamX - dxScreen * scale;
+  camera.y = dragState.startCamY - dyScreen * scale;
+  clampCamera(state.level);
 });
+
+window.addEventListener("pointerup", (evt) => {
+  if (!dragState) return;
+  if (!dragState.moved) handleClick(worldPos(evt));
+  dragState = null;
+});
+
+// Arrow keys / WASD pan the camera -- the keyboard equivalent of the
+// drag-to-pan above, per the same user request. Held keys are tracked
+// here and applied every frame in loop() (scaled by dt) rather than
+// stepping the camera once per keydown, so panning is smooth and speed
+// doesn't depend on OS key-repeat timing.
+const PAN_KEYS = new Set(["arrowup", "arrowdown", "arrowleft", "arrowright", "w", "a", "s", "d"]);
+const pressedPanKeys = new Set();
+const PAN_SPEED = 600; // world px/sec
+
+window.addEventListener("keydown", (evt) => {
+  const key = evt.key.toLowerCase();
+  if (key === "r") {
+    if (!state.gameOver && !state.win) return;
+    // Same as the reset button and the game-end screen's "Jugar de
+    // nuevo" -- back to the level picker rather than silently defaulting
+    // to level 1 (or, in networked mode, re-fetching the same still-ended
+    // shared state instead of actually resetting it).
+    restartToLevelSelect();
+    return;
+  }
+  if (PAN_KEYS.has(key)) pressedPanKeys.add(key);
+});
+window.addEventListener("keyup", (evt) => {
+  pressedPanKeys.delete(evt.key.toLowerCase());
+});
+
+function updateCameraFromKeys(dt) {
+  if (pressedPanKeys.size === 0) return;
+  // Don't steal arrow-key input while the player is typing their name
+  // into the end-of-game score screen.
+  if (document.activeElement === gameEndNameInput) return;
+  let dx = 0;
+  let dy = 0;
+  if (pressedPanKeys.has("arrowleft") || pressedPanKeys.has("a")) dx -= 1;
+  if (pressedPanKeys.has("arrowright") || pressedPanKeys.has("d")) dx += 1;
+  if (pressedPanKeys.has("arrowup") || pressedPanKeys.has("w")) dy -= 1;
+  if (pressedPanKeys.has("arrowdown") || pressedPanKeys.has("s")) dy += 1;
+  if (!dx && !dy) return;
+  const len = Math.hypot(dx, dy);
+  camera.x += (dx / len) * PAN_SPEED * dt;
+  camera.y += (dy / len) * PAN_SPEED * dt;
+  clampCamera(state.level);
+}
 
 // --- Networked (multiplayer) mode ---------------------------------------
 // Polls the host's /api/state every POLL_MS and replaces `state` wholesale
@@ -900,13 +1023,28 @@ function loop(now) {
   syncMusicToPause();
   checkGameEnd();
 
+  if (state.level !== lastCameraLevel) {
+    lastCameraLevel = state.level;
+    recenterCamera(state.level);
+  }
+  updateCameraFromKeys(dt);
+
   ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+  // Everything below, up to ctx.restore(), draws in WORLD space -- the
+  // translate is what turns the fixed 1200x750 canvas into a scrolled
+  // window over a level's (possibly much bigger) world. On levels 1/2
+  // camera is always (0,0) so this is a no-op translate, identical to
+  // drawing directly at canvas coordinates like before the camera existed.
+  ctx.save();
+  ctx.translate(-camera.x, -camera.y);
+
+  const { w: worldW, h: worldH } = worldSize(state.level);
   const currentMapImage = mapImages[state.level] || mapImages[1];
   if (ready(currentMapImage)) {
-    drawMap(ctx, currentMapImage);
+    drawMap(ctx, currentMapImage, worldW, worldH);
   } else {
     ctx.fillStyle = "#3a4a2f";
-    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+    ctx.fillRect(0, 0, worldW, worldH);
   }
   // Per user request: the red route line is no longer drawn for the
   // player. PATH itself is untouched -- vehicles (buggy/tank/motorcycle/
@@ -917,7 +1055,6 @@ function loop(now) {
   for (const p of state.projectiles) drawProjectile(p);
   for (const bm of state.beams) drawBeam(bm);
   for (const ex of state.explosions) drawExplosion(ex);
-  drawHud();
 
   if (selectedBuildType) {
     // A slot-based level (levels.js's buildSlots) only allows building at
@@ -954,6 +1091,9 @@ function loop(now) {
     ctx.fill();
     ctx.restore();
   }
+  ctx.restore();
+
+  drawHud();
   updateBuildMenu(buildMenuEl, { towers: state.towers, economy: state.economy, selectedType: selectedBuildType });
   const selectedTower = state.towers.find((t) => t.id === selectedTowerId) || null;
   if (selectedTowerId != null && !selectedTower) selectedTowerId = null; // sold/destroyed

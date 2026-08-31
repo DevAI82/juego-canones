@@ -62,7 +62,7 @@ function assignId(obj) {
 
 function pathForSpawn(type, level) {
   const level_ = levelData(level);
-  if (type === "soldier") return randomPath(level_.soldierEntry, level_.soldierExit);
+  if (type === "soldier") return randomPath(level_.soldierEntry, level_.soldierExit, level_.worldHeight);
   // Levels can offer more than one road (level 2's fork) -- each vehicle
   // spawn picks one at random, then gets its own lane offset within it.
   const basePath = level_.paths[Math.floor(Math.random() * level_.paths.length)];

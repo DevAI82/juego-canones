@@ -4,7 +4,7 @@
 // on whatever path array they're given, level-agnostic) and from the
 // level 1 trench's own waypoints, which stay in map.js as PATH for
 // backward compatibility with anything that imported it directly.
-import { PATH as LEVEL1_PATH } from "./map.js";
+import { PATH as LEVEL1_PATH, CANVAS_WIDTH, CANVAS_HEIGHT } from "./map.js";
 
 // Level 2's road forks: two separate approaches (one entering from the
 // upper-left ruins, one from the upper-right) that merge into a single
@@ -97,7 +97,120 @@ const LEVEL1_BUILD_SLOTS = [
   { x: 1021, y: 650 }, { x: 1113, y: 650 },
 ];
 
-export const MAX_LEVEL = 2;
+// Level 3: a large scrollable base-defense map, per user request ("un
+// mapa grande, que se pueda hacer scroll... cada carretera la pueden usar
+// los enemigos"). Unlike levels 1/2 (whose map image IS the 1200x750
+// viewport), this map ships at its own real 2048x2048 size (see
+// map_bg_level3.jpg / tools/extract_assets.py's extract_map_level3) and
+// main.js scrolls a 1200x750 camera window over it instead of squashing
+// the whole thing to fit -- see worldWidth/worldHeight below, read by
+// main.js to size that camera's scroll bounds.
+//
+// The image (AI-generated -- see the conversation for why: the user's own
+// reference images turned out to be Command & Conquer 3 game assets,
+// which aren't ours to ship) shows a walled garden compound in the
+// bottom-left corner -- that's the base -- fed by three separate roads
+// converging on it from the north, east and west, exactly matching the
+// user's ask that "cada carretera la pueden usar los enemigos" and that
+// the garden is "dónde tienen que dirigirse los enemigos". Traced by
+// overlaying a labeled pixel grid on the generated image (see the
+// conversation) and reading waypoints off it directly -- there's no
+// user-drawn reference for this level the way levels 1/2 had, so exact
+// road-pixel tracing isn't the point the way it was there; these
+// waypoints just have to read as plausible routes through the scene.
+const LEVEL3_WORLD_SIZE = 2048;
+
+// The north and east approaches both funnel through the same central
+// crossroads and then down the same final stretch into the compound's
+// north-east gate -- mirrors level 2's fork-then-shared-tail structure.
+const LEVEL3_SHARED_TAIL = [
+  { x: 1000, y: 980 },
+  { x: 900, y: 1080 },
+  { x: 800, y: 1180 },
+  { x: 720, y: 1280 },
+  { x: 620, y: 1380 },
+  { x: 520, y: 1460 },
+  { x: 430, y: 1540 },
+  { x: 400, y: 1620 },
+];
+
+const LEVEL3_NORTH_PATH = [
+  { x: 1550, y: -30 },
+  { x: 1500, y: 150 },
+  { x: 1420, y: 320 },
+  { x: 1330, y: 470 },
+  { x: 1220, y: 620 },
+  { x: 1100, y: 780 },
+  ...LEVEL3_SHARED_TAIL,
+];
+
+const LEVEL3_EAST_PATH = [
+  { x: 2090, y: 1550 },
+  { x: 1830, y: 1560 },
+  { x: 1600, y: 1500 },
+  { x: 1380, y: 1440 },
+  { x: 1150, y: 1350 },
+  { x: 950, y: 1250 },
+  ...LEVEL3_SHARED_TAIL.slice(2), // rejoins the tail at (800, 1180)
+];
+
+// Fully independent third approach, entering from the west and reaching
+// the compound's own south gate -- not a branch of the shared tail, a
+// genuinely separate road so all three stay useful throughout a wave
+// instead of two of them just being cosmetic variants of one chokepoint.
+const LEVEL3_WEST_PATH = [
+  { x: -30, y: 120 },
+  { x: 0, y: 130 },
+  { x: 120, y: 200 },
+  { x: 250, y: 270 },
+  { x: 380, y: 350 },
+  { x: 470, y: 430 },
+  { x: 350, y: 600 },
+  { x: 200, y: 800 },
+  { x: 100, y: 1000 },
+  { x: 60, y: 1300 },
+  { x: 60, y: 1600 },
+  { x: 150, y: 1850 },
+  { x: 300, y: 1930 },
+  { x: 430, y: 1900 },
+];
+
+// Generated as a staggered grid (130px spacing) across the whole
+// 2048x2048 map, kept only where it clears every road by 55px+ AND
+// doesn't land on a rooftop or the compound's moat (sampled from the
+// image's own pixel colors -- low-saturation gray/slate patches and
+// dark blue-tinted patches respectively). No hand-drawn reference exists
+// for this level the way levels 1/2 had, so this reproduces the same
+// "dense, even, road-avoiding" coverage those got by hand, automatically
+// -- see the conversation for the generation script.
+const LEVEL3_BUILD_SLOTS = [
+  { x: 40, y: 40 }, { x: 170, y: 40 }, { x: 430, y: 40 }, { x: 690, y: 40 }, { x: 820, y: 40 }, { x: 1210, y: 40 },
+  { x: 235, y: 170 }, { x: 495, y: 170 }, { x: 625, y: 170 }, { x: 1795, y: 170 }, { x: 1925, y: 170 }, { x: 40, y: 300 },
+  { x: 430, y: 300 }, { x: 560, y: 300 }, { x: 690, y: 300 }, { x: 950, y: 300 }, { x: 1080, y: 300 }, { x: 1210, y: 300 },
+  { x: 1600, y: 300 }, { x: 1990, y: 300 }, { x: 105, y: 430 }, { x: 235, y: 430 }, { x: 365, y: 430 }, { x: 625, y: 430 },
+  { x: 755, y: 430 }, { x: 885, y: 430 }, { x: 1015, y: 430 }, { x: 1275, y: 430 }, { x: 1665, y: 430 }, { x: 1795, y: 430 },
+  { x: 170, y: 560 }, { x: 300, y: 560 }, { x: 560, y: 560 }, { x: 690, y: 560 }, { x: 820, y: 560 }, { x: 1340, y: 560 },
+  { x: 1730, y: 560 }, { x: 1860, y: 560 }, { x: 1990, y: 560 }, { x: 105, y: 690 }, { x: 495, y: 690 }, { x: 625, y: 690 },
+  { x: 885, y: 690 }, { x: 1405, y: 690 }, { x: 1665, y: 690 }, { x: 1795, y: 690 }, { x: 300, y: 820 }, { x: 430, y: 820 },
+  { x: 560, y: 820 }, { x: 690, y: 820 }, { x: 820, y: 820 }, { x: 950, y: 820 }, { x: 1340, y: 820 }, { x: 1470, y: 820 },
+  { x: 1600, y: 820 }, { x: 1730, y: 820 }, { x: 235, y: 950 }, { x: 365, y: 950 }, { x: 495, y: 950 }, { x: 625, y: 950 },
+  { x: 885, y: 950 }, { x: 1275, y: 950 }, { x: 1795, y: 950 }, { x: 170, y: 1080 }, { x: 430, y: 1080 }, { x: 560, y: 1080 },
+  { x: 690, y: 1080 }, { x: 1210, y: 1080 }, { x: 1340, y: 1080 }, { x: 235, y: 1210 }, { x: 365, y: 1210 }, { x: 495, y: 1210 },
+  { x: 1015, y: 1210 }, { x: 1145, y: 1210 }, { x: 1275, y: 1210 }, { x: 1405, y: 1210 }, { x: 1535, y: 1210 }, { x: 1665, y: 1210 },
+  { x: 1795, y: 1210 }, { x: 1925, y: 1210 }, { x: 300, y: 1340 }, { x: 430, y: 1340 }, { x: 820, y: 1340 }, { x: 950, y: 1340 },
+  { x: 1470, y: 1340 }, { x: 1600, y: 1340 }, { x: 1730, y: 1340 }, { x: 1860, y: 1340 }, { x: 1990, y: 1340 }, { x: 235, y: 1470 },
+  { x: 365, y: 1470 }, { x: 625, y: 1470 }, { x: 755, y: 1470 }, { x: 885, y: 1470 }, { x: 1145, y: 1470 }, { x: 1795, y: 1470 },
+  { x: 1925, y: 1470 }, { x: 170, y: 1600 }, { x: 690, y: 1600 }, { x: 950, y: 1600 }, { x: 1080, y: 1600 }, { x: 1210, y: 1600 },
+  { x: 1730, y: 1600 }, { x: 235, y: 1730 }, { x: 365, y: 1730 }, { x: 495, y: 1730 }, { x: 625, y: 1730 }, { x: 885, y: 1730 },
+  { x: 1015, y: 1730 }, { x: 1145, y: 1730 }, { x: 1275, y: 1730 }, { x: 1535, y: 1730 }, { x: 1665, y: 1730 }, { x: 1795, y: 1730 },
+  { x: 1925, y: 1730 }, { x: 40, y: 1860 }, { x: 300, y: 1860 }, { x: 560, y: 1860 }, { x: 690, y: 1860 }, { x: 950, y: 1860 },
+  { x: 1210, y: 1860 }, { x: 1470, y: 1860 }, { x: 1600, y: 1860 }, { x: 1730, y: 1860 }, { x: 1990, y: 1860 }, { x: 105, y: 1990 },
+  { x: 235, y: 1990 }, { x: 365, y: 1990 }, { x: 495, y: 1990 }, { x: 625, y: 1990 }, { x: 755, y: 1990 }, { x: 885, y: 1990 },
+  { x: 1015, y: 1990 }, { x: 1145, y: 1990 }, { x: 1275, y: 1990 }, { x: 1535, y: 1990 }, { x: 1665, y: 1990 }, { x: 1795, y: 1990 },
+  { x: 1925, y: 1990 },
+];
+
+export const MAX_LEVEL = 3;
 
 export const LEVELS = {
   1: {
@@ -109,6 +222,13 @@ export const LEVELS = {
     soldierExit: LEVEL1_PATH.at(-1),
     mapImage: "assets/map_bg.png",
     buildSlots: LEVEL1_BUILD_SLOTS,
+    // Every level carries its own world size explicitly (rather than
+    // main.js falling back to the viewport's own CANVAS_WIDTH/HEIGHT
+    // whenever it's absent) so the camera-scroll code has one thing to
+    // read regardless of level -- here it's just the viewport itself,
+    // i.e. this level never scrolls.
+    worldWidth: CANVAS_WIDTH,
+    worldHeight: CANVAS_HEIGHT,
   },
   2: {
     paths: [LEVEL2_LEFT_PATH, LEVEL2_RIGHT_PATH],
@@ -119,6 +239,20 @@ export const LEVELS = {
     soldierExit: LEVEL2_SHARED_TAIL.at(-1),
     mapImage: "assets/map_bg_level2.png",
     buildSlots: LEVEL2_BUILD_SLOTS,
+    worldWidth: CANVAS_WIDTH,
+    worldHeight: CANVAS_HEIGHT,
+  },
+  3: {
+    paths: [LEVEL3_NORTH_PATH, LEVEL3_EAST_PATH, LEVEL3_WEST_PATH],
+    // The north branch's start and the shared tail's end (the garden's
+    // north-east gate) -- same representative-pair convention as level 2;
+    // soldiers roam the whole world regardless (see map.js's randomPath).
+    soldierEntry: LEVEL3_NORTH_PATH[0],
+    soldierExit: LEVEL3_SHARED_TAIL.at(-1),
+    mapImage: "assets/map_bg_level3.jpg",
+    buildSlots: LEVEL3_BUILD_SLOTS,
+    worldWidth: LEVEL3_WORLD_SIZE,
+    worldHeight: LEVEL3_WORLD_SIZE,
   },
 };
 

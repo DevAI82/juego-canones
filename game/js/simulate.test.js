@@ -147,6 +147,31 @@ test("placeTower on level 2 rejects a slot that's already occupied", () => {
   assert.equal(s.towers.length, 1);
 });
 
+test("placeTower on level 3 (large scrollable map) snaps to a build slot the same way as the other levels", () => {
+  const s = createGameState(3);
+  s.economy.money = 10000;
+  const slot = LEVELS[3].buildSlots[0];
+  const result = placeTower(s, "basic", slot.x + 10, slot.y - 8); // close but not exact
+  assert.equal(result.ok, true);
+  const tower = s.towers.find((t) => t.id === result.towerId);
+  assert.equal(tower.x, slot.x);
+  assert.equal(tower.y, slot.y);
+});
+
+test("level 3's world is bigger than the viewport in both dimensions (it's meant to scroll), levels 1/2 aren't", () => {
+  assert.ok(LEVELS[3].worldWidth > LEVELS[1].worldWidth);
+  assert.ok(LEVELS[3].worldHeight > LEVELS[1].worldHeight);
+  assert.equal(LEVELS[1].worldWidth, LEVELS[2].worldWidth);
+  assert.equal(LEVELS[1].worldHeight, LEVELS[2].worldHeight);
+});
+
+test("level 3 offers three separate roads, each usable by vehicle spawns", () => {
+  assert.equal(LEVELS[3].paths.length, 3);
+  for (const path of LEVELS[3].paths) {
+    assert.ok(path.length > 1);
+  }
+});
+
 test("placeTower rejects a point with no build slot nearby (e.g. on the road)", () => {
   const s = createGameState();
   const onRoad = PATH[5];

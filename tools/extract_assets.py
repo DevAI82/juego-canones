@@ -486,6 +486,24 @@ def extract_map_level2():
     out_img.save(OUT / "map_bg_level2.png")
 
 
+def extract_map_level3():
+    """Level 3's map ("mapas/mapa_nivel3_raw.png", 2048x2048, AI-generated
+    per user request for a large scrollable base-defense map) ships at its
+    full native size instead of being squashed to MAP_WIDTH x MAP_HEIGHT
+    like levels 1/2 -- the whole point of this level is a world bigger
+    than the fixed 1200x750 viewport, scrolled via game/js/main.js's
+    camera. No clone-patching needed: the generation prompt explicitly
+    excluded any baked-in text/UI/labels, so there's nothing to erase.
+    """
+    # JPEG, not PNG like levels 1/2: at this map's native 2048x2048 (4x the
+    # pixel count of the other levels' 1200x750, since it isn't downscaled
+    # to the viewport) a PNG came to ~9MB -- this photographic content
+    # compresses far better as JPEG (~1.7MB at q88, in line with the other
+    # two levels' file sizes) with no visible quality loss.
+    im = Image.open(ROOT / "mapas" / "mapa_nivel3_raw.png").convert("RGB")
+    im.save(OUT / "map_bg_level3.jpg", quality=88, optimize=True)
+
+
 def extract_armor_icon():
     """The original 3-skill upgrade panel (diseño mejoras.jpg -> ui_icon_
     damage/range/firerate.png) was cropped by hand in an earlier session
@@ -509,5 +527,6 @@ if __name__ == "__main__":
     extract_explosion()
     extract_map()
     extract_map_level2()
+    extract_map_level3()
     extract_armor_icon()
     print("Assets written to", OUT)

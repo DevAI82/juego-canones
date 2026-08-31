@@ -25,7 +25,10 @@ body {
   height: 750px;
   transform-origin: top left;
 }
-#game-canvas { display: block; background: #222; }
+/* touch-action: none stops the browser's own native touch-scroll/zoom
+   gesture from fighting the drag-to-pan camera in main.js (level 3's big
+   scrollable map) on a phone/tablet. */
+#game-canvas { display: block; background: #222; touch-action: none; }
 
 #skip-wave-btn {
   position: absolute;
@@ -442,6 +445,7 @@ body {
 }
 .start-level-btn[data-level="1"] { background-image: url(assets/map_bg.png); }
 .start-level-btn[data-level="2"] { background-image: url(assets/map_bg_level2.png); }
+.start-level-btn[data-level="3"] { background-image: url(assets/map_bg_level3.jpg); }
 .start-level-btn::before {
   content: "";
   position: absolute;
