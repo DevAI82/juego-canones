@@ -4,7 +4,7 @@
 // on whatever path array they're given, level-agnostic) and from the
 // level 1 trench's own waypoints, which stay in map.js as PATH for
 // backward compatibility with anything that imported it directly.
-import { PATH as LEVEL1_PATH, CANVAS_WIDTH, CANVAS_HEIGHT } from "./map.js";
+import { PATH as LEVEL1_PATH, CANVAS_WIDTH, CANVAS_HEIGHT, wallSegmentsWithGates } from "./map.js";
 
 // Level 2's road forks: two separate approaches (one entering from the
 // upper-left ruins, one from the upper-right) that merge into a single
@@ -120,20 +120,47 @@ const LEVEL1_BUILD_SLOTS = [
 // waypoints just have to read as plausible routes through the scene.
 const LEVEL3_WORLD_SIZE = 2048;
 
-// The north and east approaches both funnel through the same central
-// crossroads and then down the same final stretch into the compound's
-// north-east gate -- mirrors level 2's fork-then-shared-tail structure.
-const LEVEL3_SHARED_TAIL = [
-  { x: 1000, y: 980 },
-  { x: 900, y: 1080 },
-  { x: 800, y: 1180 },
-  { x: 720, y: 1280 },
-  { x: 620, y: 1380 },
-  { x: 520, y: 1460 },
-  { x: 430, y: 1540 },
-  { x: 400, y: 1620 },
+// The fortress's own wall/moat around the garden compound, per user
+// request ("la fortaleza sólo tiene 3 puertas... el resto es un muro que
+// NO se debería poder traspasar ni por soldados ni por vehículos").
+// Found by isolating the moat's dark-water pixels in the source image by
+// color and reading off its corners (see the conversation) -- a
+// rectangle with its north-east corner chamfered off, where the map art
+// shows a bridge. LEVEL3_GATES are the 3 actual stone bridges crossing
+// the moat, located the same way (zooming into the source image at each
+// suspected crossing to confirm a bridge is really there).
+// Corners found from the moat's dark-water pixels; the NE chamfer's own
+// two corners are then adjusted (originally (700, 1480)) to lie exactly
+// on the line through the actual gate bridge (635, 1367) found separately
+// by zooming into the source image -- wallSegmentsWithGates only cuts a
+// gap where a gate is genuinely ON its edge, so the corner and the gate
+// have to agree with each other, not just each independently approximate
+// the art.
+const LEVEL3_WALL_CORNERS = [
+  { x: 90, y: 1245 }, // NW
+  { x: 490, y: 1245 }, // top edge, before the NE chamfer
+  { x: 700, y: 1422 }, // after the NE chamfer
+  { x: 810, y: 1930 }, // SE
+  { x: 90, y: 1930 }, // SW
 ];
+const LEVEL3_GATE_NE = { x: 635, y: 1367 }; // bridge across the chamfered corner
+const LEVEL3_GATE_WEST = { x: 90, y: 1595 }; // bridge across the west wall
+const LEVEL3_GATE_SOUTH = { x: 470, y: 1930 }; // bridge across the south wall
+const LEVEL3_GATES = [LEVEL3_GATE_NE, LEVEL3_GATE_WEST, LEVEL3_GATE_SOUTH];
+const LEVEL3_WALL_SEGMENTS = wallSegmentsWithGates(LEVEL3_WALL_CORNERS, LEVEL3_GATES);
+const LEVEL3_WALL = { corners: LEVEL3_WALL_CORNERS, segments: LEVEL3_WALL_SEGMENTS, gates: LEVEL3_GATES };
 
+// Where every road ultimately leads once inside the wall -- the
+// courtyard in front of the central building. All 3 vehicle paths below
+// end here (each via its own gate, never cutting through solid wall);
+// soldiers' free-roamed routes are steered through a gate too, by
+// map.js's randomPath (passed LEVEL3_WALL -- see LEVELS[3] below).
+const LEVEL3_BASE_INTERIOR = { x: 430, y: 1600 };
+
+// Each of the 3 roads is now a fully independent approach ending at its
+// own real gate (no shared tail/fork the way level 2's two branches
+// merge) -- per user request that only those 3 marked crossings are
+// passable, every vehicle path has to actually go through one of them.
 const LEVEL3_NORTH_PATH = [
   { x: 1550, y: -30 },
   { x: 1500, y: 150 },
@@ -141,23 +168,29 @@ const LEVEL3_NORTH_PATH = [
   { x: 1330, y: 470 },
   { x: 1220, y: 620 },
   { x: 1100, y: 780 },
-  ...LEVEL3_SHARED_TAIL,
+  { x: 1000, y: 950 },
+  { x: 850, y: 1150 },
+  { x: 700, y: 1300 },
+  LEVEL3_GATE_NE,
+  { x: 500, y: 1480 },
+  LEVEL3_BASE_INTERIOR,
 ];
 
 const LEVEL3_EAST_PATH = [
   { x: 2090, y: 1550 },
-  { x: 1830, y: 1560 },
-  { x: 1600, y: 1500 },
-  { x: 1380, y: 1440 },
-  { x: 1150, y: 1350 },
-  { x: 950, y: 1250 },
-  ...LEVEL3_SHARED_TAIL.slice(2), // rejoins the tail at (800, 1180)
+  { x: 1830, y: 1600 },
+  { x: 1550, y: 1650 },
+  { x: 1250, y: 1750 },
+  { x: 950, y: 1850 },
+  // Stays south of y=1930 (i.e. outside/below the wall entirely) all the
+  // way up to the gate itself -- (700, 1920) here originally clipped
+  // inside the fortress before actually reaching LEVEL3_GATE_SOUTH.
+  { x: 750, y: 1975 },
+  LEVEL3_GATE_SOUTH,
+  { x: 430, y: 1750 },
+  LEVEL3_BASE_INTERIOR,
 ];
 
-// Fully independent third approach, entering from the west and reaching
-// the compound's own south gate -- not a branch of the shared tail, a
-// genuinely separate road so all three stay useful throughout a wave
-// instead of two of them just being cosmetic variants of one chokepoint.
 const LEVEL3_WEST_PATH = [
   { x: -30, y: 120 },
   { x: 0, y: 130 },
@@ -169,10 +202,10 @@ const LEVEL3_WEST_PATH = [
   { x: 200, y: 800 },
   { x: 100, y: 1000 },
   { x: 60, y: 1300 },
-  { x: 60, y: 1600 },
-  { x: 150, y: 1850 },
-  { x: 300, y: 1930 },
-  { x: 430, y: 1900 },
+  { x: 60, y: 1595 },
+  LEVEL3_GATE_WEST,
+  { x: 250, y: 1600 },
+  LEVEL3_BASE_INTERIOR,
 ];
 
 // Generated as a staggered grid (130px spacing) across the whole
@@ -244,15 +277,19 @@ export const LEVELS = {
   },
   3: {
     paths: [LEVEL3_NORTH_PATH, LEVEL3_EAST_PATH, LEVEL3_WEST_PATH],
-    // The north branch's start and the shared tail's end (the garden's
-    // north-east gate) -- same representative-pair convention as level 2;
-    // soldiers roam the whole world regardless (see map.js's randomPath).
+    // The north path's start and the shared interior target every road
+    // leads to -- soldiers roam the whole world in between (see map.js's
+    // randomPath), routed through a gate rather than the wall itself
+    // via the `wall` entry below.
     soldierEntry: LEVEL3_NORTH_PATH[0],
-    soldierExit: LEVEL3_SHARED_TAIL.at(-1),
+    soldierExit: LEVEL3_BASE_INTERIOR,
     mapImage: "assets/map_bg_level3.jpg",
     buildSlots: LEVEL3_BUILD_SLOTS,
     worldWidth: LEVEL3_WORLD_SIZE,
     worldHeight: LEVEL3_WORLD_SIZE,
+    // The fortress wall soldiers must route around -- see LEVEL3_WALL
+    // above. Levels 1/2 have no such obstacle, so they simply omit this.
+    wall: LEVEL3_WALL,
   },
 };
 

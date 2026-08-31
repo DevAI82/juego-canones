@@ -94,6 +94,24 @@ function positionTopControls(scale) {
   topControlsEl.style.right = `${Math.round(window.innerWidth - (gameLeft + scaledW) + 12)}px`;
 }
 
+// The on-screen D-pad (see wireNavButton() below), pinned near the map's
+// bottom-right corner at a fixed size for the same reason as
+// #top-controls above -- per user request ("flechas de navegación para
+// desplazarme más cómodo"). NAV_CONTROLS_SIZE must match the 3x3 grid of
+// 36px cells + 4px gaps set in style.css (2 * 36 + 2 * 4 for the two gaps
+// between three cells... i.e. 3*36 + 2*4).
+const NAV_CONTROLS_SIZE = 3 * 36 + 2 * 4;
+
+function positionNavControls(scale) {
+  const navControlsEl = document.getElementById("nav-controls");
+  const scaledW = CANVAS_WIDTH * scale;
+  const scaledH = CANVAS_HEIGHT * scale;
+  const gameLeft = (window.innerWidth - scaledW) / 2;
+  const gameTop = (window.innerHeight - scaledH) / 2;
+  navControlsEl.style.left = `${Math.round(gameLeft + scaledW - NAV_CONTROLS_SIZE - 16)}px`;
+  navControlsEl.style.top = `${Math.round(gameTop + scaledH - NAV_CONTROLS_SIZE - 16)}px`;
+}
+
 function resizeGame() {
   const scale = Math.min(window.innerWidth / CANVAS_WIDTH, window.innerHeight / CANVAS_HEIGHT);
   gameContainer.style.transform = `scale(${scale})`;
@@ -101,6 +119,7 @@ function resizeGame() {
   gameViewport.style.height = `${CANVAS_HEIGHT * scale}px`;
   positionBuildMenu(scale);
   positionTopControls(scale);
+  positionNavControls(scale);
 }
 resizeGame();
 window.addEventListener("resize", resizeGame);
@@ -163,28 +182,56 @@ let mouseY = 0;
 // read from the server.
 const camera = { x: 0, y: 0 };
 
+// How much world-space is visible at once, on top of the pan above -- per
+// user request ("zoom con el scroll del ratón"). 1 = the old fixed
+// behavior (exactly CANVAS_WIDTH x CANVAS_HEIGHT of world visible).
+let zoom = 1;
+const MAX_ZOOM = 2.2;
+
 function worldSize(level) {
   const d = levelData(level);
   return { w: d.worldWidth || CANVAS_WIDTH, h: d.worldHeight || CANVAS_HEIGHT };
 }
 
+// The zoom level at which the viewport exactly shows the level's full
+// world in whichever dimension is more constrained -- zooming out further
+// than this would reveal empty space past the world's own edge. For
+// levels 1/2 (world == viewport) this is always exactly 1, so those
+// levels simply can't zoom out at all, only in.
+function minZoomFor(level) {
+  const { w, h } = worldSize(level);
+  return Math.max(CANVAS_WIDTH / w, CANVAS_HEIGHT / h);
+}
+
+function clampZoom(level) {
+  zoom = Math.max(minZoomFor(level), Math.min(MAX_ZOOM, zoom));
+}
+
 // Levels 1/2's world is exactly the viewport (worldWidth/Height ==
-// CANVAS_WIDTH/HEIGHT), so w - CANVAS_WIDTH <= 0 there and this always
-// pins the camera back to (0,0) -- i.e. every scroll/pan/drag input
-// below is automatically a no-op on a non-scrollable level, with no
-// separate "is this level scrollable" branch needed anywhere else.
+// CANVAS_WIDTH/HEIGHT), so with zoom clamped to 1 there (see minZoomFor)
+// the visible span always equals the world size and this always pins the
+// camera back to (0,0) -- i.e. every scroll/pan/drag/zoom input below is
+// automatically a no-op on a non-scrollable level unless the player
+// zooms in, with no separate "is this level scrollable" branch needed
+// anywhere else.
 function clampCamera(level) {
   const { w, h } = worldSize(level);
-  camera.x = Math.max(0, Math.min(w - CANVAS_WIDTH, camera.x));
-  camera.y = Math.max(0, Math.min(h - CANVAS_HEIGHT, camera.y));
+  const viewW = CANVAS_WIDTH / zoom;
+  const viewH = CANVAS_HEIGHT / zoom;
+  camera.x = Math.max(0, Math.min(Math.max(0, w - viewW), camera.x));
+  camera.y = Math.max(0, Math.min(Math.max(0, h - viewH), camera.y));
 }
 
 // Recenters the camera on a level's "base" (its soldierExit -- the point
 // every road ultimately leads to) whenever the current level changes
 // (first load, level-select, level transition, or a networked client
 // simply polling into a level someone else already switched to -- see
-// this being driven from loop() below by watching state.level).
+// this being driven from loop() below by watching state.level). Also
+// resets zoom to 1, so replaying a level (or joining a fresh one) always
+// starts at the same familiar zoomed-out view rather than wherever the
+// last game had been left zoomed in to.
 function recenterCamera(level) {
+  zoom = 1;
   const d = levelData(level);
   const anchor = d.soldierExit || { x: worldSize(level).w / 2, y: worldSize(level).h / 2 };
   camera.x = anchor.x - CANVAS_WIDTH / 2;
@@ -566,14 +613,6 @@ function drawHud() {
   if (state.interWaveTimer > 0 && !state.gameOver && !state.win && !state.levelComplete) {
     ctx.fillText(`Siguiente oleada en ${Math.ceil(state.interWaveTimer)}s`, 20, 105);
   }
-  const { w: hudWorldW, h: hudWorldH } = worldSize(state.level);
-  if ((hudWorldW > CANVAS_WIDTH || hudWorldH > CANVAS_HEIGHT) && !state.gameOver && !state.win && !state.levelComplete) {
-    ctx.font = "13px sans-serif";
-    ctx.fillStyle = "rgba(255,255,255,0.65)";
-    ctx.textAlign = "right";
-    ctx.fillText("Arrastra el mapa o usa las flechas / WASD para desplazarte", CANVAS_WIDTH - 16, CANVAS_HEIGHT - 12);
-    ctx.textAlign = "left";
-  }
   if (networked) {
     ctx.font = "13px sans-serif";
     ctx.fillStyle = "#8f8";
@@ -840,15 +879,16 @@ function checkGameEnd() {
   }
 }
 
-// Screen pixel -> WORLD coordinate (adds the camera offset) -- every
-// gameplay position (towers, enemies, build slots) lives in world space,
-// same as before the camera existed for levels 1/2 where camera is
-// always (0,0) and this is identical to the old canvas-space conversion.
+// Screen pixel -> WORLD coordinate (adds the camera offset and divides
+// out the zoom) -- every gameplay position (towers, enemies, build
+// slots) lives in world space, same as before the camera/zoom existed
+// for levels 1/2 where camera is always (0,0) and zoom is always 1, so
+// this is identical to the old canvas-space conversion there.
 function worldPos(evt) {
   const rect = canvas.getBoundingClientRect();
   return {
-    x: ((evt.clientX - rect.left) / rect.width) * CANVAS_WIDTH + camera.x,
-    y: ((evt.clientY - rect.top) / rect.height) * CANVAS_HEIGHT + camera.y,
+    x: ((evt.clientX - rect.left) / rect.width) * CANVAS_WIDTH / zoom + camera.x,
+    y: ((evt.clientY - rect.top) / rect.height) * CANVAS_HEIGHT / zoom + camera.y,
   };
 }
 
@@ -908,7 +948,7 @@ canvas.addEventListener("pointermove", (evt) => {
   if (!dragState.moved && Math.hypot(dxScreen, dyScreen) < DRAG_THRESHOLD) return;
   dragState.moved = true;
   const rect = canvas.getBoundingClientRect();
-  const scale = CANVAS_WIDTH / rect.width; // screen px -> world px, same units mouseX/Y use
+  const scale = CANVAS_WIDTH / rect.width / zoom; // screen px -> world px, same units mouseX/Y use
   camera.x = dragState.startCamX - dxScreen * scale;
   camera.y = dragState.startCamY - dyScreen * scale;
   clampCamera(state.level);
@@ -919,6 +959,31 @@ window.addEventListener("pointerup", (evt) => {
   if (!dragState.moved) handleClick(worldPos(evt));
   dragState = null;
 });
+
+// Mouse-wheel zoom, per user request ("hacer zoom con el scroll del
+// ratón") -- zooms toward whatever world point is currently under the
+// cursor (same feel as Google Maps) rather than always zooming toward
+// the center, by capturing that world point with the OLD zoom, changing
+// zoom, then re-deriving the camera so that same world point still lands
+// under the cursor at the NEW zoom.
+canvas.addEventListener(
+  "wheel",
+  (evt) => {
+    evt.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    const cx = ((evt.clientX - rect.left) / rect.width) * CANVAS_WIDTH;
+    const cy = ((evt.clientY - rect.top) / rect.height) * CANVAS_HEIGHT;
+    const worldX = camera.x + cx / zoom;
+    const worldY = camera.y + cy / zoom;
+    const ZOOM_STEP = 1.15;
+    zoom *= evt.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
+    clampZoom(state.level);
+    camera.x = worldX - cx / zoom;
+    camera.y = worldY - cy / zoom;
+    clampCamera(state.level);
+  },
+  { passive: false },
+);
 
 // Arrow keys / WASD pan the camera -- the keyboard equivalent of the
 // drag-to-pan above, per the same user request. Held keys are tracked
@@ -959,10 +1024,40 @@ function updateCameraFromKeys(dt) {
   if (pressedPanKeys.has("arrowdown") || pressedPanKeys.has("s")) dy += 1;
   if (!dx && !dy) return;
   const len = Math.hypot(dx, dy);
-  camera.x += (dx / len) * PAN_SPEED * dt;
-  camera.y += (dy / len) * PAN_SPEED * dt;
+  // Divided by zoom so the pan reads at a constant ON-SCREEN speed --
+  // without this, the same world-px/sec speed would visibly speed up
+  // once zoomed in (the same world distance covers more screen pixels).
+  const speed = PAN_SPEED / zoom;
+  camera.x += (dx / len) * speed * dt;
+  camera.y += (dy / len) * speed * dt;
   clampCamera(state.level);
 }
+
+// On-screen D-pad (arrow buttons), per user request ("que haya flechas
+// de navegación para desplazarme más cómodo") -- an alternative to
+// drag-to-pan/keyboard for anyone who'd rather click/tap a button,
+// especially useful once zoomed in on a small screen where a drag
+// gesture is easy to mistake for a tap. Reuses PAN_KEYS'/
+// pressedPanKeys' own mechanism instead of a separate camera-nudging
+// path: holding a button just adds/removes the same synthetic
+// "arrowup"/etc. entries a real held key would, so updateCameraFromKeys()
+// above drives both identically.
+function wireNavButton(id, key) {
+  const btn = document.getElementById(id);
+  const press = (evt) => {
+    evt.preventDefault();
+    pressedPanKeys.add(key);
+  };
+  const release = () => pressedPanKeys.delete(key);
+  btn.addEventListener("pointerdown", press);
+  btn.addEventListener("pointerup", release);
+  btn.addEventListener("pointerleave", release);
+  btn.addEventListener("pointercancel", release);
+}
+wireNavButton("nav-up", "arrowup");
+wireNavButton("nav-down", "arrowdown");
+wireNavButton("nav-left", "arrowleft");
+wireNavButton("nav-right", "arrowright");
 
 // --- Networked (multiplayer) mode ---------------------------------------
 // Polls the host's /api/state every POLL_MS and replaces `state` wholesale
@@ -1031,11 +1126,13 @@ function loop(now) {
 
   ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
   // Everything below, up to ctx.restore(), draws in WORLD space -- the
-  // translate is what turns the fixed 1200x750 canvas into a scrolled
-  // window over a level's (possibly much bigger) world. On levels 1/2
-  // camera is always (0,0) so this is a no-op translate, identical to
-  // drawing directly at canvas coordinates like before the camera existed.
+  // scale+translate is what turns the fixed 1200x750 canvas into a
+  // scrolled, zoomed window over a level's (possibly much bigger) world.
+  // On levels 1/2 camera is always (0,0) and zoom is always 1, so this is
+  // a no-op transform, identical to drawing directly at canvas
+  // coordinates like before the camera/zoom existed.
   ctx.save();
+  ctx.scale(zoom, zoom);
   ctx.translate(-camera.x, -camera.y);
 
   const { w: worldW, h: worldH } = worldSize(state.level);

@@ -1,2 +1,13 @@
 __pycache__/
 *.pyc
+
+# Migration exclusions
+.env
+.env.*
+!.env.example
+!.env.example.*
+node_modules/
+venv/
+_browser/
+sharp-davinci/
+.DS_Store

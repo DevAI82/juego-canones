@@ -62,6 +62,33 @@ body {
 }
 #pause-btn.active { border-color: #ffd700; color: #ffd700; }
 
+/* On-screen D-pad -- same "position:fixed outside #game-container, sized/
+   positioned in JS (main.js's positionNavControls())" treatment as
+   #top-controls above. A 3x3 grid with only the 4 edge cells filled
+   (corners + center left empty) reads as a directional cross. */
+#nav-controls {
+  position: fixed;
+  display: grid;
+  grid-template-columns: 36px 36px 36px;
+  grid-template-rows: 36px 36px 36px;
+  gap: 4px;
+}
+.nav-btn {
+  font-size: 16px;
+  cursor: pointer;
+  background: #333;
+  color: #fff;
+  border: 2px solid #666;
+  border-radius: 4px;
+  touch-action: none;
+  user-select: none;
+}
+.nav-btn:active { background: #4a4a4a; border-color: #6fd8e6; }
+.nav-up { grid-column: 2; grid-row: 1; }
+.nav-left { grid-column: 1; grid-row: 2; }
+.nav-right { grid-column: 3; grid-row: 2; }
+.nav-down { grid-column: 2; grid-row: 3; }
+
 /* Positioned entirely in JS (main.js's resizeGame()/positionBuildMenu()):
    #build-menu lives outside #game-container (which has the transform:scale
    that would otherwise turn position:fixed here into "fixed relative to

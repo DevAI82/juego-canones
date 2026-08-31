@@ -59,6 +59,16 @@
       <button id="pause-btn" title="Pausar">⏸</button>
       <button id="reset-btn" title="Reiniciar partida">⟲</button>
     </div>
+    <!-- On-screen D-pad, per user request, so scrolling around a big
+         zoomed/scrolled map doesn't require a mouse drag or keyboard.
+         Same "outside #game-container, positioned in JS" reasoning as
+         #build-menu/#top-controls above. -->
+    <div id="nav-controls">
+      <button id="nav-up" class="nav-btn nav-up" title="Desplazar arriba">▲</button>
+      <button id="nav-left" class="nav-btn nav-left" title="Desplazar a la izquierda">◀</button>
+      <button id="nav-right" class="nav-btn nav-right" title="Desplazar a la derecha">▶</button>
+      <button id="nav-down" class="nav-btn nav-down" title="Desplazar abajo">▼</button>
+    </div>
   </div>
   <script type="module" src="js/main.js"></script>
 </body>

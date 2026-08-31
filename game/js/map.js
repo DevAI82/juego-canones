@@ -79,20 +79,195 @@ const SOLDIER_MARGIN = 50; // keep waypoints off the very top/bottom edge
 // Level 3's much taller scrollable world (see levels.js's worldHeight)
 // passes its own real height here so soldiers can roam its full vertical
 // extent instead of being stuck pacing within just the first 750px.
-export function randomPath(entry, exit, worldHeight = CANVAS_HEIGHT) {
+// `wall`, when given (level 3's fortress -- see levels.js), is
+// { corners, segments, gates }: `corners` is the closed polygon used to
+// test whether a point is inside the wall, `segments` is that same
+// boundary already split into solid pieces with a gap left at each gate
+// (see wallSegmentsWithGates below), and `gates` is the list of opening
+// centers. Per user request ("la fortaleza sólo tiene 3 puertas... el
+// resto es un muro que NO se debería poder traspasar ni por soldados ni
+// por vehículos") -- vehicles are handled separately, by simply routing
+// their hand-authored paths (levels.js) through a gate; soldiers get
+// their route fixed up here after the usual random-waypoint generation,
+// since they're the ones with no fixed path to design a gate into.
+export function randomPath(entry, exit, worldHeight = CANVAS_HEIGHT, wall = null) {
   const waypointCount = 3 + Math.floor(Math.random() * 2); // 3-4 interior stops
   const points = [{ x: entry.x, y: entry.y + (Math.random() - 0.5) * 60 }];
   for (let i = 1; i <= waypointCount; i++) {
     const t = i / (waypointCount + 1);
-    points.push({
+    let wp = {
       x: entry.x + (exit.x - entry.x) * t,
       // Full vertical freedom across the map, not just near the road --
       // this is what makes each soldier's route genuinely unpredictable.
       y: SOLDIER_MARGIN + Math.random() * (worldHeight - SOLDIER_MARGIN * 2),
-    });
+    };
+    if (wall) wp = pushOutsideWall(wp, wall);
+    points.push(wp);
   }
   points.push({ x: exit.x, y: exit.y + (Math.random() - 0.5) * 60 });
-  return points;
+  return wall ? routeThroughGates(points, wall) : points;
+}
+
+// Standard segment-segment intersection test (proper crossings only --
+// touching at an endpoint doesn't count, which is what lets a route END
+// exactly at a gate point without that final approach registering as a
+// "crossing" of the wall).
+function segmentsIntersect(p1, p2, p3, p4) {
+  const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  const d1 = cross(p3, p4, p1);
+  const d2 = cross(p3, p4, p2);
+  const d3 = cross(p1, p2, p3);
+  const d4 = cross(p1, p2, p4);
+  return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
+}
+
+// Standard ray-casting point-in-polygon test.
+export function pointInPolygon(pt, corners) {
+  let inside = false;
+  for (let i = 0, j = corners.length - 1; i < corners.length; j = i++) {
+    const xi = corners[i].x, yi = corners[i].y;
+    const xj = corners[j].x, yj = corners[j].y;
+    const intersect = yi > pt.y !== yj > pt.y && pt.x < ((xj - xi) * (pt.y - yi)) / (yj - yi) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+export function crossesWall(a, b, wallSegments) {
+  return wallSegments.some(([w1, w2]) => segmentsIntersect(a, b, w1, w2));
+}
+
+// Splits a closed polygon (`corners`) into solid wall segments, leaving a
+// `gateHalfWidth`-wide gap centered on each point in `gates` that lies
+// along one of its edges -- so the fortress wall (levels.js's LEVEL3_
+// WALL_CORNERS/GATES) blocks movement everywhere except those openings.
+export function wallSegmentsWithGates(corners, gates, gateHalfWidth = 26) {
+  const segments = [];
+  for (let i = 0; i < corners.length; i++) {
+    const a = corners[i];
+    const b = corners[(i + 1) % corners.length];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len = Math.hypot(dx, dy);
+    const ux = dx / len;
+    const uy = dy / len;
+    // Gates that fall on THIS edge (within a few px of the line, and
+    // between its endpoints), as a distance-along-the-edge `t`.
+    const onEdge = gates
+      .map((g) => ({ t: (g.x - a.x) * ux + (g.y - a.y) * uy, g }))
+      .filter(({ t, g }) => {
+        if (t < 0 || t > len) return false;
+        const px = a.x + ux * t;
+        const py = a.y + uy * t;
+        return Math.hypot(g.x - px, g.y - py) < 20;
+      })
+      .sort((p, q) => p.t - q.t);
+    let cursor = 0;
+    for (const { t } of onEdge) {
+      const gapStart = Math.max(cursor, t - gateHalfWidth);
+      if (gapStart > cursor) {
+        segments.push([
+          { x: a.x + ux * cursor, y: a.y + uy * cursor },
+          { x: a.x + ux * gapStart, y: a.y + uy * gapStart },
+        ]);
+      }
+      cursor = Math.min(len, t + gateHalfWidth);
+    }
+    if (cursor < len) {
+      segments.push([{ x: a.x + ux * cursor, y: a.y + uy * cursor }, b]);
+    }
+  }
+  return segments;
+}
+
+// Pushes a point straight out from the wall polygon's centroid until it
+// clears it -- used to keep a soldier's randomly-rolled waypoint from
+// spawning INSIDE the fortress out of nowhere (the only point allowed to
+// be inside is the final destination itself, routed through a gate
+// separately by routeThroughGates below).
+function pushOutsideWall(pt, wall) {
+  if (!pointInPolygon(pt, wall.corners)) return pt;
+  const cx = wall.corners.reduce((s, c) => s + c.x, 0) / wall.corners.length;
+  const cy = wall.corners.reduce((s, c) => s + c.y, 0) / wall.corners.length;
+  const dx = pt.x - cx || 1;
+  const dy = pt.y - cy || 1;
+  const len = Math.hypot(dx, dy);
+  let out = { x: pt.x, y: pt.y };
+  for (let step = 0; step < 40 && pointInPolygon(out, wall.corners); step++) {
+    out = { x: out.x + (dx / len) * 20, y: out.y + (dy / len) * 20 };
+  }
+  return out;
+}
+
+function nearestPoint(candidates, pt) {
+  let best = candidates[0];
+  let bestDist = Infinity;
+  for (const c of candidates) {
+    const d = Math.hypot(c.x - pt.x, c.y - pt.y);
+    if (d < bestDist) {
+      bestDist = d;
+      best = c;
+    }
+  }
+  return best;
+}
+
+// A point just outside `corner`, pushed radially away from the wall
+// polygon's own centroid so it clears the wall by `clearance` px instead
+// of sitting exactly on it.
+function pushFromCentroid(corner, wall, clearance) {
+  const cx = wall.corners.reduce((s, c) => s + c.x, 0) / wall.corners.length;
+  const cy = wall.corners.reduce((s, c) => s + c.y, 0) / wall.corners.length;
+  const dx = corner.x - cx || 1;
+  const dy = corner.y - cy || 1;
+  const len = Math.hypot(dx, dy);
+  return { x: corner.x + (dx / len) * clearance, y: corner.y + (dy / len) * clearance };
+}
+
+// Walks the waypoint list and, wherever a straight hop between two
+// consecutive points would cut through solid wall, detours it: through
+// whichever gate is nearest, for the final hop into the actual
+// destination (which is deliberately inside the wall -- see levels.js's
+// LEVEL3_BASE_INTERIOR); around the nearest WALL CORNER otherwise, for a
+// hop between two points that both belong outside it -- going through a
+// gate there wouldn't make sense, that would walk the soldier into the
+// fortress interior just to immediately walk back out, for a hop that
+// was never headed there in the first place. Not real pathfinding --
+// just enough to turn "soldiers ignore the wall entirely" into "soldiers
+// funnel through one of the 3 marked gates, and go around it everywhere
+// else", which is what was actually asked for.
+//
+// Re-checks after each detour (up to a few tries) since a single corner
+// isn't always enough to fully clear a long hop that clips more than one
+// edge -- each retry excludes corners already tried (otherwise a detour
+// point sitting close to its own corner can end up picking that SAME
+// corner again next time round, going nowhere) and pushes out a bit
+// further than the last attempt.
+function routeThroughGates(points, wall) {
+  const out = [points[0]];
+  const finalIndex = points.length - 1;
+  for (let i = 1; i < points.length; i++) {
+    const isFinal = i === finalIndex;
+    let a = out[out.length - 1];
+    const b = points[i];
+    const triedCorners = [];
+    for (let attempt = 0; attempt < 4 && crossesWall(a, b, wall.segments); attempt++) {
+      const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      let via;
+      if (isFinal) {
+        via = nearestPoint(wall.gates, mid);
+      } else {
+        const remaining = wall.corners.filter((c) => !triedCorners.includes(c));
+        const corner = nearestPoint(remaining.length ? remaining : wall.corners, mid);
+        triedCorners.push(corner);
+        via = pushFromCentroid(corner, wall, 40 + attempt * 25);
+      }
+      out.push(via);
+      a = via;
+    }
+    out.push(b);
+  }
+  return out;
 }
 
 export function pathPointAt(path, index) {
