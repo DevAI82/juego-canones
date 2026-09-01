@@ -224,48 +224,53 @@ function pushFromCentroid(corner, wall, clearance) {
   return { x: corner.x + (dx / len) * clearance, y: corner.y + (dy / len) * clearance };
 }
 
-// Walks the waypoint list and, wherever a straight hop between two
-// consecutive points would cut through solid wall, detours it: through
-// whichever gate is nearest, for the final hop into the actual
-// destination (which is deliberately inside the wall -- see levels.js's
-// LEVEL3_BASE_INTERIOR); around the nearest WALL CORNER otherwise, for a
-// hop between two points that both belong outside it -- going through a
-// gate there wouldn't make sense, that would walk the soldier into the
-// fortress interior just to immediately walk back out, for a hop that
-// was never headed there in the first place. Not real pathfinding --
-// just enough to turn "soldiers ignore the wall entirely" into "soldiers
-// funnel through one of the 3 marked gates, and go around it everywhere
-// else", which is what was actually asked for.
-//
-// Re-checks after each detour (up to a few tries) since a single corner
-// isn't always enough to fully clear a long hop that clips more than one
-// edge -- each retry excludes corners already tried (otherwise a detour
-// point sitting close to its own corner can end up picking that SAME
-// corner again next time round, going nowhere) and pushes out a bit
-// further than the last attempt.
+// Resolves one hop (a -> b) so no piece of it crosses solid wall: if it
+// doesn't cross at all, it's returned as-is; otherwise it's split via a
+// detour point -- through whichever gate is nearest, if `isFinal` (this
+// hop ends at the actual destination, deliberately inside the wall --
+// see levels.js's LEVEL3_BASE_INTERIOR); around the nearest WALL CORNER
+// otherwise, for a hop between two points that both belong outside it
+// (going through a gate there wouldn't make sense -- that would walk the
+// soldier into the fortress interior just to immediately walk back out,
+// for a hop that was never headed there in the first place) -- and BOTH
+// resulting halves are recursively resolved the same way, since a single
+// detour point isn't always itself fully clear of the wall (it can take
+// another hop or two to actually get around a corner it's still close
+// to). `excludeCorners` carries forward the corners already tried on
+// this hop's ancestor calls so a nested split doesn't re-pick the same
+// one and go nowhere; `depth` just bounds the recursion.
+function resolveHop(a, b, wall, isFinal, excludeCorners, depth) {
+  if (depth > 5 || !crossesWall(a, b, wall.segments)) return [a, b];
+  const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  let via;
+  let nextExclude = excludeCorners;
+  if (isFinal) {
+    via = nearestPoint(wall.gates, mid);
+  } else {
+    const remaining = wall.corners.filter((c) => !excludeCorners.includes(c));
+    const corner = nearestPoint(remaining.length ? remaining : wall.corners, mid);
+    nextExclude = [...excludeCorners, corner];
+    via = pushFromCentroid(corner, wall, 40 + depth * 25);
+  }
+  // The "a -> via" half is never itself the final approach into the
+  // interior (via sits ON the boundary, not inside it) -- only the
+  // "via -> b" half can still be the true final leg.
+  const left = resolveHop(a, via, wall, false, nextExclude, depth + 1);
+  const right = resolveHop(via, b, wall, isFinal, nextExclude, depth + 1);
+  return [...left, ...right.slice(1)]; // `via` ends `left` and starts `right` -- don't duplicate it
+}
+
+// Walks the waypoint list and resolves each hop between consecutive
+// points via resolveHop above. Not real pathfinding -- just enough to
+// turn "soldiers ignore the wall entirely" into "soldiers funnel through
+// one of the 3 marked gates, and go around it everywhere else", which is
+// what was actually asked for.
 function routeThroughGates(points, wall) {
   const out = [points[0]];
   const finalIndex = points.length - 1;
   for (let i = 1; i < points.length; i++) {
-    const isFinal = i === finalIndex;
-    let a = out[out.length - 1];
-    const b = points[i];
-    const triedCorners = [];
-    for (let attempt = 0; attempt < 4 && crossesWall(a, b, wall.segments); attempt++) {
-      const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-      let via;
-      if (isFinal) {
-        via = nearestPoint(wall.gates, mid);
-      } else {
-        const remaining = wall.corners.filter((c) => !triedCorners.includes(c));
-        const corner = nearestPoint(remaining.length ? remaining : wall.corners, mid);
-        triedCorners.push(corner);
-        via = pushFromCentroid(corner, wall, 40 + attempt * 25);
-      }
-      out.push(via);
-      a = via;
-    }
-    out.push(b);
+    const chain = resolveHop(out[out.length - 1], points[i], wall, i === finalIndex, [], 0);
+    out.push(...chain.slice(1));
   }
   return out;
 }
