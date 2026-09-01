@@ -1,6 +1,6 @@
 import { CANVAS_WIDTH, CANVAS_HEIGHT, drawMap } from "./map.js";
 import { WAVES } from "./waves.js";
-import { TOWER_TYPES } from "./tower.js";
+import { TOWER_TYPES, BUILD_DURATION } from "./tower.js";
 import { initBuildMenu, updateBuildMenu, initUpgradePanel, updateUpgradePanel, renderGameEndScreen, renderRanking } from "./ui.js";
 import {
   createGameState,
@@ -142,6 +142,7 @@ const sprites = {
   tower_basic: loadImage("assets/tower_basic.png"),
   tower_double: loadImage("assets/tower_double.png"),
   tower_laser: loadImage("assets/tower_laser.png"),
+  tower_basic_build: loadImage("assets/tower_basic_build.png"),
   enemy_soldier: loadImage("assets/enemy_soldier.png"),
   enemy_buggy: loadImage("assets/enemy_buggy.png"),
   enemy_tank: loadImage("assets/enemy_tank.png"),
@@ -150,6 +151,22 @@ const sprites = {
   explosion: loadImage("assets/explosion.png"),
   projectile: loadImage("assets/projectile.png"),
 };
+
+// tower_basic_build.png is a 6x5 grid of 30 frames (see tools/extract_
+// assets.py's extract_tower_basic_build) -- these must match its actual
+// layout. Only the basic tower has its own build animation; double/laser
+// still take BUILD_DURATION to finish (tower.js) but just fade in (see
+// drawTower's fallback below) since there's no footage for them.
+const BUILD_ANIM_COLS = 6;
+const BUILD_ANIM_ROWS = 5;
+const BUILD_ANIM_FRAME_COUNT = BUILD_ANIM_COLS * BUILD_ANIM_ROWS;
+// The last stretch of the build (in fraction-of-BUILD_DURATION terms)
+// crossfades from the animation's final frame into the tower's real
+// static sprite, so the switch reads as the effect settling rather than
+// a hard pop the instant construction finishes -- the animation's own
+// final frames (a fully assembled, but not identical, turret model)
+// don't pixel-match tower_basic.png, so a hard cut would be visible.
+const BUILD_CROSSFADE_FRACTION = 0.18;
 
 function ready(img) {
   return img.complete && img.naturalWidth > 0;
@@ -398,15 +415,77 @@ function drawEnemy(e) {
   ctx.fillRect(e.x - w / 2, e.y - 20, w * pct, 4);
 }
 
-function drawTower(t) {
-  const img = sprites[`tower_${t.type}`];
-  const levelSum = t.level.damage + t.level.range + t.level.fireRate;
+// Renders a tower that's still under construction (t.buildTimeRemaining
+// > 0): the basic tower plays its build-animation sheet (see the
+// BUILD_ANIM_* constants and tools/extract_assets.py's
+// extract_tower_basic_build), crossfading into the real static sprite
+// over the final BUILD_CROSSFADE_FRACTION of the build; every other type
+// has no footage to work with, so it just fades its own real sprite in
+// instead of popping in instantly. Either way, a progress bar takes the
+// place of the hp/ammo bars until construction finishes -- per user
+// request, so deploying a tower visibly takes effort rather than being
+// free.
+function drawTowerBuilding(t) {
+  const progress = 1 - t.buildTimeRemaining / BUILD_DURATION; // 0 -> 1
+  const crossfadeStart = 1 - BUILD_CROSSFADE_FRACTION;
+  const sheet = sprites.tower_basic_build;
 
-  // A dark platform under every tower keeps it visible regardless of
-  // terrain color -- the turret sprites and the grass/dirt map share
-  // similar olive/earth tones, so without this a tower can be hard to
-  // spot at a glance (this is why every real TD game gives towers a base
-  // pad instead of relying on the terrain to contrast on its own).
+  if (t.type === "basic" && ready(sheet)) {
+    const frameIndex = Math.min(BUILD_ANIM_FRAME_COUNT - 1, Math.floor(progress * BUILD_ANIM_FRAME_COUNT));
+    const col = frameIndex % BUILD_ANIM_COLS;
+    const row = Math.floor(frameIndex / BUILD_ANIM_COLS);
+    const fw = sheet.naturalWidth / BUILD_ANIM_COLS;
+    const fh = sheet.naturalHeight / BUILD_ANIM_ROWS;
+    // Bigger than the resting 68px-tall sprite: the animation's build
+    // ring/platform effect reads as spilling out past the turret itself.
+    const drawH = 110;
+    const drawW = drawH * (fw / fh);
+    const animAlpha = progress >= crossfadeStart ? 1 - (progress - crossfadeStart) / BUILD_CROSSFADE_FRACTION : 1;
+    ctx.save();
+    ctx.globalAlpha = animAlpha;
+    ctx.drawImage(sheet, col * fw, row * fh, fw, fh, t.x - drawW / 2, t.y - drawH / 2, drawW, drawH);
+    ctx.restore();
+
+    if (progress >= crossfadeStart) {
+      const img = sprites[`tower_${t.type}`];
+      if (ready(img)) {
+        const h = 68;
+        const w = h * (img.naturalWidth / img.naturalHeight);
+        ctx.save();
+        ctx.globalAlpha = (progress - crossfadeStart) / BUILD_CROSSFADE_FRACTION;
+        ctx.drawImage(img, t.x - w / 2, t.y - h / 2, w, h);
+        ctx.restore();
+      }
+    }
+  } else {
+    const img = sprites[`tower_${t.type}`];
+    ctx.save();
+    ctx.globalAlpha = Math.max(0.15, progress);
+    if (ready(img)) {
+      const h = 68;
+      const w = h * (img.naturalWidth / img.naturalHeight);
+      ctx.drawImage(img, t.x - w / 2, t.y - h / 2, w, h);
+    } else {
+      ctx.fillStyle = t.type === "laser" ? "#8a6a3a" : "#888";
+      ctx.fillRect(t.x - 14, t.y - 10, 28, 20);
+    }
+    ctx.restore();
+  }
+
+  const barW = 54;
+  ctx.fillStyle = "#223";
+  ctx.fillRect(t.x - barW / 2, t.y - 46, barW, 6);
+  ctx.fillStyle = "#ffd700";
+  ctx.fillRect(t.x - barW / 2, t.y - 46, barW * progress, 6);
+}
+
+function drawTower(t) {
+  // A dark platform under every tower (building or combat-ready) keeps
+  // it visible regardless of terrain color -- the turret sprites and the
+  // grass/dirt map share similar olive/earth tones, so without this a
+  // tower can be hard to spot at a glance (this is why every real TD
+  // game gives towers a base pad instead of relying on the terrain to
+  // contrast on its own).
   ctx.save();
   ctx.fillStyle = "rgba(20,22,18,0.75)";
   ctx.beginPath();
@@ -417,39 +496,58 @@ function drawTower(t) {
   ctx.stroke();
   ctx.restore();
 
-  ctx.save();
-  ctx.translate(t.x, t.y);
-  ctx.rotate(t.angle);
-  if (levelSum > 0) {
-    ctx.save();
-    ctx.globalAlpha = Math.min(0.15 + levelSum * 0.06, 0.6);
-    ctx.fillStyle = "#ffd700";
-    ctx.beginPath();
-    ctx.arc(0, 0, 52, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-  }
-  if (ready(img)) {
-    // Draw at the sprite's real aspect ratio instead of squashing every
-    // turret into a fixed square -- the laser turret crop alone is ~3.8:1.
-    // (Doubled from the original 34px per user feedback that towers read
-    // too small against the map.)
-    const h = 68;
-    const w = h * (img.naturalWidth / img.naturalHeight);
-    ctx.drawImage(img, -w / 2, -h / 2, w, h);
-    const damagePct = 1 - t.hp / t.maxHp;
-    if (damagePct > 0) {
-      ctx.globalAlpha = damagePct * 0.6;
-      ctx.fillStyle = "#000";
-      ctx.fillRect(-w / 2, -h / 2, w, h);
-      ctx.globalAlpha = 1;
-    }
+  if (t.buildTimeRemaining > 0) {
+    drawTowerBuilding(t);
   } else {
-    ctx.fillStyle = t.type === "laser" ? "#8a6a3a" : t.type === "double" ? "#888" : "#6b7a4a";
-    ctx.fillRect(-14, -10, 28, 20);
-    ctx.fillRect(0, -3, 22, 6);
+    const img = sprites[`tower_${t.type}`];
+    const levelSum = t.level.damage + t.level.range + t.level.fireRate;
+    ctx.save();
+    ctx.translate(t.x, t.y);
+    ctx.rotate(t.angle);
+    if (levelSum > 0) {
+      ctx.save();
+      ctx.globalAlpha = Math.min(0.15 + levelSum * 0.06, 0.6);
+      ctx.fillStyle = "#ffd700";
+      ctx.beginPath();
+      ctx.arc(0, 0, 52, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+    if (ready(img)) {
+      // Draw at the sprite's real aspect ratio instead of squashing every
+      // turret into a fixed square -- the laser turret crop alone is ~3.8:1.
+      // (Doubled from the original 34px per user feedback that towers read
+      // too small against the map.)
+      const h = 68;
+      const w = h * (img.naturalWidth / img.naturalHeight);
+      ctx.drawImage(img, -w / 2, -h / 2, w, h);
+      const damagePct = 1 - t.hp / t.maxHp;
+      if (damagePct > 0) {
+        ctx.globalAlpha = damagePct * 0.6;
+        ctx.fillStyle = "#000";
+        ctx.fillRect(-w / 2, -h / 2, w, h);
+        ctx.globalAlpha = 1;
+      }
+    } else {
+      ctx.fillStyle = t.type === "laser" ? "#8a6a3a" : t.type === "double" ? "#888" : "#6b7a4a";
+      ctx.fillRect(-14, -10, 28, 20);
+      ctx.fillRect(0, -3, 22, 6);
+    }
+    ctx.restore();
+
+    const w = 54;
+    const pct = t.hp / t.maxHp;
+    ctx.fillStyle = "#400";
+    ctx.fillRect(t.x - w / 2, t.y - 46, w, 5);
+    ctx.fillStyle = "#3c3";
+    ctx.fillRect(t.x - w / 2, t.y - 46, w * pct, 5);
+
+    const ammoPct = t.ammo / t.maxAmmo;
+    ctx.fillStyle = "#225";
+    ctx.fillRect(t.x - w / 2, t.y - 38, w, 4);
+    ctx.fillStyle = "#5af";
+    ctx.fillRect(t.x - w / 2, t.y - 38, w * ammoPct, 4);
   }
-  ctx.restore();
 
   if (t.id === selectedTowerId) {
     ctx.save();
@@ -459,19 +557,6 @@ function drawTower(t) {
     ctx.stroke();
     ctx.restore();
   }
-
-  const w = 54;
-  const pct = t.hp / t.maxHp;
-  ctx.fillStyle = "#400";
-  ctx.fillRect(t.x - w / 2, t.y - 46, w, 5);
-  ctx.fillStyle = "#3c3";
-  ctx.fillRect(t.x - w / 2, t.y - 46, w * pct, 5);
-
-  const ammoPct = t.ammo / t.maxAmmo;
-  ctx.fillStyle = "#225";
-  ctx.fillRect(t.x - w / 2, t.y - 38, w, 4);
-  ctx.fillStyle = "#5af";
-  ctx.fillRect(t.x - w / 2, t.y - 38, w * ammoPct, 4);
 }
 
 function drawExplosion(ex) {

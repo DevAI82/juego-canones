@@ -17,6 +17,15 @@ export const TOWER_TYPES = {
   laser: { cost: 160, damage: 35, range: 220, fireRate: 1.2, maxAmmo: 20, reloadTime: 5, maxCount: 2, hp: 100, projectilesPerShot: 1, armor: 1 },
 };
 
+// How long a freshly-placed tower spends "under construction" before it
+// can target/fire, per user request for a Command & Conquer/Dune
+// 2000-style build effect that visibly takes effort to deploy rather
+// than appearing instantly. Only the basic tower has its own build
+// animation today (game/assets/tower_basic_build.png -- see main.js),
+// but the delay itself applies to every type so double/laser aren't
+// placed "for free" faster than basic while they still just fade in.
+export const BUILD_DURATION = 3.5;
+
 export function createTower(type, x, y) {
   const def = TOWER_TYPES[type];
   return {
@@ -39,6 +48,7 @@ export function createTower(type, x, y) {
     target: null,
     armorMult: def.armor,
     level: { damage: 0, range: 0, fireRate: 0, armor: 0 },
+    buildTimeRemaining: BUILD_DURATION,
   };
 }
 
@@ -70,6 +80,14 @@ export function findTarget(tower, enemies) {
 
 export function stepTower(tower, enemies, dt) {
   if (tower.hp <= 0) return null;
+
+  // Under construction -- can be damaged/destroyed like any other tower
+  // (matches how a half-built structure works in the games this is
+  // modeled on), but doesn't target or fire until it finishes.
+  if (tower.buildTimeRemaining > 0) {
+    tower.buildTimeRemaining = Math.max(0, tower.buildTimeRemaining - dt);
+    return null;
+  }
 
   if (tower.reloading) {
     tower.reloadTimer -= dt;

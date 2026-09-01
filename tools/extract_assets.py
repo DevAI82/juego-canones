@@ -504,6 +504,87 @@ def extract_map_level3():
     im.save(OUT / "map_bg_level3.jpg", quality=88, optimize=True)
 
 
+def extract_tower_basic_build():
+    """Build-up animation sprite sheet for the basic tower, per user
+    request to give placing a tower a brief Command & Conquer / Dune
+    2000-style "materializing" effect instead of it just appearing
+    instantly. Source is a 10s/24fps cinematic 3D render
+    (animaciones/animación torreta simple.mp4) of the turret assembling
+    on a busy ruined-city street -- a full live-action-style scene, not a
+    transparent sprite, so the street/traffic has to be keyed out.
+
+    The keying trick: the camera is locked the whole clip, and the
+    street is essentially still (just road/buildings) in frame 0, before
+    anything starts appearing -- diffing every later frame against frame
+    0 isolates "what's new" (the holographic build platform, the turret,
+    its smoke/sparks). A flat color-distance threshold alone still let
+    through shadow drift and passing cars anywhere in frame (one produced
+    a visible ghost blob), so the result is further restricted to
+    whichever alpha region is connected to a seed patch at the crop's
+    center -- the turret always sits there, so it survives, while any
+    unconnected car/shadow blob elsewhere in frame gets dropped even
+    though it individually crossed the diff threshold.
+
+    30 frames sampled evenly across the full clip (so the whole assembly
+    sequence -- platform, sparks, smoke, final turret -- plays, per user
+    request for the "completo/cinematográfico" pacing option), downscaled
+    and packed into a 6x5 grid sheet (see game/js/main.js's BUILD_ANIM_*
+    constants, which must match COLS/ROWS/frame size below).
+    """
+    import cv2
+
+    src = ROOT / "animaciones" / "animación torreta simple.mp4"
+    cap = cv2.VideoCapture(str(src))
+    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+    def read_frame(idx):
+        cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+        ok, frame_bgr = cap.read()
+        if not ok:
+            raise RuntimeError(f"couldn't read frame {idx}")
+        return np.array(Image.fromarray(frame_bgr[:, :, ::-1]))  # BGR -> RGB
+
+    CROP = (150, 120, 950, 660)  # x0, y0, x1, y1, in source frame coords
+    N, COLS, ROWS = 30, 6, 5
+    FRAME_W, FRAME_H = 260, 176
+
+    bg = read_frame(0).astype(int)
+    bg_crop = bg[CROP[1]:CROP[3], CROP[0]:CROP[2]]
+    h, w = bg_crop.shape[:2]
+    cy, cx = h // 2, w // 2
+
+    def key_frame(idx):
+        im = read_frame(idx).astype(int)
+        crop = im[CROP[1]:CROP[3], CROP[0]:CROP[2]]
+        diff = np.abs(crop - bg_crop).sum(axis=2)
+
+        low, high = 70, 170
+        alpha = np.clip((diff - low) / (high - low), 0, 1)
+
+        mask = alpha > 0.05
+        if mask.any():
+            labeled, _ = ndimage.label(mask, structure=np.ones((3, 3), dtype=bool))
+            seed_r = 90
+            seed_labels = set(labeled[cy - seed_r:cy + seed_r, cx - seed_r:cx + seed_r].flatten().tolist())
+            seed_labels.discard(0)
+            alpha = np.where(np.isin(labeled, list(seed_labels)), alpha, 0.0) if seed_labels else np.zeros_like(alpha)
+
+        alpha_u8 = (alpha * 255).astype(np.uint8)
+        rgb = crop.astype(np.uint8).copy()
+        rgb[alpha_u8 == 0] = 0
+        out = Image.fromarray(np.dstack([rgb, alpha_u8]), mode="RGBA")
+        return out.resize((FRAME_W, FRAME_H), Image.Resampling.LANCZOS)
+
+    indices = [round(i * (total - 1) / (N - 1)) for i in range(N)]
+    sheet = Image.new("RGBA", (FRAME_W * COLS, FRAME_H * ROWS), (0, 0, 0, 0))
+    for i, idx in enumerate(indices):
+        frame = key_frame(idx)
+        sheet.paste(frame, ((i % COLS) * FRAME_W, (i // COLS) * FRAME_H), frame)
+    cap.release()
+
+    sheet.save(OUT / "tower_basic_build.png")
+
+
 def extract_armor_icon():
     """The original 3-skill upgrade panel (diseño mejoras.jpg -> ui_icon_
     damage/range/firerate.png) was cropped by hand in an earlier session
@@ -528,5 +609,6 @@ if __name__ == "__main__":
     extract_map()
     extract_map_level2()
     extract_map_level3()
+    extract_tower_basic_build()
     extract_armor_icon()
     print("Assets written to", OUT)
