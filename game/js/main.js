@@ -152,21 +152,28 @@ const sprites = {
   projectile: loadImage("assets/projectile.png"),
 };
 
-// tower_basic_build.png is a 6x5 grid of 30 frames (see tools/extract_
+// tower_basic_build.png is an 8x8 grid of 64 frames (see tools/extract_
 // assets.py's extract_tower_basic_build) -- these must match its actual
 // layout. Only the basic tower has its own build animation; double/laser
 // still take BUILD_DURATION to finish (tower.js) but just fade in (see
 // drawTower's fallback below) since there's no footage for them.
-const BUILD_ANIM_COLS = 6;
-const BUILD_ANIM_ROWS = 5;
+//
+// This sheet's own frames already have a build-progress percentage bar
+// composited into them (per user request, using a second purpose-made
+// animation instead of the first video-sourced one, which didn't have
+// one) -- so unlike the fallback path, drawTowerBuilding does NOT also
+// draw its own progress bar over this tower type; that would double up.
+const BUILD_ANIM_COLS = 8;
+const BUILD_ANIM_ROWS = 8;
 const BUILD_ANIM_FRAME_COUNT = BUILD_ANIM_COLS * BUILD_ANIM_ROWS;
 // The last stretch of the build (in fraction-of-BUILD_DURATION terms)
 // crossfades from the animation's final frame into the tower's real
 // static sprite, so the switch reads as the effect settling rather than
-// a hard pop the instant construction finishes -- the animation's own
-// final frames (a fully assembled, but not identical, turret model)
-// don't pixel-match tower_basic.png, so a hard cut would be visible.
-const BUILD_CROSSFADE_FRACTION = 0.18;
+// a hard pop the instant construction finishes. tower_basic.png is now
+// sourced from this same animation's own last frame (extract_tower_basic
+// in tools/extract_assets.py), so this crossfade is mainly just settling
+// the hologram glow/progress-bar UI out, not a model swap.
+const BUILD_CROSSFADE_FRACTION = 0.1;
 
 function ready(img) {
   return img.complete && img.naturalWidth > 0;
@@ -421,10 +428,11 @@ function drawEnemy(e) {
 // extract_tower_basic_build), crossfading into the real static sprite
 // over the final BUILD_CROSSFADE_FRACTION of the build; every other type
 // has no footage to work with, so it just fades its own real sprite in
-// instead of popping in instantly. Either way, a progress bar takes the
-// place of the hp/ammo bars until construction finishes -- per user
-// request, so deploying a tower visibly takes effort rather than being
-// free.
+// instead of popping in instantly, with an hp/ammo-bar-replacing
+// progress bar main.js draws itself. The basic tower's animation frames
+// already have their OWN progress-percentage bar baked in (per user
+// request, from a second purpose-made source with one included), so
+// that fallback bar is skipped there -- drawing both would double up.
 function drawTowerBuilding(t) {
   const progress = 1 - t.buildTimeRemaining / BUILD_DURATION; // 0 -> 1
   const crossfadeStart = 1 - BUILD_CROSSFADE_FRACTION;
@@ -436,14 +444,16 @@ function drawTowerBuilding(t) {
     const row = Math.floor(frameIndex / BUILD_ANIM_COLS);
     const fw = sheet.naturalWidth / BUILD_ANIM_COLS;
     const fh = sheet.naturalHeight / BUILD_ANIM_ROWS;
-    // Bigger than the resting 68px-tall sprite: the animation's build
-    // ring/platform effect reads as spilling out past the turret itself.
-    const drawH = 110;
+    // Bigger than the resting 68px-tall sprite: the frame includes both
+    // the build platform (wider than the turret itself) and, below it,
+    // the baked-in progress bar, so the turret alone reads at roughly
+    // the same size as the resting sprite once this whole frame fits.
+    const drawH = 128;
     const drawW = drawH * (fw / fh);
     const animAlpha = progress >= crossfadeStart ? 1 - (progress - crossfadeStart) / BUILD_CROSSFADE_FRACTION : 1;
     ctx.save();
     ctx.globalAlpha = animAlpha;
-    ctx.drawImage(sheet, col * fw, row * fh, fw, fh, t.x - drawW / 2, t.y - drawH / 2, drawW, drawH);
+    ctx.drawImage(sheet, col * fw, row * fh, fw, fh, t.x - drawW / 2, t.y - drawH / 2 + 10, drawW, drawH);
     ctx.restore();
 
     if (progress >= crossfadeStart) {
@@ -457,20 +467,21 @@ function drawTowerBuilding(t) {
         ctx.restore();
       }
     }
-  } else {
-    const img = sprites[`tower_${t.type}`];
-    ctx.save();
-    ctx.globalAlpha = Math.max(0.15, progress);
-    if (ready(img)) {
-      const h = 68;
-      const w = h * (img.naturalWidth / img.naturalHeight);
-      ctx.drawImage(img, t.x - w / 2, t.y - h / 2, w, h);
-    } else {
-      ctx.fillStyle = t.type === "laser" ? "#8a6a3a" : "#888";
-      ctx.fillRect(t.x - 14, t.y - 10, 28, 20);
-    }
-    ctx.restore();
+    return;
   }
+
+  const img = sprites[`tower_${t.type}`];
+  ctx.save();
+  ctx.globalAlpha = Math.max(0.15, progress);
+  if (ready(img)) {
+    const h = 68;
+    const w = h * (img.naturalWidth / img.naturalHeight);
+    ctx.drawImage(img, t.x - w / 2, t.y - h / 2, w, h);
+  } else {
+    ctx.fillStyle = t.type === "laser" ? "#8a6a3a" : "#888";
+    ctx.fillRect(t.x - 14, t.y - 10, 28, 20);
+  }
+  ctx.restore();
 
   const barW = 54;
   ctx.fillStyle = "#223";

@@ -20,11 +20,15 @@ export const TOWER_TYPES = {
 // How long a freshly-placed tower spends "under construction" before it
 // can target/fire, per user request for a Command & Conquer/Dune
 // 2000-style build effect that visibly takes effort to deploy rather
-// than appearing instantly. Only the basic tower has its own build
-// animation today (game/assets/tower_basic_build.png -- see main.js),
-// but the delay itself applies to every type so double/laser aren't
-// placed "for free" faster than basic while they still just fade in.
-export const BUILD_DURATION = 3.5;
+// than appearing instantly. Matches the basic tower's build-animation
+// GIF's own native runtime (4s/64 frames -- see main.js and tools/
+// extract_assets.py's extract_tower_basic_build) exactly, so the
+// percentage the animation's own baked-in progress bar shows stays in
+// sync with real elapsed build time. Only the basic tower has its own
+// build animation today, but the delay itself applies to every type so
+// double/laser aren't placed "for free" faster than basic while they
+// still just fade in (see main.js's drawTowerBuilding).
+export const BUILD_DURATION = 4;
 
 export function createTower(type, x, y) {
   const def = TOWER_TYPES[type];

@@ -184,7 +184,8 @@ def extract_towers():
     """
     sources = {
         # (filename stem, barrel direction in the source image)
-        "tower_basic": ("torre simple", "down"),
+        # tower_basic isn't sourced here any more -- see extract_tower_basic(),
+        # which matches it to the build-animation video's own turret model.
         "tower_double": ("torre doble", "up"),
         "tower_laser": ("torre laser", "up"),
     }
@@ -504,32 +505,22 @@ def extract_map_level3():
     im.save(OUT / "map_bg_level3.jpg", quality=88, optimize=True)
 
 
-def extract_tower_basic_build():
-    """Build-up animation sprite sheet for the basic tower, per user
-    request to give placing a tower a brief Command & Conquer / Dune
-    2000-style "materializing" effect instead of it just appearing
-    instantly. Source is a 10s/24fps cinematic 3D render
-    (animaciones/animación torreta simple.mp4) of the turret assembling
-    on a busy ruined-city street -- a full live-action-style scene, not a
-    transparent sprite, so the street/traffic has to be keyed out.
+def extract_tower_basic():
+    """The basic tower's resting sprite, per user follow-up request ("el
+    último fotograma quiero que sea el diseño final de la torreta...
+    debemos cambiar también la imagen de la torreta para que esté acorde
+    con el video") -- the turret model shown once construction finishes
+    (see extract_tower_basic_build below) now has to MATCH this sprite,
+    not the differently-styled one tower_basic.png used before (that one
+    came from a separate photoshoot, diseño torres/torre simple.jpg; see
+    extract_towers, which no longer sources "basic" from there).
 
-    The keying trick: the camera is locked the whole clip, and the
-    street is essentially still (just road/buildings) in frame 0, before
-    anything starts appearing -- diffing every later frame against frame
-    0 isolates "what's new" (the holographic build platform, the turret,
-    its smoke/sparks). A flat color-distance threshold alone still let
-    through shadow drift and passing cars anywhere in frame (one produced
-    a visible ghost blob), so the result is further restricted to
-    whichever alpha region is connected to a seed patch at the crop's
-    center -- the turret always sits there, so it survives, while any
-    unconnected car/shadow blob elsewhere in frame gets dropped even
-    though it individually crossed the diff threshold.
-
-    30 frames sampled evenly across the full clip (so the whole assembly
-    sequence -- platform, sparks, smoke, final turret -- plays, per user
-    request for the "completo/cinematográfico" pacing option), downscaled
-    and packed into a 6x5 grid sheet (see game/js/main.js's BUILD_ANIM_*
-    constants, which must match COLS/ROWS/frame size below).
+    Rather than re-key the user's own exported "fotograma final" stills
+    (different, unknown crop from the source video, so there's no
+    matching "before" plate to diff against), this reuses the exact same
+    clean-plate keying extract_tower_basic_build() uses on the video's
+    OWN last frame -- guaranteed pixel-perfect same model/pose as the
+    animation's own final frame, which is the whole point.
     """
     import cv2
 
@@ -542,45 +533,124 @@ def extract_tower_basic_build():
         ok, frame_bgr = cap.read()
         if not ok:
             raise RuntimeError(f"couldn't read frame {idx}")
-        return np.array(Image.fromarray(frame_bgr[:, :, ::-1]))  # BGR -> RGB
+        return np.array(Image.fromarray(frame_bgr[:, :, ::-1]))
 
-    CROP = (150, 120, 950, 660)  # x0, y0, x1, y1, in source frame coords
-    N, COLS, ROWS = 30, 6, 5
-    FRAME_W, FRAME_H = 260, 176
-
+    CROP = (150, 120, 950, 660)
     bg = read_frame(0).astype(int)
     bg_crop = bg[CROP[1]:CROP[3], CROP[0]:CROP[2]]
     h, w = bg_crop.shape[:2]
     cy, cx = h // 2, w // 2
 
-    def key_frame(idx):
-        im = read_frame(idx).astype(int)
-        crop = im[CROP[1]:CROP[3], CROP[0]:CROP[2]]
-        diff = np.abs(crop - bg_crop).sum(axis=2)
+    im = read_frame(total - 1).astype(int)
+    crop = im[CROP[1]:CROP[3], CROP[0]:CROP[2]]
+    diff = np.abs(crop - bg_crop).sum(axis=2)
+    low, high = 70, 170
+    alpha = np.clip((diff - low) / (high - low), 0, 1)
+    mask = alpha > 0.05
+    if mask.any():
+        labeled, _ = ndimage.label(mask, structure=np.ones((3, 3), dtype=bool))
+        seed_r = 90
+        seed_labels = set(labeled[cy - seed_r:cy + seed_r, cx - seed_r:cx + seed_r].flatten().tolist())
+        seed_labels.discard(0)
+        alpha = np.where(np.isin(labeled, list(seed_labels)), alpha, 0.0) if seed_labels else np.zeros_like(alpha)
+    cap.release()
 
-        low, high = 70, 170
-        alpha = np.clip((diff - low) / (high - low), 0, 1)
+    alpha_u8 = (alpha * 255).astype(np.uint8)
+    rgb = crop.astype(np.uint8).copy()
+    rgb[alpha_u8 == 0] = 0
+    keyed = Image.fromarray(np.dstack([rgb, alpha_u8]), mode="RGBA")
+
+    # Source barrel points left; the game's rotation convention is
+    # angle=0 -> barrel points +x (right), same reasoning as extract_towers().
+    rotated = keyed.rotate(180, expand=True)
+    trimmed = rotated.crop(rotated.getbbox())
+    downscale(trimmed).save(OUT / "tower_basic.png")
+
+
+def extract_tower_basic_build():
+    """Build-up animation sprite sheet for the basic tower, per user
+    request to give placing a tower a brief Command & Conquer / Dune
+    2000-style "materializing" effect instead of it just appearing
+    instantly, and per their follow-up request to use a second, purpose-
+    made animation with its own baked-in progress-percentage UI instead
+    of the first (video) attempt (see game/js/main.js: the code no longer
+    draws its own progress bar over this tower type, since this source
+    already has one).
+
+    Source is animaciones/Torreta Simple/torreta simple gif.gif, 480x270
+    /64 frames/4s -- a live-action-style render (same turret model/scene
+    as the original build video) with a UI progress bar composited in,
+    not a transparent sprite, so the street still has to be keyed out.
+
+    Unlike the original video, this GIF has no genuinely empty "before"
+    frame to diff against (frame 0 already shows the 0%-complete
+    hologram) -- frame 0 is used as the reference anyway, since the
+    hologram there is a thin, mostly-see-through wireframe that still
+    reveals most of the underlying street, and every later frame differs
+    from it far more than frame-0-vs-itself ever could. Cleaned up with:
+    - a stricter low/high diff threshold than the video needed (this
+      source's road texture carries more compression speckle),
+    - a binary-opening/closing pass to kill small isolated noise flecks
+      before labeling (a flat threshold alone still left visible speckle
+      once composited over real game terrain),
+    - connected-component filtering seeded from TWO regions (the turret/
+      platform, and the progress-bar UI) rather than one, since the bar
+      sits a few pixels below the platform and isn't always
+      pixel-connected to it.
+
+    All 64 frames are kept (no resampling down, unlike the video's 240 ->
+    30 -- this source is already a sparser, purpose-built sequence) and
+    packed into an 8x8 grid sheet (see game/js/main.js's BUILD_ANIM_*
+    constants, which must match COLS/ROWS/frame size below).
+    """
+    src = ROOT / "animaciones" / "Torreta Simple" / "torreta simple gif.gif"
+    gif = Image.open(src)
+    total = gif.n_frames
+
+    gif.seek(0)
+    bg = np.array(gif.convert("RGB")).astype(int)
+
+    # y, x slices, in the GIF's own 480x270 frame -- the platform/turret
+    # (roughly centered, a bit above frame-center) and the progress bar
+    # (fixed near the bottom), see the docstring above.
+    SEED_TURRET = (slice(20, 230), slice(10, 470))
+    SEED_BAR = (slice(200, 260), slice(110, 370))
+    LOW, HIGH, OPEN_ITERS = 70, 150, 2
+    COLS, ROWS = 8, 8
+    FRAME_W, FRAME_H = 240, 135
+
+    def key_frame(idx):
+        gif.seek(idx)
+        im = np.array(gif.convert("RGB")).astype(int)
+        diff = np.abs(im - bg).sum(axis=2)
+        alpha = np.clip((diff - LOW) / (HIGH - LOW), 0, 1)
+
+        hard = diff > LOW
+        opened = ndimage.binary_opening(hard, structure=np.ones((3, 3), dtype=bool), iterations=OPEN_ITERS)
+        # Opening erodes the true edge along with the noise -- grow it
+        # back out, but only into pixels that were already above the raw
+        # threshold, so this restores the real boundary without
+        # re-admitting the pruned speckle.
+        opened = ndimage.binary_dilation(opened, structure=np.ones((3, 3), dtype=bool), iterations=OPEN_ITERS) & hard
+        alpha = np.where(opened, alpha, 0.0)
 
         mask = alpha > 0.05
         if mask.any():
             labeled, _ = ndimage.label(mask, structure=np.ones((3, 3), dtype=bool))
-            seed_r = 90
-            seed_labels = set(labeled[cy - seed_r:cy + seed_r, cx - seed_r:cx + seed_r].flatten().tolist())
+            seed_labels = set(labeled[SEED_TURRET].flatten().tolist()) | set(labeled[SEED_BAR].flatten().tolist())
             seed_labels.discard(0)
             alpha = np.where(np.isin(labeled, list(seed_labels)), alpha, 0.0) if seed_labels else np.zeros_like(alpha)
 
         alpha_u8 = (alpha * 255).astype(np.uint8)
-        rgb = crop.astype(np.uint8).copy()
+        rgb = im.astype(np.uint8).copy()
         rgb[alpha_u8 == 0] = 0
         out = Image.fromarray(np.dstack([rgb, alpha_u8]), mode="RGBA")
         return out.resize((FRAME_W, FRAME_H), Image.Resampling.LANCZOS)
 
-    indices = [round(i * (total - 1) / (N - 1)) for i in range(N)]
     sheet = Image.new("RGBA", (FRAME_W * COLS, FRAME_H * ROWS), (0, 0, 0, 0))
-    for i, idx in enumerate(indices):
-        frame = key_frame(idx)
+    for i in range(total):
+        frame = key_frame(i)
         sheet.paste(frame, ((i % COLS) * FRAME_W, (i // COLS) * FRAME_H), frame)
-    cap.release()
 
     sheet.save(OUT / "tower_basic_build.png")
 
@@ -609,6 +679,7 @@ if __name__ == "__main__":
     extract_map()
     extract_map_level2()
     extract_map_level3()
+    extract_tower_basic()
     extract_tower_basic_build()
     extract_armor_icon()
     print("Assets written to", OUT)
