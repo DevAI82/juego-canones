@@ -165,6 +165,18 @@ const LEVEL3_BASE_INTERIOR = { x: 430, y: 1600 };
 // red road traces in "mapas/mapa nivel 3 carreteras.png". Vehicles strictly
 // follow these road centerlines and never cross buildings, fields, or walls.
 // Every route enters the defended fortress through one of its 3 stone bridge gates:
+//
+// The last stretch before each gate was re-traced against the map art so
+// every road meets its bridge head-on, square to the wall: the traces ran
+// alongside the moat into the bridge (and the north road's even dipped
+// inside the wall just before it), so vehicles in the outer lanes -- and
+// any rounding the corner into the bridge -- cut across solid wall. The
+// two north-east roads now meet on the paved square in front of their
+// bridge (LEVEL3_NE_APPROACH), the south-east one follows the dirt track
+// along the moat to the south bridge, and the north-west one keeps to its
+// track down the moat's west side instead of grazing the fortress corner.
+const LEVEL3_NE_APPROACH = { x: 674, y: 1321 };
+
 // 1. North Main Highway -> Gate NE (strictly bypasses building via west street)
 export const LEVEL3_NORTH_MAIN_PATH = [
   { x: 512, y: -30 },
@@ -180,8 +192,8 @@ export const LEVEL3_NORTH_MAIN_PATH = [
   { x: 468, y: 1161 },
   { x: 532, y: 1176 },
   { x: 575, y: 1220 },
-  { x: 570, y: 1300 },
-  { x: 595, y: 1345 },
+  { x: 620, y: 1282 },
+  LEVEL3_NE_APPROACH,
   LEVEL3_GATE_NE,
   { x: 500, y: 1480 },
   LEVEL3_BASE_INTERIOR,
@@ -200,9 +212,7 @@ export const LEVEL3_NORTHEAST_PATH = [
   { x: 1047, y: 995 },
   { x: 857, y: 1228 },
   { x: 785, y: 1280 },
-  { x: 790, y: 1360 },
-  { x: 760, y: 1410 },
-  { x: 685, y: 1400 },
+  LEVEL3_NE_APPROACH,
   LEVEL3_GATE_NE,
   { x: 500, y: 1480 },
   LEVEL3_BASE_INTERIOR,
@@ -217,6 +227,7 @@ export const LEVEL3_NORTHWEST_PATH = [
   { x: 197, y: 378 },
   { x: 81, y: 605 },
   { x: 100, y: 1016 },
+  { x: 48, y: 1230 },
   { x: 47, y: 1594 },
   LEVEL3_GATE_WEST,
   { x: 250, y: 1600 },
@@ -237,6 +248,7 @@ export const LEVEL3_SOUTHEAST_PATH = [
   { x: 860, y: 1935 },
   { x: 843, y: 1982 },
   { x: 683, y: 2006 },
+  { x: 478, y: 1992 },
   LEVEL3_GATE_SOUTH,
   { x: 430, y: 1750 },
   LEVEL3_BASE_INTERIOR,

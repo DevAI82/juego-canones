@@ -180,21 +180,36 @@ export function wallSegmentsWithGates(corners, gates, gateHalfWidth = 26) {
   return segments;
 }
 
-// Pushes a point straight out from the wall polygon's centroid until it
-// clears it -- used to keep a soldier's randomly-rolled waypoint from
-// spawning INSIDE the fortress out of nowhere (the only point allowed to
-// be inside is the final destination itself, routed through a gate
-// separately by routeThroughGates below).
+// How far a soldier's free-roaming waypoints keep from the wall. A point
+// rolled just outside it used to be kept as-is -- a route could then run
+// a few px from the wall, close enough that a soldier rounding the corner
+// there (enemy.js steers smoothly instead of snapping onto each segment)
+// clipped through it.
+const WALL_CLEARANCE = 24;
+
+function tooCloseToWall(pt, wall) {
+  if (pointInPolygon(pt, wall.corners)) return true;
+  return wall.corners.some((a, i) => {
+    const b = wall.corners[(i + 1) % wall.corners.length];
+    return distToSegment(pt.x, pt.y, a.x, a.y, b.x, b.y) < WALL_CLEARANCE;
+  });
+}
+
+// Pushes a point straight out from the wall polygon's centroid until it's
+// clear of it by WALL_CLEARANCE -- used to keep a soldier's randomly-rolled
+// waypoint from landing inside the fortress (the only point allowed to be
+// inside is the final destination itself, routed through a gate
+// separately by routeThroughGates below) or right up against it.
 function pushOutsideWall(pt, wall) {
-  if (!pointInPolygon(pt, wall.corners)) return pt;
+  if (!tooCloseToWall(pt, wall)) return pt;
   const cx = wall.corners.reduce((s, c) => s + c.x, 0) / wall.corners.length;
   const cy = wall.corners.reduce((s, c) => s + c.y, 0) / wall.corners.length;
   const dx = pt.x - cx || 1;
   const dy = pt.y - cy || 1;
   const len = Math.hypot(dx, dy);
   let out = { x: pt.x, y: pt.y };
-  for (let step = 0; step < 40 && pointInPolygon(out, wall.corners); step++) {
-    out = { x: out.x + (dx / len) * 20, y: out.y + (dy / len) * 20 };
+  for (let step = 0; step < 60 && tooCloseToWall(out, wall); step++) {
+    out = { x: out.x + (dx / len) * 10, y: out.y + (dy / len) * 10 };
   }
   return out;
 }
@@ -212,6 +227,38 @@ function nearestPoint(candidates, pt) {
   return best;
 }
 
+// The point GATE_APPROACH px straight out from `gate`, square to the wall
+// edge it sits on -- routes go through it on the way in, so the last leg
+// crosses the wall head-on through the gap. Heading for the gate from
+// wherever the route happened to be could instead run along the wall face
+// itself (one did, exactly on the line of the NE chamfer), and a soldier
+// rounding the corner onto that leg cut through the wall.
+const GATE_APPROACH = 45;
+
+function gateApproachPoint(gate, wall) {
+  let edge = null;
+  let edgeDist = Infinity;
+  wall.corners.forEach((a, i) => {
+    const b = wall.corners[(i + 1) % wall.corners.length];
+    const d = distToSegment(gate.x, gate.y, a.x, a.y, b.x, b.y);
+    if (d < edgeDist) {
+      edgeDist = d;
+      edge = [a, b];
+    }
+  });
+  const [a, b] = edge;
+  const len = Math.hypot(b.x - a.x, b.y - a.y);
+  let nx = -(b.y - a.y) / len;
+  let ny = (b.x - a.x) / len;
+  const cx = wall.corners.reduce((s, c) => s + c.x, 0) / wall.corners.length;
+  const cy = wall.corners.reduce((s, c) => s + c.y, 0) / wall.corners.length;
+  if ((gate.x - cx) * nx + (gate.y - cy) * ny < 0) {
+    nx = -nx;
+    ny = -ny;
+  }
+  return { x: gate.x + nx * GATE_APPROACH, y: gate.y + ny * GATE_APPROACH };
+}
+
 // A point just outside `corner`, pushed radially away from the wall
 // polygon's own centroid so it clears the wall by `clearance` px instead
 // of sitting exactly on it.
@@ -226,9 +273,10 @@ function pushFromCentroid(corner, wall, clearance) {
 
 // Resolves one hop (a -> b) so no piece of it crosses solid wall: if it
 // doesn't cross at all, it's returned as-is; otherwise it's split via a
-// detour point -- through whichever gate is nearest, if `isFinal` (this
-// hop ends at the actual destination, deliberately inside the wall --
-// see levels.js's LEVEL3_BASE_INTERIOR); around the nearest WALL CORNER
+// detour point -- through whichever gate is nearest, lined up square to
+// it first (gateApproachPoint), if `isFinal` (this hop ends at the actual
+// destination, deliberately inside the wall -- see levels.js's
+// LEVEL3_BASE_INTERIOR); around the nearest WALL CORNER
 // otherwise, for a hop between two points that both belong outside it
 // (going through a gate there wouldn't make sense -- that would walk the
 // soldier into the fortress interior just to immediately walk back out,
@@ -242,21 +290,20 @@ function pushFromCentroid(corner, wall, clearance) {
 function resolveHop(a, b, wall, isFinal, excludeCorners, depth) {
   if (depth > 5 || !crossesWall(a, b, wall.segments)) return [a, b];
   const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-  let via;
-  let nextExclude = excludeCorners;
   if (isFinal) {
-    via = nearestPoint(wall.gates, mid);
-  } else {
-    const remaining = wall.corners.filter((c) => !excludeCorners.includes(c));
-    const corner = nearestPoint(remaining.length ? remaining : wall.corners, mid);
-    nextExclude = [...excludeCorners, corner];
-    via = pushFromCentroid(corner, wall, 40 + depth * 25);
+    // The approach point is outside the wall, so only the gate -> b leg is
+    // still the final one into the interior.
+    const gate = nearestPoint(wall.gates, mid);
+    const left = resolveHop(a, gateApproachPoint(gate, wall), wall, false, excludeCorners, depth + 1);
+    const right = resolveHop(gate, b, wall, true, excludeCorners, depth + 1);
+    return [...left, ...right];
   }
-  // The "a -> via" half is never itself the final approach into the
-  // interior (via sits ON the boundary, not inside it) -- only the
-  // "via -> b" half can still be the true final leg.
+  const remaining = wall.corners.filter((c) => !excludeCorners.includes(c));
+  const corner = nearestPoint(remaining.length ? remaining : wall.corners, mid);
+  const nextExclude = [...excludeCorners, corner];
+  const via = pushFromCentroid(corner, wall, 40 + depth * 25);
   const left = resolveHop(a, via, wall, false, nextExclude, depth + 1);
-  const right = resolveHop(via, b, wall, isFinal, nextExclude, depth + 1);
+  const right = resolveHop(via, b, wall, false, nextExclude, depth + 1);
   return [...left, ...right.slice(1)]; // `via` ends `left` and starts `right` -- don't duplicate it
 }
 
@@ -286,7 +333,15 @@ export function pathPointAt(path, index) {
 // exact same centerline and stacking on top of each other -- per user
 // request, so the road reads as something with real width, not a thin
 // wire everyone rides single-file.
-export function offsetPath(path, offset) {
+//
+// `pinchAt` (level 3's gates): the lanes narrow toward the road's middle
+// within PINCH_RADIUS of each of these points, so vehicles in the outer
+// lanes squeeze through a gate's bridge instead of clipping the wall on
+// either side of it.
+const PINCH_RADIUS = 90;
+const PINCH_MIN = 0.25;
+
+export function offsetPath(path, offset, pinchAt = []) {
   if (offset === 0) return path;
   const out = [];
   for (let i = 0; i < path.length; i++) {
@@ -298,7 +353,9 @@ export function offsetPath(path, offset) {
     // Rotate the local direction 90 degrees to get the perpendicular.
     const px = -dy / len;
     const py = dx / len;
-    out.push({ x: path[i].x + px * offset, y: path[i].y + py * offset });
+    let k = 1;
+    for (const g of pinchAt) k = Math.min(k, Math.max(PINCH_MIN, Math.hypot(path[i].x - g.x, path[i].y - g.y) / PINCH_RADIUS));
+    out.push({ x: path[i].x + px * offset * k, y: path[i].y + py * offset * k });
   }
   return out;
 }
@@ -313,7 +370,7 @@ export function drawMap(ctx, mapImage, width = CANVAS_WIDTH, height = CANVAS_HEI
 }
 
 // Point-to-segment distance from (x, y) to the segment (x1,y1)-(x2,y2).
-function distToSegment(x, y, x1, y1, x2, y2) {
+export function distToSegment(x, y, x1, y1, x2, y2) {
   const dx = x2 - x1;
   const dy = y2 - y1;
   const lenSq = dx * dx + dy * dy;

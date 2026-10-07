@@ -80,7 +80,8 @@ function pathForSpawn(item, state) {
   }
   const pathIndex = item.pathIndex ?? chooseRoute(level_.paths, state.towers);
   const laneOffset = (Math.random() * 2 - 1) * VEHICLE_LANE_HALF_WIDTH;
-  return { path: offsetPath(level_.paths[pathIndex], laneOffset), pathIndex };
+  const gates = level_.wall ? level_.wall.gates : [];
+  return { path: offsetPath(level_.paths[pathIndex], laneOffset, gates), pathIndex };
 }
 
 // Nudges any two alive enemies closer than ENEMY_SEPARATION_DIST directly
@@ -258,10 +259,11 @@ export function stepSimulation(state, dt) {
   }
   trySpawn(state);
 
-  const { worldWidth, worldHeight } = levelData(state.level);
+  const { worldWidth, worldHeight, wall } = levelData(state.level);
+  const narrow = wall ? wall.gates : [];
   for (const e of state.enemies) {
-    if (holdsForSiege(e, state.towers, dt, worldWidth, worldHeight)) continue;
-    const { reachedEnd } = stepEnemy(e, dt);
+    const hold = holdsForSiege(e, state.towers, dt, worldWidth, worldHeight);
+    const { reachedEnd } = stepEnemy(e, dt, state.enemies, hold, narrow);
     if (reachedEnd) {
       e.alive = false;
       if (loseLife(state.economy, e.damage)) state.gameOver = true;
