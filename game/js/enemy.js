@@ -7,17 +7,13 @@ import { lerpAngle } from "./util.js";
 const TURN_RATE = 9;
 
 export const ENEMY_TYPES = {
-  soldier: { hp: 40, speed: 55, damage: 1, bounty: 8, fireRange: 90, fireDamage: 2, fireCooldown: 1.2 },
-  buggy: { hp: 25, speed: 95, damage: 1, bounty: 10, fireRange: 100, fireDamage: 2, fireCooldown: 1.0 },
-  tank: { hp: 120, speed: 30, damage: 2, bounty: 20, fireRange: 120, fireDamage: 5, fireCooldown: 2.0 },
-  // Vehicle, confined to PATH like buggy/tank. Faster and weaker than the
-  // buggy -- a glass cannon that closes distance fast but drops in a
-  // couple of hits.
-  motorcycle: { hp: 15, speed: 135, damage: 1, bounty: 9, fireRange: 90, fireDamage: 2, fireCooldown: 0.9 },
-  // Vehicle. Lighter/less armored than the tank but outranges and
-  // out-damages it -- a fire-support unit rather than a brawler, so it's
-  // worth killing at range before it gets to sit back and pepper towers.
-  rocket: { hp: 70, speed: 35, damage: 2, bounty: 25, fireRange: 170, fireDamage: 9, fireCooldown: 2.2 },
+  soldier: { hp: 40, speed: 50, damage: 1, bounty: 8, fireRange: 90, fireDamage: 2, fireCooldown: 1.2 },
+  buggy: { hp: 30, speed: 62, damage: 1, bounty: 10, fireRange: 110, fireDamage: 2, fireCooldown: 1.0 },
+  tank: { hp: 120, speed: 32, damage: 2, bounty: 20, fireRange: 130, fireDamage: 5, fireCooldown: 2.0 },
+  // Vehicle, fast escort unit that stays coordinated with the armored convoy.
+  motorcycle: { hp: 18, speed: 78, damage: 1, bounty: 9, fireRange: 95, fireDamage: 2, fireCooldown: 0.9 },
+  // Heavy rocket artillery truck. Range matches laser tower max range (220 base up to ~345 at max wave level)
+  rocket: { hp: 75, speed: 34, damage: 2, bounty: 25, fireRange: 220, fireDamage: 10, fireCooldown: 2.4 },
 };
 
 // Per user request, the tank and rocket launcher aren't static threats --
@@ -29,7 +25,7 @@ export const ENEMY_TYPES = {
 const WAVES_PER_LEVEL = 7;
 const MAX_PROGRESSIVE_LEVEL = 5;
 const TANK_ARMOR_MULT_PER_LEVEL = 0.85; // damage-taken multiplier, mirrors tower armor
-const ROCKET_RANGE_MULT_PER_LEVEL = 1.2; // mirrors tower range
+const ROCKET_RANGE_MULT_PER_LEVEL = 1.09; // Scales 220 base up to ~340 at level 5, equivalent to max laser tower range (345)
 
 function progressiveLevel(waveIndex) {
   return Math.min(MAX_PROGRESSIVE_LEVEL, Math.floor(waveIndex / WAVES_PER_LEVEL));

@@ -1,7 +1,7 @@
 import { CANVAS_WIDTH, CANVAS_HEIGHT, drawMap } from "./map.js";
 import { WAVES } from "./waves.js";
 import { TOWER_TYPES, BUILD_DURATION } from "./tower.js";
-import { initBuildMenu, updateBuildMenu, initUpgradePanel, updateUpgradePanel, renderGameEndScreen, renderRanking } from "./ui.js";
+import { initBuildMenu, updateBuildMenu, initUpgradePanel, updateUpgradePanel, renderGameEndScreen, renderRanking, renderStatsModal } from "./ui.js";
 import {
   createGameState,
   startNextLevel,
@@ -143,6 +143,8 @@ const sprites = {
   tower_double: loadImage("assets/tower_double.png"),
   tower_laser: loadImage("assets/tower_laser.png"),
   tower_basic_build: loadImage("assets/tower_basic_build.png"),
+  tower_double_build: loadImage("assets/tower_double_build.png"),
+  tower_laser_build: loadImage("assets/tower_laser_build.png"),
   enemy_soldier: loadImage("assets/enemy_soldier.png"),
   enemy_buggy: loadImage("assets/enemy_buggy.png"),
   enemy_tank: loadImage("assets/enemy_tank.png"),
@@ -152,27 +154,11 @@ const sprites = {
   projectile: loadImage("assets/projectile.png"),
 };
 
-// tower_basic_build.png is an 8x8 grid of 64 frames (see tools/extract_
-// assets.py's extract_tower_basic_build) -- these must match its actual
-// layout. Only the basic tower has its own build animation; double/laser
-// still take BUILD_DURATION to finish (tower.js) but just fade in (see
-// drawTower's fallback below) since there's no footage for them.
-//
-// This sheet's own frames already have a build-progress percentage bar
-// composited into them (per user request, using a second purpose-made
-// animation instead of the first video-sourced one, which didn't have
-// one) -- so unlike the fallback path, drawTowerBuilding does NOT also
-// draw its own progress bar over this tower type; that would double up.
-const BUILD_ANIM_COLS = 8;
-const BUILD_ANIM_ROWS = 8;
+// Build animation sheets are 6x5 grids of 30 frames (see tools/extract_all_turrets.py)
+// extracted from the 720p 4-second videos for basic, double, and laser turrets.
+const BUILD_ANIM_COLS = 6;
+const BUILD_ANIM_ROWS = 5;
 const BUILD_ANIM_FRAME_COUNT = BUILD_ANIM_COLS * BUILD_ANIM_ROWS;
-// The last stretch of the build (in fraction-of-BUILD_DURATION terms)
-// crossfades from the animation's final frame into the tower's real
-// static sprite, so the switch reads as the effect settling rather than
-// a hard pop the instant construction finishes. tower_basic.png is now
-// sourced from this same animation's own last frame (extract_tower_basic
-// in tools/extract_assets.py), so this crossfade is mainly just settling
-// the hologram glow/progress-bar UI out, not a model swap.
 const BUILD_CROSSFADE_FRACTION = 0.1;
 
 function ready(img) {
@@ -217,49 +203,46 @@ function worldSize(level) {
   return { w: d.worldWidth || CANVAS_WIDTH, h: d.worldHeight || CANVAS_HEIGHT };
 }
 
-// The zoom level at which the viewport exactly shows the level's full
-// world in whichever dimension is more constrained -- zooming out further
-// than this would reveal empty space past the world's own edge. For
-// levels 1/2 (world == viewport) this is always exactly 1, so those
-// levels simply can't zoom out at all, only in.
+// The minimum zoom level at which the entire map world is 100% visible
+// on screen at once (whichever dimension is more constrained).
+// For Level 3 (2048x2048 world), minZoom is ~0.366, allowing full-map
+// overview with no scrolling needed. For Levels 1/2, minZoom is 1.0.
 function minZoomFor(level) {
   const { w, h } = worldSize(level);
-  return Math.max(CANVAS_WIDTH / w, CANVAS_HEIGHT / h);
+  return Math.min(CANVAS_WIDTH / w, CANVAS_HEIGHT / h);
 }
 
 function clampZoom(level) {
   zoom = Math.max(minZoomFor(level), Math.min(MAX_ZOOM, zoom));
 }
 
-// Levels 1/2's world is exactly the viewport (worldWidth/Height ==
-// CANVAS_WIDTH/HEIGHT), so with zoom clamped to 1 there (see minZoomFor)
-// the visible span always equals the world size and this always pins the
-// camera back to (0,0) -- i.e. every scroll/pan/drag/zoom input below is
-// automatically a no-op on a non-scrollable level unless the player
-// zooms in, with no separate "is this level scrollable" branch needed
-// anywhere else.
 function clampCamera(level) {
   const { w, h } = worldSize(level);
   const viewW = CANVAS_WIDTH / zoom;
   const viewH = CANVAS_HEIGHT / zoom;
-  camera.x = Math.max(0, Math.min(Math.max(0, w - viewW), camera.x));
-  camera.y = Math.max(0, Math.min(Math.max(0, h - viewH), camera.y));
+  if (viewW >= w) {
+    camera.x = (w - viewW) / 2; // Center horizontally when fully zoomed out
+  } else {
+    camera.x = Math.max(0, Math.min(w - viewW, camera.x));
+  }
+  if (viewH >= h) {
+    camera.y = (h - viewH) / 2; // Center vertically when fully zoomed out
+  } else {
+    camera.y = Math.max(0, Math.min(h - viewH, camera.y));
+  }
 }
 
-// Recenters the camera on a level's "base" (its soldierExit -- the point
-// every road ultimately leads to) whenever the current level changes
-// (first load, level-select, level transition, or a networked client
-// simply polling into a level someone else already switched to -- see
-// this being driven from loop() below by watching state.level). Also
-// resets zoom to 1, so replaying a level (or joining a fresh one) always
-// starts at the same familiar zoomed-out view rather than wherever the
-// last game had been left zoomed in to.
+// Recenters the camera when switching levels or restarting.
+// Automatically starts at full map overview (minZoomFor) so the player
+// has a complete tactical view of the battlefield right away.
 function recenterCamera(level) {
-  zoom = 1;
+  const { w, h } = worldSize(level);
+  zoom = minZoomFor(level);
+  clampZoom(level);
   const d = levelData(level);
-  const anchor = d.soldierExit || { x: worldSize(level).w / 2, y: worldSize(level).h / 2 };
-  camera.x = anchor.x - CANVAS_WIDTH / 2;
-  camera.y = anchor.y - CANVAS_HEIGHT / 2;
+  const anchor = d.soldierExit || { x: w / 2, y: h / 2 };
+  camera.x = anchor.x - (CANVAS_WIDTH / zoom) / 2;
+  camera.y = anchor.y - (CANVAS_HEIGHT / zoom) / 2;
   clampCamera(level);
 }
 let lastCameraLevel = null;
@@ -388,38 +371,64 @@ function postAction(body) {
 // second -- purely a rendering flourish (see drawEnemy), no gameplay effect.
 const BOB_SPEED = 9;
 
+const ENEMY_DRAW_SIZES = {
+  tank: { h: 36, shadowRx: 28, shadowRy: 16 },
+  rocket: { h: 34, shadowRx: 26, shadowRy: 15 },
+  buggy: { h: 30, shadowRx: 22, shadowRy: 13 },
+  motorcycle: { h: 26, shadowRx: 18, shadowRy: 10 },
+  soldier: { h: 24, shadowRx: 11, shadowRy: 11 },
+};
+
 function drawEnemy(e) {
   const spriteKey = `enemy_${e.type}`;
   const img = sprites[spriteKey];
+  const sizeDef = ENEMY_DRAW_SIZES[e.type] || { h: 28, shadowRx: 20, shadowRy: 12 };
+  const h = sizeDef.h;
+  const w = ready(img) ? h * (img.naturalWidth / img.naturalHeight) : h * 1.5;
+
   ctx.save();
   // A small side-to-side bob while moving, out of phase per-enemy
   // (bobPhase) so a wave doesn't all bounce in unison -- makes movement
   // read as walking/driving instead of a sprite gliding in place.
-  const bob = Math.sin(frameNow * BOB_SPEED + e.bobPhase) * 1.6;
+  const bob = Math.sin(frameNow * BOB_SPEED + e.bobPhase) * 1.4;
   ctx.translate(e.x, e.y + bob);
+
+  // Subtle directional ground shadow under vehicles and soldiers
+  ctx.save();
+  ctx.rotate(e.angle);
+  ctx.fillStyle = "rgba(0, 0, 0, 0.28)";
+  ctx.beginPath();
+  ctx.ellipse(2, 4, sizeDef.shadowRx, sizeDef.shadowRy, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
   ctx.rotate(e.angle);
   if (ready(img)) {
-    // Draw at the sprite's real aspect ratio instead of squashing every
-    // enemy into a fixed square -- source crops range up to ~3.8:1.
-    const h = 26;
-    const w = h * (img.naturalWidth / img.naturalHeight);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
     ctx.drawImage(img, -w / 2, -h / 2, w, h);
   } else {
-    const FALLBACK_COLOR = { tank: "#7a3b3b", buggy: "#b8ab7a", soldier: "#8a8f5c", motorcycle: "#6b6b52", rocket: "#7a8060" };
-    ctx.fillStyle = FALLBACK_COLOR[e.type] || "#8a8f5c";
+    const FALLBACK_COLOR = { tank: "#635843", buggy: "#786d52", soldier: "#5f6848", motorcycle: "#555246", rocket: "#66614f" };
+    ctx.fillStyle = FALLBACK_COLOR[e.type] || "#5f6848";
     ctx.beginPath();
-    ctx.arc(0, 0, 10, 0, Math.PI * 2);
+    ctx.arc(0, 0, h / 2, 0, Math.PI * 2);
     ctx.fill();
   }
   ctx.restore();
 
-  // health bar
-  const w = 24;
-  const pct = e.hp / e.maxHp;
-  ctx.fillStyle = "#400";
-  ctx.fillRect(e.x - w / 2, e.y - 20, w, 4);
-  ctx.fillStyle = "#e33";
-  ctx.fillRect(e.x - w / 2, e.y - 20, w * pct, 4);
+  // Tactical health bar
+  const barW = Math.max(22, Math.min(38, w * 0.75));
+  const barH = 4;
+  const barY = e.y - h / 2 - 9;
+  const pct = Math.max(0, Math.min(1, e.hp / e.maxHp));
+  ctx.save();
+  ctx.fillStyle = "rgba(0, 0, 0, 0.75)";
+  ctx.fillRect(e.x - barW / 2 - 1, barY - 1, barW + 2, barH + 2);
+  ctx.fillStyle = "#330000";
+  ctx.fillRect(e.x - barW / 2, barY, barW, barH);
+  ctx.fillStyle = pct > 0.5 ? "#2ecc71" : pct > 0.25 ? "#f1c40f" : "#e74c3c";
+  ctx.fillRect(e.x - barW / 2, barY, barW * pct, barH);
+  ctx.restore();
 }
 
 // Renders a tower that's still under construction (t.buildTimeRemaining
@@ -435,86 +444,160 @@ function drawEnemy(e) {
 // that fallback bar is skipped there -- drawing both would double up.
 function drawTowerBuilding(t) {
   const progress = 1 - t.buildTimeRemaining / BUILD_DURATION; // 0 -> 1
-  const crossfadeStart = 1 - BUILD_CROSSFADE_FRACTION;
-  const sheet = sprites.tower_basic_build;
+  const sheet = sprites[`tower_${t.type}_build`];
 
-  if (t.type === "basic" && ready(sheet)) {
+  if (sheet && ready(sheet)) {
     const frameIndex = Math.min(BUILD_ANIM_FRAME_COUNT - 1, Math.floor(progress * BUILD_ANIM_FRAME_COUNT));
     const col = frameIndex % BUILD_ANIM_COLS;
     const row = Math.floor(frameIndex / BUILD_ANIM_COLS);
     const fw = sheet.naturalWidth / BUILD_ANIM_COLS;
     const fh = sheet.naturalHeight / BUILD_ANIM_ROWS;
-    // Bigger than the resting 68px-tall sprite: the frame includes both
-    // the build platform (wider than the turret itself) and, below it,
-    // the baked-in progress bar, so the turret alone reads at roughly
-    // the same size as the resting sprite once this whole frame fits.
-    const drawH = 128;
-    const drawW = drawH * (fw / fh);
-    const animAlpha = progress >= crossfadeStart ? 1 - (progress - crossfadeStart) / BUILD_CROSSFADE_FRACTION : 1;
-    ctx.save();
-    ctx.globalAlpha = animAlpha;
-    ctx.drawImage(sheet, col * fw, row * fh, fw, fh, t.x - drawW / 2, t.y - drawH / 2 + 10, drawW, drawH);
-    ctx.restore();
 
-    if (progress >= crossfadeStart) {
-      const img = sprites[`tower_${t.type}`];
-      if (ready(img)) {
-        const h = 68;
-        const w = h * (img.naturalWidth / img.naturalHeight);
-        ctx.save();
-        ctx.globalAlpha = (progress - crossfadeStart) / BUILD_CROSSFADE_FRACTION;
-        ctx.drawImage(img, t.x - w / 2, t.y - h / 2, w, h);
-        ctx.restore();
-      }
-    }
-    return;
-  }
-
-  const img = sprites[`tower_${t.type}`];
-  ctx.save();
-  ctx.globalAlpha = Math.max(0.15, progress);
-  if (ready(img)) {
-    const h = 68;
-    const w = h * (img.naturalWidth / img.naturalHeight);
-    ctx.drawImage(img, t.x - w / 2, t.y - h / 2, w, h);
+    // Sized to match resting turret scale with radial construction base
+    const drawSize = 76;
+    ctx.drawImage(sheet, col * fw, row * fh, fw, fh, t.x - drawSize / 2, t.y - drawSize / 2, drawSize, drawSize);
   } else {
-    ctx.fillStyle = t.type === "laser" ? "#8a6a3a" : "#888";
-    ctx.fillRect(t.x - 14, t.y - 10, 28, 20);
+    const img = sprites[`tower_${t.type}`];
+    ctx.save();
+    ctx.globalAlpha = Math.max(0.2, progress);
+    if (ready(img)) {
+      const h = 76;
+      const w = 76;
+      ctx.drawImage(img, t.x - w / 2, t.y - h / 2, w, h);
+    } else {
+      ctx.fillStyle = t.type === "laser" ? "#8a6a3a" : "#888";
+      ctx.fillRect(t.x - 14, t.y - 10, 28, 20);
+    }
+    ctx.restore();
   }
-  ctx.restore();
 
-  const barW = 54;
-  ctx.fillStyle = "#223";
-  ctx.fillRect(t.x - barW / 2, t.y - 46, barW, 6);
-  ctx.fillStyle = "#ffd700";
-  ctx.fillRect(t.x - barW / 2, t.y - 46, barW * progress, 6);
+  // Tactical RTS / Command & Conquer Progress Bar
+  const barW = 56;
+  const barH = 6;
+  const barY = t.y - 44;
+
+  ctx.save();
+  // Outer frame with tactical bevel
+  ctx.fillStyle = "rgba(10, 15, 20, 0.9)";
+  ctx.fillRect(t.x - barW / 2 - 2, barY - 2, barW + 4, barH + 4);
+  ctx.strokeStyle = "#4fd1c5";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(t.x - barW / 2 - 2, barY - 2, barW + 4, barH + 4);
+
+  // Background slot
+  ctx.fillStyle = "#1a202c";
+  ctx.fillRect(t.x - barW / 2, barY, barW, barH);
+
+  // Energetic cyan progress fill
+  const grad = ctx.createLinearGradient(t.x - barW / 2, barY, t.x + barW / 2, barY);
+  grad.addColorStop(0, "#319795");
+  grad.addColorStop(0.5, "#38b2ac");
+  grad.addColorStop(1, "#4fd1c5");
+  ctx.fillStyle = grad;
+  ctx.fillRect(t.x - barW / 2, barY, barW * progress, barH);
+
+  // Top gloss highlight
+  ctx.fillStyle = "rgba(255, 255, 255, 0.45)";
+  ctx.fillRect(t.x - barW / 2, barY, barW * progress, 2);
+  ctx.restore();
 }
 
-function drawTower(t) {
-  // A dark platform under every tower (building or combat-ready) keeps
-  // it visible regardless of terrain color -- the turret sprites and the
-  // grass/dirt map share similar olive/earth tones, so without this a
-  // tower can be hard to spot at a glance (this is why every real TD
-  // game gives towers a base pad instead of relying on the terrain to
-  // contrast on its own).
+function drawTowerBase(t) {
+  const rx = 40;
+  const ry = 28;
+  const h = 7; // Height/thickness of the 3D concrete/metal base
+
   ctx.save();
-  ctx.fillStyle = "rgba(20,22,18,0.75)";
+  // 1. Soft directional ground shadow (offset down-right)
+  ctx.fillStyle = "rgba(0, 0, 0, 0.42)";
   ctx.beginPath();
-  ctx.arc(t.x, t.y, 38, 0, Math.PI * 2);
+  ctx.ellipse(t.x + 4, t.y + 10, rx + 4, ry + 2, 0, 0, Math.PI * 2);
   ctx.fill();
-  ctx.strokeStyle = "rgba(220,220,200,0.55)";
-  ctx.lineWidth = 2;
+
+  // 2. 3D Platform Side / Thickness (front-facing bevel)
+  const sideGrad = ctx.createLinearGradient(t.x - rx, t.y, t.x + rx, t.y);
+  sideGrad.addColorStop(0, "#1a202c");
+  sideGrad.addColorStop(0.5, "#2d3748");
+  sideGrad.addColorStop(1, "#171923");
+  ctx.fillStyle = sideGrad;
+  ctx.beginPath();
+  ctx.ellipse(t.x, t.y + h, rx, ry, 0, 0, Math.PI);
+  ctx.ellipse(t.x, t.y, rx, ry, 0, Math.PI, 0, true);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = "rgba(0, 0, 0, 0.5)";
+  ctx.lineWidth = 1;
   ctx.stroke();
+
+  // 3. 3D Platform Top Face (illuminated from above)
+  const topGrad = ctx.createRadialGradient(t.x - 8, t.y - 6, 4, t.x, t.y, rx);
+  topGrad.addColorStop(0, "#4a5568");
+  topGrad.addColorStop(0.7, "#2d3748");
+  topGrad.addColorStop(1, "#1a202c");
+  ctx.fillStyle = topGrad;
+  ctx.beginPath();
+  ctx.ellipse(t.x, t.y, rx, ry, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Top highlight rim
+  ctx.strokeStyle = "rgba(226, 232, 240, 0.35)";
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  // 4. Inner mechanical turret socket
+  ctx.fillStyle = "#111418";
+  ctx.beginPath();
+  ctx.ellipse(t.x, t.y, rx * 0.55, ry * 0.55, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(79, 209, 197, 0.6)"; // subtle tactical cyan ring
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // 5. Perimeter tactical bolts
+  for (let a = 0; a < Math.PI * 2; a += Math.PI / 3) {
+    const bx = t.x + Math.cos(a) * (rx * 0.82);
+    const by = t.y + Math.sin(a) * (ry * 0.82);
+    ctx.fillStyle = "#a0aec0";
+    ctx.beginPath();
+    ctx.arc(bx, by, 1.6, 0, Math.PI * 2);
+    ctx.fill();
+  }
   ctx.restore();
+}
+
+// Natural resting angle of the cannon barrel in each upright 3D sprite:
+// basic points at -59.5°, double points at +90.0° (straight down), laser points at +90.3°
+const TOWER_RESTING_ANGLES = {
+  basic: -59.5 * (Math.PI / 180),
+  double: 90.0 * (Math.PI / 180),
+  laser: 90.3 * (Math.PI / 180),
+};
+
+function drawTower(t) {
+  // Render the volumetric 3D base pedestal
+  drawTowerBase(t);
 
   if (t.buildTimeRemaining > 0) {
     drawTowerBuilding(t);
   } else {
     const img = sprites[`tower_${t.type}`];
     const levelSum = t.level.damage + t.level.range + t.level.fireRate;
+    const restingAngle = TOWER_RESTING_ANGLES[t.type] || 0;
+    const drawAngle = t.angle - restingAngle;
+
+    // Dynamic drop shadow under the rotating turret body
+    ctx.save();
+    ctx.translate(t.x + 3, t.y + 4);
+    ctx.rotate(t.angle);
+    ctx.fillStyle = "rgba(0, 0, 0, 0.35)";
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 24, 18, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
     ctx.save();
     ctx.translate(t.x, t.y);
-    ctx.rotate(t.angle);
+    ctx.rotate(drawAngle);
     if (levelSum > 0) {
       ctx.save();
       ctx.globalAlpha = Math.min(0.15 + levelSum * 0.06, 0.6);
@@ -525,13 +608,10 @@ function drawTower(t) {
       ctx.restore();
     }
     if (ready(img)) {
-      // Draw at the sprite's real aspect ratio instead of squashing every
-      // turret into a fixed square -- the laser turret crop alone is ~3.8:1.
-      // (Doubled from the original 34px per user feedback that towers read
-      // too small against the map.)
-      const h = 68;
-      const w = h * (img.naturalWidth / img.naturalHeight);
+      const h = 76;
+      const w = 76;
       ctx.drawImage(img, -w / 2, -h / 2, w, h);
+
       const damagePct = 1 - t.hp / t.maxHp;
       if (damagePct > 0) {
         ctx.globalAlpha = damagePct * 0.6;
@@ -546,6 +626,35 @@ function drawTower(t) {
     }
     ctx.restore();
 
+    // 3D dynamic muzzle flash positioned exactly at the cannon tip in world space
+    if (t.fireTimer > t.fireRate - 0.09) {
+      ctx.save();
+      const flashLen = t.type === "laser" ? 34 : t.type === "double" ? 32 : 30;
+      const flashX = t.x + Math.cos(t.angle) * flashLen;
+      const flashY = t.y + Math.sin(t.angle) * flashLen;
+      ctx.fillStyle = t.type === "laser" ? "#4fd1c5" : "#ffb700";
+      ctx.shadowColor = t.type === "laser" ? "#81e6d9" : "#ff8800";
+      ctx.shadowBlur = 12;
+
+      if (t.type === "double") {
+        const spread = 6;
+        const p1x = flashX - Math.sin(t.angle) * spread;
+        const p1y = flashY + Math.cos(t.angle) * spread;
+        const p2x = flashX + Math.sin(t.angle) * spread;
+        const p2y = flashY - Math.cos(t.angle) * spread;
+        ctx.beginPath();
+        ctx.arc(p1x, p1y, 5, 0, Math.PI * 2);
+        ctx.arc(p2x, p2y, 5, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        ctx.beginPath();
+        ctx.arc(flashX, flashY, 6, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    // Floating tactical HUD bars (Health and Ammo)
     const w = 54;
     const pct = t.hp / t.maxHp;
     ctx.fillStyle = "#400";
@@ -743,18 +852,6 @@ initBuildMenu(buildMenuEl, {
     if (state.gameOver || state.win || state.levelComplete) return;
     selectedBuildType = selectedBuildType === type ? null : type;
   },
-});
-
-// Upgrade panel callbacks are defined once, here, and read the *current*
-// value of the module-level `selectedTowerId` variable at click time via
-// normal closure semantics -- they are never re-created per frame, which is
-// what makes the panel's buttons clickable in the first place (see
-// initUpgradePanel's comment in ui.js).
-initUpgradePanel(upgradePanelEl, {
-  onUpgrade: (skill) => {
-    if (state.gameOver || state.win || state.levelComplete || selectedTowerId == null) return;
-    actions.upgrade(selectedTowerId, skill);
-  },
   onRepair: () => {
     if (state.gameOver || state.win || state.levelComplete || selectedTowerId == null) return;
     actions.repair(selectedTowerId);
@@ -766,11 +863,50 @@ initUpgradePanel(upgradePanelEl, {
   },
 });
 
+// Upgrade panel callbacks are defined once, here, and read the *current*
+// value of the module-level `selectedTowerId` variable at click time
+initUpgradePanel(upgradePanelEl, {
+  onUpgrade: (skill) => {
+    if (state.gameOver || state.win || state.levelComplete || selectedTowerId == null) return;
+    actions.upgrade(selectedTowerId, skill);
+  },
+});
+
 const skipWaveBtn = document.getElementById("skip-wave-btn");
 skipWaveBtn.addEventListener("click", () => {
   if (state.gameOver || state.win || state.levelComplete) return;
   actions.skip();
 });
+
+const statsBtn = document.getElementById("stats-btn");
+const statsOverlay = document.getElementById("stats-overlay");
+const statsCloseBtn = document.getElementById("stats-close-btn");
+
+async function openStatsModal() {
+  statsOverlay.classList.remove("hidden");
+  let entries = [];
+  try {
+    const res = await fetch("/api/ranking");
+    if (res.ok) entries = await res.json();
+  } catch (err) {
+    entries = JSON.parse(localStorage.getItem("td_ranking") || "[]");
+  }
+  renderStatsModal(statsOverlay, state, entries);
+}
+
+function closeStatsModal() {
+  statsOverlay.classList.add("hidden");
+}
+
+statsBtn.addEventListener("click", () => {
+  if (statsOverlay.classList.contains("hidden")) {
+    openStatsModal();
+  } else {
+    closeStatsModal();
+  }
+});
+
+statsCloseBtn.addEventListener("click", closeStatsModal);
 
 const muteBtn = document.getElementById("mute-btn");
 muteBtn.addEventListener("click", () => {
@@ -1002,7 +1138,12 @@ function handleClick(pos) {
       return;
     }
     actions.place(selectedBuildType, check.x, check.y);
-    selectedBuildType = null;
+    const def = TOWER_TYPES[selectedBuildType];
+    const moneyAfter = state.economy.money - def.cost;
+    const countAfter = state.towers.filter((t) => t.type === selectedBuildType && t.hp > 0).length + 1;
+    if (moneyAfter < def.cost || countAfter >= def.maxCount) {
+      selectedBuildType = null;
+    }
     return;
   }
   let nearestTower = null;
@@ -1027,11 +1168,29 @@ function handleClick(pos) {
 // simply has no visual effect -- it doesn't need its own "is this level
 // scrollable" check, and a real drag gesture correctly not placing a
 // tower is the right behavior there too.
-const DRAG_THRESHOLD = 6; // screen px before a press counts as a drag, not a click
-let dragState = null; // { startClientX, startClientY, startCamX, startCamY, moved }
+const DRAG_THRESHOLD = 15; // screen px before a press counts as a drag, not a click
+let dragState = null; // { startClientX, startClientY, startCamX, startCamY, startWorldPos, moved }
+
+canvas.addEventListener("contextmenu", (evt) => evt.preventDefault());
 
 canvas.addEventListener("pointerdown", (evt) => {
-  dragState = { startClientX: evt.clientX, startClientY: evt.clientY, startCamX: camera.x, startCamY: camera.y, moved: false };
+  if (evt.button === 2) {
+    // Right-click cancels build selection
+    if (selectedBuildType) {
+      selectedBuildType = null;
+    }
+    return;
+  }
+  if (evt.button !== 0) return;
+  const startWorldPos = worldPos(evt);
+  dragState = {
+    startClientX: evt.clientX,
+    startClientY: evt.clientY,
+    startCamX: camera.x,
+    startCamY: camera.y,
+    startWorldPos,
+    moved: false,
+  };
 });
 
 canvas.addEventListener("pointermove", (evt) => {
@@ -1052,7 +1211,24 @@ canvas.addEventListener("pointermove", (evt) => {
 
 window.addEventListener("pointerup", (evt) => {
   if (!dragState) return;
-  if (!dragState.moved) handleClick(worldPos(evt));
+  const dxScreen = evt.clientX - dragState.startClientX;
+  const dyScreen = evt.clientY - dragState.startClientY;
+  const dist = Math.hypot(dxScreen, dyScreen);
+
+  // If it didn't move past threshold, or if we are in build mode and released near a valid placement
+  if (!dragState.moved || dist < DRAG_THRESHOLD || (selectedBuildType && dist < 30)) {
+    const endPos = worldPos(evt);
+    const startCheck = selectedBuildType ? canPlaceTower(state, selectedBuildType, dragState.startWorldPos.x, dragState.startWorldPos.y) : null;
+    const endCheck = selectedBuildType ? canPlaceTower(state, selectedBuildType, endPos.x, endPos.y) : null;
+
+    if (endCheck && endCheck.ok) {
+      handleClick(endPos);
+    } else if (startCheck && startCheck.ok) {
+      handleClick(dragState.startWorldPos);
+    } else {
+      handleClick(endPos);
+    }
+  }
   dragState = null;
 });
 
@@ -1287,11 +1463,31 @@ function loop(now) {
   ctx.restore();
 
   drawHud();
-  updateBuildMenu(buildMenuEl, { towers: state.towers, economy: state.economy, selectedType: selectedBuildType });
   const selectedTower = state.towers.find((t) => t.id === selectedTowerId) || null;
   if (selectedTowerId != null && !selectedTower) selectedTowerId = null; // sold/destroyed
+  updateBuildMenu(buildMenuEl, {
+    towers: state.towers,
+    economy: state.economy,
+    selectedType: selectedBuildType,
+    selectedTower,
+  });
   updateUpgradePanel(upgradePanelEl, selectedTower);
-  skipWaveBtn.classList.toggle("hidden", !(state.interWaveTimer > 0 && !state.gameOver && !state.win && !state.levelComplete));
+
+  // Play / Advance Wave button:
+  const canAdvanceWave = !state.gameOver && !state.win && !state.levelComplete && state.waveIndex < 39;
+  skipWaveBtn.classList.toggle("hidden", !canAdvanceWave);
+  if (canAdvanceWave) {
+    if (state.interWaveTimer > 0) {
+      skipWaveBtn.textContent = `▶ Iniciar Oleada ${state.waveIndex + 1}`;
+      skipWaveBtn.classList.add("pulse");
+      skipWaveBtn.title = "Comenzar oleada inmediatamente";
+    } else {
+      skipWaveBtn.textContent = `▶ +Oleada ${state.waveIndex + 2}`;
+      skipWaveBtn.classList.remove("pulse");
+      skipWaveBtn.title = "Llamar a la siguiente oleada de inmediato (acelerar juego)";
+    }
+  }
+
   pauseBtn.textContent = state.paused ? "▶" : "⏸";
   pauseBtn.title = state.paused ? "Reanudar" : "Pausar";
   pauseBtn.classList.toggle("active", state.paused);

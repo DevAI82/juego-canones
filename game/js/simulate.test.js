@@ -165,8 +165,8 @@ test("level 3's world is bigger than the viewport in both dimensions (it's meant
   assert.equal(LEVELS[1].worldHeight, LEVELS[2].worldHeight);
 });
 
-test("level 3 offers three separate roads, each usable by vehicle spawns", () => {
-  assert.equal(LEVELS[3].paths.length, 3);
+test("level 3 offers multiple separate roads, each usable by vehicle spawns", () => {
+  assert.ok(LEVELS[3].paths.length >= 3);
   for (const path of LEVELS[3].paths) {
     assert.ok(path.length > 1);
   }

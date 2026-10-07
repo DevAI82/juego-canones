@@ -46,29 +46,33 @@
           <button id="gameend-close-btn">Jugar de nuevo</button>
         </div>
       </div>
+      <div id="stats-overlay" class="hidden">
+        <div id="stats-modal">
+          <div class="stats-modal-header">
+            <div id="stats-title">🏆 RANKING Y ESTADÍSTICAS</div>
+            <button id="stats-close-btn" class="stats-close-btn" title="Cerrar">✕</button>
+          </div>
+          <div id="stats-summary-card"></div>
+          <div class="stats-ranking-header">Top 20 Mejores Puntuaciones</div>
+          <ol id="stats-ranking-list"></ol>
+        </div>
+      </div>
     </div>
-    <!-- Outside #game-container (which has the JS-driven transform:scale)
-         so position:fixed here is relative to the real viewport, not the
-         scaled game -- lets main.js's resizeGame() park this in the black
-         letterbox margin on a wide window instead of covering the map,
-         per user request, falling back to overlapping the top of the map
-         (like the old layout) when the window's too narrow for a margin. -->
-    <div id="build-menu"></div>
-    <div id="top-controls">
-      <button id="mute-btn" title="Silenciar sonido">🔊</button>
-      <button id="pause-btn" title="Pausar">⏸</button>
-      <button id="reset-btn" title="Reiniciar partida">⟲</button>
-    </div>
-    <!-- On-screen D-pad, per user request, so scrolling around a big
-         zoomed/scrolled map doesn't require a mouse drag or keyboard.
-         Same "outside #game-container, positioned in JS" reasoning as
-         #build-menu/#top-controls above. -->
-    <div id="nav-controls">
-      <button id="nav-up" class="nav-btn nav-up" title="Desplazar arriba">▲</button>
-      <button id="nav-left" class="nav-btn nav-left" title="Desplazar a la izquierda">◀</button>
-      <button id="nav-right" class="nav-btn nav-right" title="Desplazar a la derecha">▶</button>
-      <button id="nav-down" class="nav-btn nav-down" title="Desplazar abajo">▼</button>
-    </div>
+  </div>
+  <!-- Outside #game-viewport so position:fixed is relative to window viewport -->
+  <div id="build-menu"></div>
+  <div id="top-controls">
+    <button id="stats-btn" title="Ranking y Estadísticas">🏆</button>
+    <button id="mute-btn" title="Silenciar sonido">🔊</button>
+    <button id="pause-btn" title="Pausar">⏸</button>
+    <button id="reset-btn" title="Reiniciar partida">⟲</button>
+  </div>
+  <!-- On-screen D-pad -->
+  <div id="nav-controls">
+    <button id="nav-up" class="nav-btn nav-up" title="Desplazar arriba">▲</button>
+    <button id="nav-left" class="nav-btn nav-left" title="Desplazar a la izquierda">◀</button>
+    <button id="nav-right" class="nav-btn nav-right" title="Desplazar a la derecha">▶</button>
+    <button id="nav-down" class="nav-btn nav-down" title="Desplazar abajo">▼</button>
   </div>
   <script type="module" src="js/main.js"></script>
 </body>

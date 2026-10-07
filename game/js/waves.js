@@ -65,42 +65,38 @@ export const WAVES = [
   { enemies: [{ type: "soldier", count: 32, interval: 0.06 }, { type: "buggy", count: 26, interval: 0.06 }, { type: "motorcycle", count: 26, interval: 0.05 }, { type: "tank", count: 20, interval: 0.2 }, { type: "rocket", count: 20, interval: 0.4 }] },
 ];
 
-// Motorcycles/buggies spawn this long after "their" tank, in the same
-// wave, rather than on their own independent interval.
-const ESCORT_DELAY = 0.35;
+// Motorcycles/buggies spawn behind their lead heavy unit (tank/rocket),
+// maintaining tight convoy formation so heavies take the frontline damage.
+const ESCORT_DELAY = 0.45;
 
 export function buildSpawnQueue(waveIndex) {
   const wave = WAVES[waveIndex];
   const queue = [];
 
-  const tankGroup = wave.enemies.find((g) => g.type === "tank");
-  const tankTimes = [];
-  if (tankGroup) {
+  const leadGroup = wave.enemies.find((g) => g.type === "tank") || wave.enemies.find((g) => g.type === "rocket");
+  const leadTimes = [];
+  if (leadGroup) {
     let t = 0;
-    for (let i = 0; i < tankGroup.count; i++) {
-      tankTimes.push(t);
-      t += tankGroup.interval;
+    for (let i = 0; i < leadGroup.count; i++) {
+      leadTimes.push(t);
+      t += leadGroup.interval;
     }
   }
 
   for (const group of wave.enemies) {
-    if (group.type === "tank") {
-      for (const t of tankTimes) queue.push({ type: "tank", time: t });
+    if (group === leadGroup) {
+      for (const t of leadTimes) queue.push({ type: group.type, time: t });
       continue;
     }
-    // Per user request: motorcycles and buggies ride just behind a tank
-    // when the wave has any, cycling through each tank in turn (a small
-    // extra delay per lap so repeats don't all land on the exact same
-    // instant) -- so they spend the wave shielded by whichever tank a
-    // tower is already focused on (tower.js's findTarget gives tanks
-    // targeting priority) instead of arriving as an easy, undefended
-    // target on their own.
-    const isEscort = (group.type === "buggy" || group.type === "motorcycle") && tankTimes.length > 0;
+    // Motorcycles and buggies ride closely behind the armored vanguard, cycling through
+    // each heavy vehicle so they arrive together as a synchronized strike group.
+    const isEscort = (group.type === "buggy" || group.type === "motorcycle") && leadTimes.length > 0;
     let t = 0;
     for (let i = 0; i < group.count; i++) {
       if (isEscort) {
-        const lap = Math.floor(i / tankTimes.length);
-        queue.push({ type: group.type, time: tankTimes[i % tankTimes.length] + ESCORT_DELAY + lap * 0.25 });
+        const lap = Math.floor(i / leadTimes.length);
+        const stagger = group.type === "motorcycle" ? 0.15 : 0;
+        queue.push({ type: group.type, time: leadTimes[i % leadTimes.length] + ESCORT_DELAY + lap * 0.25 + stagger });
       } else {
         queue.push({ type: group.type, time: t });
       }

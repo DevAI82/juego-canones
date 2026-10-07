@@ -19,8 +19,19 @@ const ENEMY_ICON = {
   rocket: "assets/enemy_rocket.png",
 };
 
-export function initBuildMenu(container, { onSelect }) {
+const SKILL_ICON = {
+  damage: "assets/ui_icon_damage.png",
+  range: "assets/ui_icon_range.png",
+  fireRate: "assets/ui_icon_firerate.png",
+  armor: "assets/ui_icon_armor.png",
+};
+
+export function initBuildMenu(container, { onSelect, onRepair, onSell }) {
   container.innerHTML = "";
+
+  const towersSection = document.createElement("div");
+  towersSection.className = "build-towers-section";
+
   for (const type of Object.keys(TOWER_TYPES)) {
     const btn = document.createElement("button");
     btn.className = "build-btn";
@@ -30,51 +41,88 @@ export function initBuildMenu(container, { onSelect }) {
     label.className = "build-btn-label";
     btn.appendChild(label);
     btn.addEventListener("click", () => onSelect(type));
-    container.appendChild(btn);
+    towersSection.appendChild(btn);
   }
+  container.appendChild(towersSection);
+
+  // Actions section (Reparar & Vender) placed directly below the laser turret
+  const actionsSection = document.createElement("div");
+  actionsSection.className = "build-actions-section";
+
+  const repairBtn = document.createElement("button");
+  repairBtn.className = "build-action-btn build-repair-btn";
+  repairBtn.style.backgroundImage = `url(assets/ui_btn_repair.png)`;
+  const repairLabel = document.createElement("span");
+  repairLabel.className = "build-action-btn-label";
+  repairLabel.textContent = "Reparar";
+  repairBtn.appendChild(repairLabel);
+  repairBtn.addEventListener("click", () => onRepair());
+  actionsSection.appendChild(repairBtn);
+
+  const sellBtn = document.createElement("button");
+  sellBtn.className = "build-action-btn build-sell-btn";
+  sellBtn.style.backgroundImage = `url(assets/ui_btn_sell.png)`;
+  const sellLabel = document.createElement("span");
+  sellLabel.className = "build-action-btn-label";
+  sellLabel.textContent = "Vender";
+  sellBtn.appendChild(sellLabel);
+  sellBtn.addEventListener("click", () => onSell());
+  actionsSection.appendChild(sellBtn);
+
+  container.appendChild(actionsSection);
+
+  container._buildMenuRefs = {
+    repairBtn,
+    repairLabel,
+    sellBtn,
+    sellLabel,
+  };
 }
 
-export function updateBuildMenu(container, { towers, economy, selectedType }) {
+export function updateBuildMenu(container, { towers, economy, selectedType, selectedTower }) {
   for (const btn of container.querySelectorAll(".build-btn")) {
-    const type = btn.dataset.type;
+    const type = (btn.dataset && btn.dataset.type) || btn.getAttribute("data-type") || btn.dataset?.type;
     const def = TOWER_TYPES[type];
-    const countOnField = towers.filter((t) => t.type === type && t.hp > 0).length;
+    if (!def) continue;
+    const countOnField = (towers || []).filter((t) => t.type === type && t.hp > 0).length;
     const atMax = countOnField >= def.maxCount;
-    const canAfford = economy.money >= def.cost;
+    const canAfford = economy && economy.money >= def.cost;
     btn.disabled = atMax || !canAfford;
     btn.classList.toggle("selected", type === selectedType);
-    btn.querySelector(".build-btn-label").textContent = `${LABELS[type]} ($${def.cost}) ${countOnField}/${def.maxCount}`;
+    const labelEl = btn.querySelector(".build-btn-label");
+    if (labelEl) {
+      labelEl.textContent = `${LABELS[type] || type} ($${def.cost}) ${countOnField}/${def.maxCount}`;
+    }
+  }
+
+  const refs = container._buildMenuRefs;
+  if (!refs) return;
+
+  if (selectedTower) {
+    const repairCost = Math.round((selectedTower.maxHp - selectedTower.hp) * 0.5);
+    const refund = Math.round(TOWER_TYPES[selectedTower.type].cost * 0.6);
+
+    if (repairCost > 0) {
+      const canAffordRepair = economy.money >= repairCost;
+      refs.repairBtn.disabled = !canAffordRepair;
+      refs.repairLabel.textContent = `Reparar ($${repairCost})`;
+    } else {
+      refs.repairBtn.disabled = true;
+      refs.repairLabel.textContent = "100% Vida";
+    }
+
+    refs.sellBtn.disabled = false;
+    refs.sellLabel.textContent = `Vender (+$${refund})`;
+  } else {
+    refs.repairBtn.disabled = true;
+    refs.repairLabel.textContent = "Reparar";
+    refs.sellBtn.disabled = true;
+    refs.sellLabel.textContent = "Vender";
   }
 }
 
-// Builds the upgrade panel's DOM structure ONCE and wires up its event
-// listeners once. This mirrors updateBuildMenu's pattern above: rebuilding
-// innerHTML on every animation-loop call (as the old renderUpgradePanel did)
-// makes the buttons structurally unclickable, because a browser click event
-// only fires when the mousedown and mouseup targets share a common ancestor
-// -- and at ~60 rebuilds/sec against a 50-150ms human click, the DOM gets
-// swapped out from under the pointer between those two events almost every
-// time. See updateUpgradePanel below for the per-frame mutation half.
-//
-// `onUpgrade`/`onRepair`/`onSell` are captured once here, but that's fine as
-// long as the caller defines them as ordinary functions that read the
-// "currently selected tower" from their own enclosing scope at call time
-// (e.g. a module-level `let selectedTower` in main.js) rather than a value
-// snapshotted when initUpgradePanel was invoked.
-// Holographic-card art per skill, and the shared "Mejorar" button art --
-// cropped from the user's Gemini-generated mockup (diseño mejoras.jpg) so
-// the panel matches the premium sci-fi look they commissioned, rather than
-// plain text buttons.
-const SKILL_ICON = {
-  damage: "assets/ui_icon_damage.png",
-  range: "assets/ui_icon_range.png",
-  fireRate: "assets/ui_icon_firerate.png",
-  // Cropped from the follow-up mockup (Mejoras/diseño mejoras ampliado.jpg)
-  // that added this 4th skill, not the original 3-skill one above.
-  armor: "assets/ui_icon_armor.png",
-};
-
-export function initUpgradePanel(container, { onUpgrade, onRepair, onSell }) {
+// Builds the upgrade panel's DOM structure ONCE and wires up its event listeners once.
+export function initUpgradePanel(container, { onUpgrade }) {
   container.innerHTML = "";
   const cols = {};
 
@@ -86,12 +134,6 @@ export function initUpgradePanel(container, { onUpgrade, onRepair, onSell }) {
     label.className = "upgrade-label";
     label.textContent = SKILL_LABELS[skill];
 
-    // The hologram-icon crop only covers the icon area of the mockup (not
-    // the stats/pips region below it, which needs to show live numbers) --
-    // this inner card is the cyan-bordered box, with the icon as its top
-    // background and its own dark fill showing through underneath for the
-    // stats/pips row, so the border reads as one continuous card exactly
-    // like the mockup's.
     const card = document.createElement("div");
     card.className = "upgrade-card";
     card.style.backgroundImage = `url(${SKILL_ICON[skill]})`;
@@ -131,21 +173,47 @@ export function initUpgradePanel(container, { onUpgrade, onRepair, onSell }) {
     cols[skill] = { levelEl, costEl, btn, pipEls };
   }
 
-  const repairBtn = document.createElement("button");
-  repairBtn.className = "upgrade-icon-btn upgrade-repair-btn";
-  repairBtn.setAttribute("aria-label", "Reparar");
-  repairBtn.addEventListener("click", () => onRepair());
-  container.appendChild(repairBtn);
+  container._upgradePanelRefs = { cols };
+}
 
-  const sellBtn = document.createElement("button");
-  sellBtn.className = "upgrade-icon-btn upgrade-sell-btn";
-  sellBtn.setAttribute("aria-label", "Vender");
-  sellBtn.addEventListener("click", () => onSell());
-  container.appendChild(sellBtn);
+export function renderStatsModal(overlay, state, rankingEntries) {
+  const summary = overlay.querySelector("#stats-summary-card");
+  if (summary) {
+    const kills = state.stats.kills || {};
+    const totalKills = Object.values(kills).reduce((a, b) => a + b, 0);
+    summary.innerHTML = `
+      <div class="stats-grid">
+        <div class="stats-item"><span class="stats-num">${state.level}/3</span><span class="stats-lbl">Nivel</span></div>
+        <div class="stats-item"><span class="stats-num">${state.waveIndex + 1}/40</span><span class="stats-lbl">Oleada</span></div>
+        <div class="stats-item"><span class="stats-num">${state.economy.lives}</span><span class="stats-lbl">Vidas</span></div>
+        <div class="stats-item"><span class="stats-num">$${state.economy.money}</span><span class="stats-lbl">Fondos</span></div>
+        <div class="stats-item"><span class="stats-num">${state.stats.towersBuilt}</span><span class="stats-lbl">Torretas</span></div>
+        <div class="stats-item"><span class="stats-num">${totalKills}</span><span class="stats-lbl">Bajas</span></div>
+      </div>
+      <div class="stats-kills-detail">
+        <span class="kill-tag">💂 Soldados: ${kills.soldier || 0}</span>
+        <span class="kill-tag">🏎️ Buggies: ${kills.buggy || 0}</span>
+        <span class="kill-tag">🏍️ Motos: ${kills.motorcycle || 0}</span>
+        <span class="kill-tag">🛡️ Tanques: ${kills.tank || 0}</span>
+        <span class="kill-tag">🚀 Cohetes: ${kills.rocket || 0}</span>
+      </div>
+    `;
+  }
 
-  // Stash element references on the container so updateUpgradePanel (called
-  // every frame) can find them again without touching innerHTML.
-  container._upgradePanelRefs = { cols, repairBtn, sellBtn };
+  const list = overlay.querySelector("#stats-ranking-list");
+  if (list) {
+    list.innerHTML = "";
+    if (!rankingEntries || rankingEntries.length === 0) {
+      list.innerHTML = `<li class="gameend-ranking-empty">Sin puntuaciones registradas aún</li>`;
+    } else {
+      rankingEntries.forEach((entry, i) => {
+        const li = document.createElement("li");
+        li.className = "stats-ranking-row";
+        li.innerHTML = `<span class="ranking-pos">#${i + 1}</span><span class="ranking-name">${entry.name}</span><span class="ranking-score">${entry.score} pts</span>`;
+        list.appendChild(li);
+      });
+    }
+  }
 }
 
 // The end-of-game screen only needs to render once (when the match ends)

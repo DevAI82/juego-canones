@@ -161,113 +161,194 @@ const LEVEL3_BASE_INTERIOR = { x: 430, y: 1600 };
 // own real gate (no shared tail/fork the way level 2's two branches
 // merge) -- per user request that only those 3 marked crossings are
 // passable, every vehicle path has to actually go through one of them.
-const LEVEL3_NORTH_PATH = [
-  { x: 1550, y: -30 },
-  { x: 1500, y: 150 },
-  { x: 1420, y: 320 },
-  { x: 1330, y: 470 },
-  { x: 1220, y: 620 },
-  { x: 1100, y: 780 },
-  { x: 1000, y: 950 },
-  { x: 850, y: 1150 },
-  { x: 700, y: 1300 },
+// 5 designated vehicle road routes extracted directly from the user's
+// red road traces in "mapas/mapa nivel 3 carreteras.png". Vehicles strictly
+// follow these road centerlines and never cross buildings, fields, or walls.
+// Every route enters the defended fortress through one of its 3 stone bridge gates:
+// 1. North Main Highway -> Gate NE (strictly bypasses building via west street)
+export const LEVEL3_NORTH_MAIN_PATH = [
+  { x: 512, y: -30 },
+  { x: 512, y: 32 },
+  { x: 498, y: 196 },
+  { x: 356, y: 236 },
+  { x: 313, y: 274 },
+  { x: 467, y: 452 },
+  { x: 660, y: 626 },
+  { x: 526, y: 716 },
+  { x: 469, y: 793 },
+  { x: 437, y: 883 },
+  { x: 468, y: 1161 },
+  { x: 532, y: 1176 },
+  { x: 575, y: 1220 },
+  { x: 570, y: 1300 },
+  { x: 595, y: 1345 },
   LEVEL3_GATE_NE,
   { x: 500, y: 1480 },
   LEVEL3_BASE_INTERIOR,
 ];
 
-const LEVEL3_EAST_PATH = [
-  { x: 2090, y: 1550 },
-  { x: 1830, y: 1600 },
-  { x: 1550, y: 1650 },
-  { x: 1250, y: 1750 },
-  { x: 950, y: 1850 },
-  // Stays south of y=1930 (i.e. outside/below the wall entirely) all the
-  // way up to the gate itself -- (700, 1920) here originally clipped
-  // inside the fortress before actually reaching LEVEL3_GATE_SOUTH.
-  { x: 750, y: 1975 },
-  LEVEL3_GATE_SOUTH,
-  { x: 430, y: 1750 },
+// 2. North-East Highway -> Gate NE (strictly bypasses building via east paved boulevard)
+export const LEVEL3_NORTHEAST_PATH = [
+  { x: 2048, y: -30 },
+  { x: 2007, y: 27 },
+  { x: 1939, y: 84 },
+  { x: 1795, y: 261 },
+  { x: 1568, y: 443 },
+  { x: 1393, y: 664 },
+  { x: 1244, y: 756 },
+  { x: 1142, y: 845 },
+  { x: 1047, y: 995 },
+  { x: 857, y: 1228 },
+  { x: 785, y: 1280 },
+  { x: 790, y: 1360 },
+  { x: 760, y: 1410 },
+  { x: 685, y: 1400 },
+  LEVEL3_GATE_NE,
+  { x: 500, y: 1480 },
   LEVEL3_BASE_INTERIOR,
 ];
 
-const LEVEL3_WEST_PATH = [
-  { x: -30, y: 120 },
-  { x: 0, y: 130 },
-  { x: 120, y: 200 },
-  { x: 250, y: 270 },
-  { x: 380, y: 350 },
-  { x: 470, y: 430 },
-  { x: 350, y: 600 },
-  { x: 200, y: 800 },
-  { x: 100, y: 1000 },
-  { x: 60, y: 1300 },
-  { x: 60, y: 1595 },
+// 3. North-West Boulevard -> Gate West
+export const LEVEL3_NORTHWEST_PATH = [
+  { x: -30, y: 24 },
+  { x: 45, y: 24 },
+  { x: 115, y: 120 },
+  { x: 299, y: 273 },
+  { x: 197, y: 378 },
+  { x: 81, y: 605 },
+  { x: 100, y: 1016 },
+  { x: 47, y: 1594 },
   LEVEL3_GATE_WEST,
   { x: 250, y: 1600 },
   LEVEL3_BASE_INTERIOR,
 ];
 
-// Generated as a staggered grid (130px spacing) across the whole
-// 2048x2048 map, kept only where it clears every road by 55px+ AND
-// doesn't land on a rooftop or the compound's moat (sampled from the
-// image's own pixel colors -- low-saturation gray/slate patches and
-// dark blue-tinted patches respectively). No hand-drawn reference exists
-// for this level the way levels 1/2 had, so this reproduces the same
-// "dense, even, road-avoiding" coverage those got by hand, automatically
-// -- see the conversation for the generation script.
+// 4. South-East Highway -> Gate South
+export const LEVEL3_SOUTHEAST_PATH = [
+  { x: 2080, y: 2007 },
+  { x: 2006, y: 2007 },
+  { x: 1722, y: 1700 },
+  { x: 1610, y: 1609 },
+  { x: 1468, y: 1434 },
+  { x: 1329, y: 1559 },
+  { x: 1201, y: 1597 },
+  { x: 1136, y: 1645 },
+  { x: 914, y: 1906 },
+  { x: 860, y: 1935 },
+  { x: 843, y: 1982 },
+  { x: 683, y: 2006 },
+  LEVEL3_GATE_SOUTH,
+  { x: 430, y: 1750 },
+  LEVEL3_BASE_INTERIOR,
+];
+
+// 5. South Direct Avenue -> Gate South
+export const LEVEL3_SOUTH_PATH = [
+  { x: 581, y: 2080 },
+  { x: 581, y: 2005 },
+  { x: 476, y: 2000 },
+  LEVEL3_GATE_SOUTH,
+  { x: 430, y: 1750 },
+  LEVEL3_BASE_INTERIOR,
+];
+
+// Backward-compatibility aliases for tests
+export const LEVEL3_NORTH_PATH = LEVEL3_NORTH_MAIN_PATH;
+export const LEVEL3_EAST_PATH = LEVEL3_SOUTHEAST_PATH;
+export const LEVEL3_WEST_PATH = LEVEL3_NORTHWEST_PATH;
+
+// Dense tactical build slots distributed across the 2048x2048 map and inside the fortress base (589 slots)
 const LEVEL3_BUILD_SLOTS = [
-  { x: 40, y: 40 }, { x: 170, y: 40 }, { x: 430, y: 40 }, { x: 690, y: 40 }, { x: 820, y: 40 }, { x: 1210, y: 40 },
-  { x: 235, y: 170 }, { x: 495, y: 170 }, { x: 625, y: 170 }, { x: 1795, y: 170 }, { x: 1925, y: 170 }, { x: 40, y: 300 },
-  { x: 430, y: 300 }, { x: 560, y: 300 }, { x: 690, y: 300 }, { x: 950, y: 300 }, { x: 1080, y: 300 }, { x: 1210, y: 300 },
-  { x: 1600, y: 300 }, { x: 1990, y: 300 }, { x: 105, y: 430 }, { x: 235, y: 430 }, { x: 365, y: 430 }, { x: 625, y: 430 },
-  { x: 755, y: 430 }, { x: 885, y: 430 }, { x: 1015, y: 430 }, { x: 1275, y: 430 }, { x: 1665, y: 430 }, { x: 1795, y: 430 },
-  { x: 170, y: 560 }, { x: 300, y: 560 }, { x: 560, y: 560 }, { x: 690, y: 560 }, { x: 820, y: 560 }, { x: 1340, y: 560 },
-  { x: 1730, y: 560 }, { x: 1860, y: 560 }, { x: 1990, y: 560 }, { x: 105, y: 690 }, { x: 495, y: 690 }, { x: 625, y: 690 },
-  { x: 885, y: 690 }, { x: 1405, y: 690 }, { x: 1665, y: 690 }, { x: 1795, y: 690 }, { x: 300, y: 820 }, { x: 430, y: 820 },
-  { x: 560, y: 820 }, { x: 690, y: 820 }, { x: 820, y: 820 }, { x: 950, y: 820 }, { x: 1340, y: 820 }, { x: 1470, y: 820 },
-  { x: 1600, y: 820 }, { x: 1730, y: 820 }, { x: 235, y: 950 }, { x: 365, y: 950 }, { x: 495, y: 950 }, { x: 625, y: 950 },
-  { x: 885, y: 950 }, { x: 1275, y: 950 }, { x: 1795, y: 950 }, { x: 170, y: 1080 }, { x: 430, y: 1080 }, { x: 560, y: 1080 },
-  { x: 690, y: 1080 }, { x: 1210, y: 1080 }, { x: 1340, y: 1080 }, { x: 235, y: 1210 }, { x: 365, y: 1210 }, { x: 495, y: 1210 },
-  { x: 1015, y: 1210 }, { x: 1145, y: 1210 }, { x: 1275, y: 1210 }, { x: 1405, y: 1210 }, { x: 1535, y: 1210 }, { x: 1665, y: 1210 },
-  { x: 1795, y: 1210 }, { x: 1925, y: 1210 }, { x: 300, y: 1340 }, { x: 430, y: 1340 }, { x: 820, y: 1340 }, { x: 950, y: 1340 },
-  { x: 1470, y: 1340 }, { x: 1600, y: 1340 }, { x: 1730, y: 1340 }, { x: 1860, y: 1340 }, { x: 1990, y: 1340 }, { x: 235, y: 1470 },
-  { x: 365, y: 1470 }, { x: 625, y: 1470 }, { x: 755, y: 1470 }, { x: 885, y: 1470 }, { x: 1145, y: 1470 }, { x: 1795, y: 1470 },
-  { x: 1925, y: 1470 }, { x: 170, y: 1600 }, { x: 690, y: 1600 }, { x: 950, y: 1600 }, { x: 1080, y: 1600 }, { x: 1210, y: 1600 },
-  { x: 1730, y: 1600 }, { x: 235, y: 1730 }, { x: 365, y: 1730 }, { x: 495, y: 1730 }, { x: 625, y: 1730 }, { x: 885, y: 1730 },
-  { x: 1015, y: 1730 }, { x: 1145, y: 1730 }, { x: 1275, y: 1730 }, { x: 1535, y: 1730 }, { x: 1665, y: 1730 }, { x: 1795, y: 1730 },
-  { x: 1925, y: 1730 }, { x: 40, y: 1860 }, { x: 300, y: 1860 }, { x: 560, y: 1860 }, { x: 690, y: 1860 }, { x: 950, y: 1860 },
-  { x: 1210, y: 1860 }, { x: 1470, y: 1860 }, { x: 1600, y: 1860 }, { x: 1730, y: 1860 }, { x: 1990, y: 1860 }, { x: 105, y: 1990 },
-  { x: 235, y: 1990 }, { x: 365, y: 1990 }, { x: 495, y: 1990 }, { x: 625, y: 1990 }, { x: 755, y: 1990 }, { x: 885, y: 1990 },
-  { x: 1015, y: 1990 }, { x: 1145, y: 1990 }, { x: 1275, y: 1990 }, { x: 1535, y: 1990 }, { x: 1665, y: 1990 }, { x: 1795, y: 1990 },
-  { x: 1925, y: 1990 },
+  { x: 135, y: 60 }, { x: 210, y: 60 }, { x: 285, y: 60 }, { x: 360, y: 60 }, { x: 435, y: 60 }, { x: 585, y: 60 }, { x: 660, y: 60 }, { x: 735, y: 60 },
+  { x: 810, y: 60 }, { x: 885, y: 60 }, { x: 960, y: 60 }, { x: 1035, y: 60 }, { x: 1110, y: 60 }, { x: 1185, y: 60 }, { x: 1260, y: 60 }, { x: 1335, y: 60 },
+  { x: 1410, y: 60 }, { x: 1485, y: 60 }, { x: 1560, y: 60 }, { x: 1635, y: 60 }, { x: 1710, y: 60 }, { x: 1785, y: 60 }, { x: 1860, y: 60 }, { x: 60, y: 135 },
+  { x: 210, y: 135 }, { x: 285, y: 135 }, { x: 360, y: 135 }, { x: 435, y: 135 }, { x: 585, y: 135 }, { x: 660, y: 135 }, { x: 735, y: 135 }, { x: 810, y: 135 },
+  { x: 885, y: 135 }, { x: 960, y: 135 }, { x: 1035, y: 135 }, { x: 1110, y: 135 }, { x: 1185, y: 135 }, { x: 1260, y: 135 }, { x: 1335, y: 135 }, { x: 1410, y: 135 },
+  { x: 1485, y: 135 }, { x: 1560, y: 135 }, { x: 1635, y: 135 }, { x: 1710, y: 135 }, { x: 1785, y: 135 }, { x: 60, y: 210 }, { x: 135, y: 210 }, { x: 285, y: 210 },
+  { x: 585, y: 210 }, { x: 660, y: 210 }, { x: 735, y: 210 }, { x: 810, y: 210 }, { x: 885, y: 210 }, { x: 960, y: 210 }, { x: 1035, y: 210 }, { x: 1110, y: 210 },
+  { x: 1185, y: 210 }, { x: 1260, y: 210 }, { x: 1335, y: 210 }, { x: 1410, y: 210 }, { x: 1485, y: 210 }, { x: 1560, y: 210 }, { x: 1635, y: 210 }, { x: 1710, y: 210 },
+  { x: 1785, y: 210 }, { x: 1935, y: 210 }, { x: 60, y: 285 }, { x: 135, y: 285 }, { x: 210, y: 285 }, { x: 435, y: 285 }, { x: 510, y: 285 }, { x: 585, y: 285 },
+  { x: 660, y: 285 }, { x: 735, y: 285 }, { x: 810, y: 285 }, { x: 885, y: 285 }, { x: 960, y: 285 }, { x: 1035, y: 285 }, { x: 1110, y: 285 }, { x: 1185, y: 285 },
+  { x: 1260, y: 285 }, { x: 1335, y: 285 }, { x: 1410, y: 285 }, { x: 1485, y: 285 }, { x: 1560, y: 285 }, { x: 1635, y: 285 }, { x: 1710, y: 285 }, { x: 1860, y: 285 },
+  { x: 1935, y: 285 }, { x: 60, y: 360 }, { x: 135, y: 360 }, { x: 285, y: 360 }, { x: 435, y: 360 }, { x: 510, y: 360 }, { x: 585, y: 360 }, { x: 660, y: 360 },
+  { x: 735, y: 360 }, { x: 810, y: 360 }, { x: 885, y: 360 }, { x: 960, y: 360 }, { x: 1035, y: 360 }, { x: 1110, y: 360 }, { x: 1185, y: 360 }, { x: 1260, y: 360 },
+  { x: 1335, y: 360 }, { x: 1410, y: 360 }, { x: 1485, y: 360 }, { x: 1560, y: 360 }, { x: 1785, y: 360 }, { x: 1860, y: 360 }, { x: 1935, y: 360 }, { x: 60, y: 435 },
+  { x: 210, y: 435 }, { x: 285, y: 435 }, { x: 360, y: 435 }, { x: 510, y: 435 }, { x: 585, y: 435 }, { x: 660, y: 435 }, { x: 735, y: 435 }, { x: 810, y: 435 },
+  { x: 885, y: 435 }, { x: 960, y: 435 }, { x: 1035, y: 435 }, { x: 1110, y: 435 }, { x: 1185, y: 435 }, { x: 1260, y: 435 }, { x: 1335, y: 435 }, { x: 1410, y: 435 },
+  { x: 1485, y: 435 }, { x: 1635, y: 435 }, { x: 1710, y: 435 }, { x: 1785, y: 435 }, { x: 1860, y: 435 }, { x: 1935, y: 435 }, { x: 60, y: 510 }, { x: 210, y: 510 },
+  { x: 285, y: 510 }, { x: 360, y: 510 }, { x: 435, y: 510 }, { x: 585, y: 510 }, { x: 660, y: 510 }, { x: 735, y: 510 }, { x: 810, y: 510 }, { x: 885, y: 510 },
+  { x: 960, y: 510 }, { x: 1035, y: 510 }, { x: 1110, y: 510 }, { x: 1185, y: 510 }, { x: 1260, y: 510 }, { x: 1335, y: 510 }, { x: 1410, y: 510 }, { x: 1560, y: 510 },
+  { x: 1635, y: 510 }, { x: 1710, y: 510 }, { x: 1785, y: 510 }, { x: 1860, y: 510 }, { x: 1935, y: 510 }, { x: 135, y: 585 }, { x: 210, y: 585 }, { x: 285, y: 585 },
+  { x: 360, y: 585 }, { x: 435, y: 585 }, { x: 510, y: 585 }, { x: 735, y: 585 }, { x: 810, y: 585 }, { x: 885, y: 585 }, { x: 960, y: 585 }, { x: 1035, y: 585 },
+  { x: 1110, y: 585 }, { x: 1185, y: 585 }, { x: 1260, y: 585 }, { x: 1335, y: 585 }, { x: 1410, y: 585 }, { x: 1560, y: 585 }, { x: 1635, y: 585 }, { x: 1710, y: 585 },
+  { x: 1785, y: 585 }, { x: 1860, y: 585 }, { x: 1935, y: 585 }, { x: 135, y: 660 }, { x: 210, y: 660 }, { x: 285, y: 660 }, { x: 360, y: 660 }, { x: 435, y: 660 },
+  { x: 510, y: 660 }, { x: 735, y: 660 }, { x: 810, y: 660 }, { x: 885, y: 660 }, { x: 960, y: 660 }, { x: 1035, y: 660 }, { x: 1110, y: 660 }, { x: 1185, y: 660 },
+  { x: 1260, y: 660 }, { x: 1335, y: 660 }, { x: 1485, y: 660 }, { x: 1560, y: 660 }, { x: 1635, y: 660 }, { x: 1710, y: 660 }, { x: 1785, y: 660 }, { x: 1860, y: 660 },
+  { x: 1935, y: 660 }, { x: 135, y: 735 }, { x: 210, y: 735 }, { x: 285, y: 735 }, { x: 360, y: 735 }, { x: 435, y: 735 }, { x: 585, y: 735 }, { x: 660, y: 735 },
+  { x: 735, y: 735 }, { x: 810, y: 735 }, { x: 885, y: 735 }, { x: 960, y: 735 }, { x: 1035, y: 735 }, { x: 1110, y: 735 }, { x: 1185, y: 735 }, { x: 1410, y: 735 },
+  { x: 1485, y: 735 }, { x: 1560, y: 735 }, { x: 1635, y: 735 }, { x: 1710, y: 735 }, { x: 1785, y: 735 }, { x: 1860, y: 735 }, { x: 1935, y: 735 }, { x: 135, y: 810 },
+  { x: 210, y: 810 }, { x: 285, y: 810 }, { x: 360, y: 810 }, { x: 510, y: 810 }, { x: 585, y: 810 }, { x: 660, y: 810 }, { x: 735, y: 810 }, { x: 810, y: 810 },
+  { x: 885, y: 810 }, { x: 960, y: 810 }, { x: 1035, y: 810 }, { x: 1110, y: 810 }, { x: 1260, y: 810 }, { x: 1335, y: 810 }, { x: 1410, y: 810 }, { x: 1485, y: 810 },
+  { x: 1560, y: 810 }, { x: 1635, y: 810 }, { x: 1710, y: 810 }, { x: 1785, y: 810 }, { x: 1860, y: 810 }, { x: 1935, y: 810 }, { x: 60, y: 885 }, { x: 135, y: 885 },
+  { x: 210, y: 885 }, { x: 285, y: 885 }, { x: 360, y: 885 }, { x: 510, y: 885 }, { x: 585, y: 885 }, { x: 660, y: 885 }, { x: 735, y: 885 }, { x: 810, y: 885 },
+  { x: 885, y: 885 }, { x: 960, y: 885 }, { x: 1035, y: 885 }, { x: 1185, y: 885 }, { x: 1260, y: 885 }, { x: 1335, y: 885 }, { x: 1410, y: 885 }, { x: 1485, y: 885 },
+  { x: 1560, y: 885 }, { x: 1635, y: 885 }, { x: 1710, y: 885 }, { x: 1785, y: 885 }, { x: 1860, y: 885 }, { x: 1935, y: 885 }, { x: 60, y: 960 }, { x: 135, y: 960 },
+  { x: 210, y: 960 }, { x: 285, y: 960 }, { x: 360, y: 960 }, { x: 510, y: 960 }, { x: 585, y: 960 }, { x: 660, y: 960 }, { x: 735, y: 960 }, { x: 810, y: 960 },
+  { x: 885, y: 960 }, { x: 960, y: 960 }, { x: 1110, y: 960 }, { x: 1185, y: 960 }, { x: 1260, y: 960 }, { x: 1335, y: 960 }, { x: 1410, y: 960 }, { x: 1485, y: 960 },
+  { x: 1560, y: 960 }, { x: 1635, y: 960 }, { x: 1710, y: 960 }, { x: 1785, y: 960 }, { x: 1860, y: 960 }, { x: 1935, y: 960 }, { x: 60, y: 1035 }, { x: 135, y: 1035 },
+  { x: 210, y: 1035 }, { x: 285, y: 1035 }, { x: 360, y: 1035 }, { x: 510, y: 1035 }, { x: 585, y: 1035 }, { x: 660, y: 1035 }, { x: 735, y: 1035 }, { x: 810, y: 1035 },
+  { x: 885, y: 1035 }, { x: 960, y: 1035 }, { x: 1110, y: 1035 }, { x: 1185, y: 1035 }, { x: 1260, y: 1035 }, { x: 1335, y: 1035 }, { x: 1410, y: 1035 }, { x: 1485, y: 1035 },
+  { x: 1560, y: 1035 }, { x: 1635, y: 1035 }, { x: 1710, y: 1035 }, { x: 1785, y: 1035 }, { x: 1860, y: 1035 }, { x: 1935, y: 1035 }, { x: 135, y: 1110 }, { x: 210, y: 1110 },
+  { x: 285, y: 1110 }, { x: 360, y: 1110 }, { x: 510, y: 1110 }, { x: 585, y: 1110 }, { x: 660, y: 1110 }, { x: 735, y: 1110 }, { x: 810, y: 1110 }, { x: 885, y: 1110 },
+  { x: 1035, y: 1110 }, { x: 1110, y: 1110 }, { x: 1185, y: 1110 }, { x: 1260, y: 1110 }, { x: 1335, y: 1110 }, { x: 1410, y: 1110 }, { x: 1485, y: 1110 }, { x: 1560, y: 1110 },
+  { x: 1635, y: 1110 }, { x: 1710, y: 1110 }, { x: 1785, y: 1110 }, { x: 1860, y: 1110 }, { x: 1935, y: 1110 }, { x: 135, y: 1185 }, { x: 210, y: 1185 }, { x: 285, y: 1185 },
+  { x: 360, y: 1185 }, { x: 435, y: 1185 }, { x: 660, y: 1185 }, { x: 735, y: 1185 }, { x: 810, y: 1185 }, { x: 960, y: 1185 }, { x: 1035, y: 1185 }, { x: 1110, y: 1185 },
+  { x: 1185, y: 1185 }, { x: 1260, y: 1185 }, { x: 1335, y: 1185 }, { x: 1410, y: 1185 }, { x: 1485, y: 1185 }, { x: 1560, y: 1185 }, { x: 1635, y: 1185 }, { x: 1710, y: 1185 },
+  { x: 1785, y: 1185 }, { x: 1860, y: 1185 }, { x: 1935, y: 1185 }, { x: 135, y: 1260 }, { x: 210, y: 1260 }, { x: 285, y: 1260 }, { x: 360, y: 1260 }, { x: 435, y: 1260 },
+  { x: 510, y: 1260 }, { x: 585, y: 1260 }, { x: 735, y: 1260 }, { x: 885, y: 1260 }, { x: 960, y: 1260 }, { x: 1035, y: 1260 }, { x: 1110, y: 1260 }, { x: 1185, y: 1260 },
+  { x: 1260, y: 1260 }, { x: 1335, y: 1260 }, { x: 1410, y: 1260 }, { x: 1485, y: 1260 }, { x: 1560, y: 1260 }, { x: 1635, y: 1260 }, { x: 1710, y: 1260 }, { x: 1785, y: 1260 },
+  { x: 1860, y: 1260 }, { x: 1935, y: 1260 }, { x: 135, y: 1335 }, { x: 210, y: 1335 }, { x: 285, y: 1335 }, { x: 360, y: 1335 }, { x: 435, y: 1335 }, { x: 510, y: 1335 },
+  { x: 585, y: 1335 }, { x: 810, y: 1335 }, { x: 885, y: 1335 }, { x: 960, y: 1335 }, { x: 1035, y: 1335 }, { x: 1110, y: 1335 }, { x: 1185, y: 1335 }, { x: 1260, y: 1335 },
+  { x: 1335, y: 1335 }, { x: 1410, y: 1335 }, { x: 1485, y: 1335 }, { x: 1560, y: 1335 }, { x: 1635, y: 1335 }, { x: 1710, y: 1335 }, { x: 1785, y: 1335 }, { x: 1860, y: 1335 },
+  { x: 1935, y: 1335 }, { x: 135, y: 1410 }, { x: 210, y: 1410 }, { x: 285, y: 1410 }, { x: 360, y: 1410 }, { x: 435, y: 1410 }, { x: 510, y: 1410 }, { x: 660, y: 1410 },
+  { x: 735, y: 1410 }, { x: 810, y: 1410 }, { x: 885, y: 1410 }, { x: 960, y: 1410 }, { x: 1035, y: 1410 }, { x: 1110, y: 1410 }, { x: 1185, y: 1410 }, { x: 1260, y: 1410 },
+  { x: 1335, y: 1410 }, { x: 1410, y: 1410 }, { x: 1560, y: 1410 }, { x: 1635, y: 1410 }, { x: 1710, y: 1410 }, { x: 1785, y: 1410 }, { x: 1860, y: 1410 }, { x: 1935, y: 1410 },
+  { x: 135, y: 1485 }, { x: 210, y: 1485 }, { x: 285, y: 1485 }, { x: 360, y: 1485 }, { x: 435, y: 1485 }, { x: 585, y: 1485 }, { x: 660, y: 1485 }, { x: 735, y: 1485 },
+  { x: 810, y: 1485 }, { x: 885, y: 1485 }, { x: 960, y: 1485 }, { x: 1035, y: 1485 }, { x: 1110, y: 1485 }, { x: 1185, y: 1485 }, { x: 1260, y: 1485 }, { x: 1335, y: 1485 },
+  { x: 1560, y: 1485 }, { x: 1635, y: 1485 }, { x: 1710, y: 1485 }, { x: 1785, y: 1485 }, { x: 1860, y: 1485 }, { x: 1935, y: 1485 }, { x: 135, y: 1560 }, { x: 210, y: 1560 },
+  { x: 285, y: 1560 }, { x: 360, y: 1560 }, { x: 510, y: 1560 }, { x: 585, y: 1560 }, { x: 660, y: 1560 }, { x: 735, y: 1560 }, { x: 810, y: 1560 }, { x: 885, y: 1560 },
+  { x: 960, y: 1560 }, { x: 1035, y: 1560 }, { x: 1110, y: 1560 }, { x: 1185, y: 1560 }, { x: 1410, y: 1560 }, { x: 1485, y: 1560 }, { x: 1635, y: 1560 }, { x: 1710, y: 1560 },
+  { x: 1785, y: 1560 }, { x: 1860, y: 1560 }, { x: 1935, y: 1560 }, { x: 60, y: 1635 }, { x: 135, y: 1635 }, { x: 210, y: 1635 }, { x: 285, y: 1635 }, { x: 360, y: 1635 },
+  { x: 510, y: 1635 }, { x: 585, y: 1635 }, { x: 660, y: 1635 }, { x: 735, y: 1635 }, { x: 810, y: 1635 }, { x: 885, y: 1635 }, { x: 960, y: 1635 }, { x: 1035, y: 1635 },
+  { x: 1260, y: 1635 }, { x: 1335, y: 1635 }, { x: 1410, y: 1635 }, { x: 1485, y: 1635 }, { x: 1560, y: 1635 }, { x: 1710, y: 1635 }, { x: 1785, y: 1635 }, { x: 1860, y: 1635 },
+  { x: 1935, y: 1635 }, { x: 60, y: 1710 }, { x: 135, y: 1710 }, { x: 210, y: 1710 }, { x: 285, y: 1710 }, { x: 360, y: 1710 }, { x: 510, y: 1710 }, { x: 585, y: 1710 },
+  { x: 660, y: 1710 }, { x: 735, y: 1710 }, { x: 810, y: 1710 }, { x: 885, y: 1710 }, { x: 960, y: 1710 }, { x: 1035, y: 1710 }, { x: 1185, y: 1710 }, { x: 1260, y: 1710 },
+  { x: 1335, y: 1710 }, { x: 1410, y: 1710 }, { x: 1485, y: 1710 }, { x: 1560, y: 1710 }, { x: 1635, y: 1710 }, { x: 1785, y: 1710 }, { x: 1860, y: 1710 }, { x: 1935, y: 1710 },
+  { x: 60, y: 1785 }, { x: 135, y: 1785 }, { x: 210, y: 1785 }, { x: 285, y: 1785 }, { x: 360, y: 1785 }, { x: 510, y: 1785 }, { x: 585, y: 1785 }, { x: 660, y: 1785 },
+  { x: 735, y: 1785 }, { x: 810, y: 1785 }, { x: 885, y: 1785 }, { x: 960, y: 1785 }, { x: 1110, y: 1785 }, { x: 1185, y: 1785 }, { x: 1260, y: 1785 }, { x: 1335, y: 1785 },
+  { x: 1410, y: 1785 }, { x: 1485, y: 1785 }, { x: 1560, y: 1785 }, { x: 1635, y: 1785 }, { x: 1710, y: 1785 }, { x: 1860, y: 1785 }, { x: 1935, y: 1785 }, { x: 60, y: 1860 },
+  { x: 135, y: 1860 }, { x: 210, y: 1860 }, { x: 285, y: 1860 }, { x: 360, y: 1860 }, { x: 510, y: 1860 }, { x: 585, y: 1860 }, { x: 660, y: 1860 }, { x: 735, y: 1860 },
+  { x: 810, y: 1860 }, { x: 885, y: 1860 }, { x: 1035, y: 1860 }, { x: 1110, y: 1860 }, { x: 1185, y: 1860 }, { x: 1260, y: 1860 }, { x: 1335, y: 1860 }, { x: 1410, y: 1860 },
+  { x: 1485, y: 1860 }, { x: 1560, y: 1860 }, { x: 1635, y: 1860 }, { x: 1710, y: 1860 }, { x: 1785, y: 1860 }, { x: 1935, y: 1860 }, { x: 60, y: 1935 }, { x: 135, y: 1935 },
+  { x: 210, y: 1935 }, { x: 285, y: 1935 }, { x: 360, y: 1935 }, { x: 435, y: 1935 }, { x: 585, y: 1935 }, { x: 660, y: 1935 }, { x: 735, y: 1935 }, { x: 810, y: 1935 },
+  { x: 960, y: 1935 }, { x: 1035, y: 1935 }, { x: 1110, y: 1935 }, { x: 1185, y: 1935 }, { x: 1260, y: 1935 }, { x: 1335, y: 1935 }, { x: 1410, y: 1935 }, { x: 1485, y: 1935 },
+  { x: 1560, y: 1935 }, { x: 1635, y: 1935 }, { x: 1710, y: 1935 }, { x: 1785, y: 1935 }, { x: 1860, y: 1935 },
 ];
 
 export const MAX_LEVEL = 3;
 
 export const LEVELS = {
   1: {
-    // Vehicles only have one road here -- wrapped in an array so
-    // pathForSpawn's "pick one of this level's paths" logic works the
-    // same regardless of how many branches a level has.
     paths: [LEVEL1_PATH],
     soldierEntry: LEVEL1_PATH[0],
     soldierExit: LEVEL1_PATH.at(-1),
     mapImage: "assets/map_bg.png",
     buildSlots: LEVEL1_BUILD_SLOTS,
-    // Every level carries its own world size explicitly (rather than
-    // main.js falling back to the viewport's own CANVAS_WIDTH/HEIGHT
-    // whenever it's absent) so the camera-scroll code has one thing to
-    // read regardless of level -- here it's just the viewport itself,
-    // i.e. this level never scrolls.
     worldWidth: CANVAS_WIDTH,
     worldHeight: CANVAS_HEIGHT,
   },
   2: {
     paths: [LEVEL2_LEFT_PATH, LEVEL2_RIGHT_PATH],
-    // Soldiers roam anywhere between an entry and exit point regardless
-    // of which branch vehicles take -- the left branch's start and the
-    // shared tail's end are as good a representative pair as any.
     soldierEntry: LEVEL2_LEFT_PATH[0],
     soldierExit: LEVEL2_SHARED_TAIL.at(-1),
     mapImage: "assets/map_bg_level2.png",
@@ -276,19 +357,26 @@ export const LEVELS = {
     worldHeight: CANVAS_HEIGHT,
   },
   3: {
-    paths: [LEVEL3_NORTH_PATH, LEVEL3_EAST_PATH, LEVEL3_WEST_PATH],
-    // The north path's start and the shared interior target every road
-    // leads to -- soldiers roam the whole world in between (see map.js's
-    // randomPath), routed through a gate rather than the wall itself
-    // via the `wall` entry below.
-    soldierEntry: LEVEL3_NORTH_PATH[0],
+    paths: [
+      LEVEL3_NORTH_MAIN_PATH,
+      LEVEL3_NORTHEAST_PATH,
+      LEVEL3_NORTHWEST_PATH,
+      LEVEL3_SOUTHEAST_PATH,
+      LEVEL3_SOUTH_PATH,
+    ],
+    soldierEntries: [
+      LEVEL3_NORTH_MAIN_PATH[0],
+      LEVEL3_NORTHEAST_PATH[0],
+      LEVEL3_NORTHWEST_PATH[0],
+      LEVEL3_SOUTHEAST_PATH[0],
+      LEVEL3_SOUTH_PATH[0],
+    ],
+    soldierEntry: LEVEL3_NORTH_MAIN_PATH[0],
     soldierExit: LEVEL3_BASE_INTERIOR,
     mapImage: "assets/map_bg_level3.jpg",
     buildSlots: LEVEL3_BUILD_SLOTS,
     worldWidth: LEVEL3_WORLD_SIZE,
     worldHeight: LEVEL3_WORLD_SIZE,
-    // The fortress wall soldiers must route around -- see LEVEL3_WALL
-    // above. Levels 1/2 have no such obstacle, so they simply omit this.
     wall: LEVEL3_WALL,
   },
 };

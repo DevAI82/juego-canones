@@ -63,7 +63,7 @@ test("createEnemy scales tank armorMult and rocket fireRange with waveIndex, cap
   const earlyRocket = createEnemy("rocket", PATH, 0);
   const maxRocket = createEnemy("rocket", PATH, 999);
   assert.equal(earlyRocket.fireRange, ENEMY_TYPES.rocket.fireRange);
-  assert.ok(Math.abs(maxRocket.fireRange - ENEMY_TYPES.rocket.fireRange * 1.2 ** 5) < 1e-6);
+  assert.ok(Math.abs(maxRocket.fireRange - ENEMY_TYPES.rocket.fireRange * 1.09 ** 5) < 1e-6);
 
   // Non-tank/rocket types are untouched by waveIndex.
   const lateSoldier = createEnemy("soldier", PATH, 999);

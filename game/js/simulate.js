@@ -38,7 +38,7 @@ const ENEMY_SEPARATION_DIST = 14;
 // snaps to it; a slot within this radius of an existing live tower
 // counts as occupied. Wide enough that clicking doesn't need to be
 // pixel-precise.
-const SLOT_SNAP_RADIUS = 45;
+const SLOT_SNAP_RADIUS = 55;
 const SLOT_OCCUPIED_RADIUS = 20;
 
 function nearestSlot(slots, x, y) {
@@ -62,8 +62,11 @@ function assignId(obj) {
 
 function pathForSpawn(type, level) {
   const level_ = levelData(level);
-  if (type === "soldier") return randomPath(level_.soldierEntry, level_.soldierExit, level_.worldHeight, level_.wall);
-  // Levels can offer more than one road (level 2's fork) -- each vehicle
+  if (type === "soldier") {
+    const entry = level_.soldierEntries ? level_.soldierEntries[Math.floor(Math.random() * level_.soldierEntries.length)] : level_.soldierEntry;
+    return randomPath(entry, level_.soldierExit, level_.worldHeight, level_.wall);
+  }
+  // Levels can offer more than one road -- each vehicle
   // spawn picks one at random, then gets its own lane offset within it.
   const basePath = level_.paths[Math.floor(Math.random() * level_.paths.length)];
   const laneOffset = (Math.random() * 2 - 1) * VEHICLE_LANE_HALF_WIDTH;
@@ -244,27 +247,22 @@ export function stepSimulation(state, dt) {
   for (const t of state.towers) {
     const shot = stepTower(t, state.enemies, dt);
     if (shot) {
+      // Calculate muzzle position at the tip of the turret's cannon barrel
+      const barrelLen = t.type === "laser" ? 34 : t.type === "double" ? 32 : 30;
+      const muzzleX = t.x + Math.cos(t.angle) * barrelLen;
+      const muzzleY = t.y + Math.sin(t.angle) * barrelLen;
+
       if (t.type === "laser") {
-        // A railgun beam travels effectively instantly -- damage the
-        // target immediately rather than spawning a bullet that flies
-        // toward it, and leave only a brief visual flash behind.
+        // A railgun beam travels instantly from the muzzle to the target
         damageEnemy(shot.target, shot.damage);
-        state.beams.push(assignId({ x1: shot.x, y1: shot.y, x2: shot.target.x, y2: shot.target.y, age: 0, duration: 0.15 }));
+        state.beams.push(assignId({ x1: muzzleX, y1: muzzleY, x2: shot.target.x, y2: shot.target.y, age: 0, duration: 0.15 }));
       } else {
         for (let i = 0; i < shot.projectilesPerShot; i++) {
-          // Offset each shot perpendicular to the barrel so the double
-          // tower's two rounds are visibly two separate bullets from its
-          // twin barrels, not one bullet drawn on top of the other.
-          // 14px (was 6): at the towers' current draw size the old gap read
-          // as one thick dot rather than two distinct shots -- per user
-          // feedback wanting the double tower's twin barrels clearly visible.
-          const spread = shot.projectilesPerShot > 1 ? (i - (shot.projectilesPerShot - 1) / 2) * 14 : 0;
-          const px = shot.x - Math.sin(t.angle) * spread;
-          const py = shot.y + Math.cos(t.angle) * spread;
-          // Both cannon towers (basic/double) fire the tank-shell sprite
-          // per user request; only the laser (handled above, a beam) is
-          // visually different among player towers.
-          state.projectiles.push(assignId(createProjectile(px, py, shot.target, shot.damage, 400, "shell", "cannon")));
+          // Offset each shot perpendicular to the barrel for double cannons
+          const spread = shot.projectilesPerShot > 1 ? (i - (shot.projectilesPerShot - 1) / 2) * 12 : 0;
+          const px = muzzleX - Math.sin(t.angle) * spread;
+          const py = muzzleY + Math.cos(t.angle) * spread;
+          state.projectiles.push(assignId(createProjectile(px, py, shot.target, shot.damage, 420, "shell", "cannon")));
         }
       }
     }
@@ -413,8 +411,25 @@ export function sellTower(state, towerId) {
 
 export function skipWave(state) {
   if (state.gameOver || state.win || state.levelComplete) return { ok: false, reason: "game-over" };
-  state.interWaveTimer = 0;
-  return { ok: true };
+  // If waiting in inter-wave countdown, start the wave immediately
+  if (state.interWaveTimer > 0) {
+    state.interWaveTimer = 0;
+    return { ok: true, wave: state.waveIndex + 1 };
+  }
+  // If wave is running, allow calling the next wave early to speed up the game!
+  if (state.waveIndex < WAVES.length - 1) {
+    state.waveIndex++;
+    state.totalWavesCleared++;
+    state.economy.wave = state.waveIndex + 1;
+    const nextQueue = buildSpawnQueue(state.waveIndex);
+    // Offset spawn times so they begin spawning from the current clock
+    for (const item of nextQueue) {
+      item.time += state.waveClock;
+    }
+    state.spawnQueue = state.spawnQueue.concat(nextQueue).sort((a, b) => a.time - b.time);
+    return { ok: true, wave: state.waveIndex + 1 };
+  }
+  return { ok: false, reason: "last-wave" };
 }
 
 export function togglePause(state) {

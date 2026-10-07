@@ -237,84 +237,91 @@ def tint_red(im, strength=0.55):
     return Image.fromarray(out, mode="RGBA")
 
 
+def clean_alpha_matte(im_rgb, bg_color=None, tol=24, edge=4):
+    """Produces smooth, anti-aliased alpha transparency around a studio-rendered unit."""
+    arr = np.array(im_rgb).astype(float)
+    if bg_color is None:
+        borders = np.concatenate([arr[0, :], arr[-1, :], arr[:, 0], arr[:, -1]], axis=0)
+        bg_color = np.median(borders, axis=0)
+    
+    dist = np.linalg.norm(arr - bg_color, axis=2)
+    alpha = np.clip((dist - tol) / max(edge, 1), 0.0, 1.0)
+    
+    core = dist > (tol + 16)
+    core_filled = ndimage.binary_fill_holes(core)
+    alpha = np.maximum(alpha, core_filled.astype(float))
+    
+    alpha_im = Image.fromarray((alpha * 255).astype(np.uint8), mode="L")
+    from PIL import ImageFilter
+    alpha_im = alpha_im.filter(ImageFilter.GaussianBlur(0.6))
+    
+    rgba = np.dstack([arr.astype(np.uint8), np.array(alpha_im)])
+    
+    alpha_arr = np.array(alpha_im)
+    rows = np.where(alpha_arr > 10)[0]
+    cols = np.where(alpha_arr > 10)[1]
+    if len(rows) > 0 and len(cols) > 0:
+        y0, y1 = max(0, rows.min() - 2), min(arr.shape[0], rows.max() + 3)
+        x0, x1 = max(0, cols.min() - 2), min(arr.shape[1], cols.max() + 3)
+        return Image.fromarray(rgba[y0:y1, x0:x1])
+    return Image.fromarray(rgba)
+
+
 def extract_enemies():
-    im = Image.open(ROOT / "ENEMIGOS CENITAL.jpg").convert("RGB")
-    bg = (254, 254, 254)
-    # label boxes, in ORIGINAL image coordinates
-    label_boxes_orig = [
-        (0, 205, 1024, 225),   # "VISTAS CENITALES DE ENEMIGOS..." (top instance)
-        (560, 378, 1024, 398), # same label, lower instance
-    ]
+    # Extracted from the high-resolution sheet (2752x1536) in enemigos/enemigos.jpg
+    # Using clean alpha matting without artificial tinting to keep original military colors
+    im = Image.open(ROOT / "enemigos" / "enemigos.jpg").convert("RGB")
+    
+    # 1. Heavy Battle Tank (Top-Left)
+    tank_box = (35, 75, 940, 520)
+    tank_clean = clean_alpha_matte(im.crop(tank_box), tol=22, edge=5)
+    w, h = tank_clean.size
+    scale = 512 / max(w, h)
+    tank_out = tank_clean.resize((int(w * scale), int(h * scale)), Image.Resampling.LANCZOS)
+    tank_out.save(OUT / "enemy_tank.png")
 
-    # width trimmed from 445->420: the source APC vehicle art starts at
-    # x434, and 445 was pulling in a sliver of it
-    tank_box = (10, 5, 420, 215)
-    tank = im.crop(tank_box)
-    tank_rgba = color_key(tank, bg)
-    tank_rgba = clear_regions(tank_rgba, [
-        (lx0 - tank_box[0], ly0 - tank_box[1], lx1 - tank_box[0], ly1 - tank_box[1])
-        for (lx0, ly0, lx1, ly1) in label_boxes_orig
-    ])
-    downscale(tint_red(tank_rgba)).save(OUT / "enemy_tank.png")
+    # 2. Combat Buggy
+    buggy_box = (1920, 580, 2640, 1010)
+    buggy_clean = clean_alpha_matte(im.crop(buggy_box), tol=22, edge=5)
+    w, h = buggy_clean.size
+    scale = 512 / max(w, h)
+    buggy_out = buggy_clean.resize((int(w * scale), int(h * scale)), Image.Resampling.LANCZOS)
+    buggy_out.save(OUT / "enemy_buggy.png")
 
-    buggy_box = (700, 210, 1005, 365)
-    buggy = im.crop(buggy_box)
-    buggy_rgba = color_key(buggy, bg)
-    buggy_rgba = clear_regions(buggy_rgba, [
-        (lx0 - buggy_box[0], ly0 - buggy_box[1], lx1 - buggy_box[0], ly1 - buggy_box[1])
-        for (lx0, ly0, lx1, ly1) in label_boxes_orig
-    ])
-    # Like the player towers, the source art's natural olive/khaki tone
-    # (mean RGB ~71,70,60) is dark and low-saturation -- almost identical
-    # to the trench's own dirt color, so at the tiny on-screen draw size
-    # it effectively disappears against the terrain. Warm the tint up so
-    # it reads as a distinct enemy unit against both grass and dirt.
-    buggy_rgba = tint_toward(buggy_rgba, (195, 140, 70), strength=0.35)
-    downscale(buggy_rgba).save(OUT / "enemy_buggy.png")
-
+    # 3. Infantry Soldier (from ENEMIGOS CENITAL.jpg reference)
+    im_cen = Image.open(ROOT / "enemigos" / "ENEMIGOS CENITAL.jpg").convert("RGB")
     soldier_box = (895, 450, 990, 550)
-    soldier = im.crop(soldier_box)
-    soldier_rgba = color_key(soldier, bg)
-    soldier_rgba = clear_regions(soldier_rgba, [
-        (lx0 - soldier_box[0], ly0 - soldier_box[1], lx1 - soldier_box[0], ly1 - soldier_box[1])
-        for (lx0, ly0, lx1, ly1) in label_boxes_orig
-    ])
-    # Same problem as the buggy, worse: at only ~95x100px before downscale
-    # (drawn smaller still in-game than any other sprite), a dark
-    # camo-green soldier on dark trench dirt was reported as effectively
-    # invisible. A stronger, warmer tint than the buggy's gives the small
-    # sprite some color to read even at a few pixels tall.
-    soldier_rgba = tint_toward(soldier_rgba, (215, 165, 80), strength=0.5)
-    downscale(soldier_rgba).save(OUT / "enemy_soldier.png")
+    soldier_crop = im_cen.crop(soldier_box)
+    soldier_clean = clean_alpha_matte(soldier_crop, bg_color=[254, 254, 254], tol=20, edge=4)
+    w, h = soldier_clean.size
+    scale = 256 / max(w, h)
+    soldier_out = soldier_clean.resize((int(w * scale), int(h * scale)), Image.Resampling.LANCZOS)
+    from PIL import ImageEnhance
+    soldier_out = ImageEnhance.Sharpness(soldier_out).enhance(1.4)
+    soldier_out.save(OUT / "enemy_soldier.png")
 
 
 def extract_new_enemies():
     """Motorcycle and rocket-launcher-truck enemies, added per user request
-    (both are vehicles -- they use PATH, not SOLDIER_PATH, wired in
-    main.js). Sources are clean top-down crops from their own reference
-    sheets (enemigos/motocicletas.jpg, enemigos/lanzacohetes.jpg), each on
-    a uniform grey background -- no labels or neighboring-art bleed to
-    work around, same easy case as the tower turret renders.
+    from clean high-res reference sheets (enemigos/motocicletas.jpg, enemigos/lanzacohetes.jpg).
     """
     moto_im = Image.open(ROOT / "enemigos" / "motocicletas.jpg").convert("RGB")
-    moto_bg = moto_im.getpixel((2, 2))
-    moto_box = (5, 50, 140, 275)
-    moto = color_key(moto_im.crop(moto_box), moto_bg)
-    # Source bike faces up (front wheel at the top); rotate it to the
-    # game's +x-facing convention the same way tower_double/tower_laser
-    # were (clockwise, i.e. PIL's -90, turns "up" into "right").
-    moto = moto.rotate(-90, expand=True)
-    downscale(moto).save(OUT / "enemy_motorcycle.png")
+    moto_box = (5, 45, 148, 280)
+    moto_clean = clean_alpha_matte(moto_im.crop(moto_box), tol=22, edge=4)
+    moto_rotated = moto_clean.rotate(-90, expand=True, resample=Image.Resampling.BICUBIC)
+    w, h = moto_rotated.size
+    scale = 384 / max(w, h)
+    moto_out = moto_rotated.resize((int(w * scale), int(h * scale)), Image.Resampling.LANCZOS)
+    moto_out.save(OUT / "enemy_motorcycle.png")
 
     rocket_im = Image.open(ROOT / "enemigos" / "lanzacohetes.jpg").convert("RGB")
-    rocket_bg = rocket_im.getpixel((2, 2))
     rocket_box = (15, 50, 505, 270)
-    rocket = color_key(rocket_im.crop(rocket_box), rocket_bg)
-    # Source truck faces left (cab on the left); mirror it rather than
-    # rotating 180, so "near/far side" stays up/down and only left-right
-    # flips, same treatment as tower_double's mirrored barrels.
-    rocket = rocket.transpose(Image.FLIP_LEFT_RIGHT)
-    downscale(rocket).save(OUT / "enemy_rocket.png")
+    rocket_clean = clean_alpha_matte(rocket_im.crop(rocket_box), tol=22, edge=4)
+    rocket_flipped = rocket_clean.transpose(Image.FLIP_LEFT_RIGHT)
+    w, h = rocket_flipped.size
+    scale = 512 / max(w, h)
+    rocket_out = rocket_flipped.resize((int(w * scale), int(h * scale)), Image.Resampling.LANCZOS)
+    rocket_out.save(OUT / "enemy_rocket.png")
 
 
 def extract_projectile():
@@ -671,7 +678,6 @@ def extract_armor_icon():
 
 
 if __name__ == "__main__":
-    extract_towers()
     extract_enemies()
     extract_new_enemies()
     extract_projectile()
@@ -679,7 +685,7 @@ if __name__ == "__main__":
     extract_map()
     extract_map_level2()
     extract_map_level3()
-    extract_tower_basic()
-    extract_tower_basic_build()
+    from extract_all_turrets import main as extract_all_turrets_main
+    extract_all_turrets_main()
     extract_armor_icon()
     print("Assets written to", OUT)
