@@ -1,4 +1,5 @@
 import { lerpAngle } from "./util.js";
+import { pickTowerTarget, ROCKET_SIEGE_TIME, SOLDIER_SPRINT_TIME, SOLDIER_SPRINT_MULT, SOLDIER_SPRINT_COOLDOWN } from "./ai.js";
 
 // How quickly an enemy's facing angle catches up to its direction of
 // travel, in "fraction of the remaining turn per second". Higher = snappier.
@@ -31,7 +32,9 @@ function progressiveLevel(waveIndex) {
   return Math.min(MAX_PROGRESSIVE_LEVEL, Math.floor(waveIndex / WAVES_PER_LEVEL));
 }
 
-export function createEnemy(type, path, waveIndex = 0) {
+// pathIndex: which of the level's roads a vehicle took (index into
+// levels.js's `paths`), or null for a soldier's own random route.
+export function createEnemy(type, path, waveIndex = 0, pathIndex = null) {
   const def = ENEMY_TYPES[type];
   // +/-10% per-instance speed variation so a wave of identical enemies
   // doesn't move in a perfectly uniform, robotic block.
@@ -52,6 +55,7 @@ export function createEnemy(type, path, waveIndex = 0) {
     fireTimer: def.fireCooldown,
     armorMult,
     path,
+    pathIndex,
     waypointIndex: 0,
     x: path[0].x,
     y: path[0].y,
@@ -59,6 +63,14 @@ export function createEnemy(type, path, waveIndex = 0) {
     // Random phase offset for the walking/driving bob animation (drawn in
     // main.js), so enemies of the same type don't all bob in lockstep.
     bobPhase: Math.random() * Math.PI * 2,
+    // Seconds of siege a rocket truck has left (ai.js's holdsForSiege),
+    // and whether it's stopped to shell a tower right now.
+    siegeLeft: type === "rocket" ? ROCKET_SIEGE_TIME : 0,
+    holding: false,
+    // Seconds left of a soldier's sprint after being hit, and until it can
+    // sprint again.
+    sprint: 0,
+    sprintCooldown: 0,
     alive: true,
   };
 }
@@ -68,10 +80,16 @@ export function stepEnemy(enemy, dt) {
   const target = enemy.path[enemy.waypointIndex + 1];
   if (!target) return { reachedEnd: true };
 
+  let speed = enemy.speed;
+  if (enemy.sprintCooldown > 0) enemy.sprintCooldown = Math.max(0, enemy.sprintCooldown - dt);
+  if (enemy.sprint > 0) {
+    enemy.sprint = Math.max(0, enemy.sprint - dt);
+    speed *= SOLDIER_SPRINT_MULT;
+  }
   const dx = target.x - enemy.x;
   const dy = target.y - enemy.y;
   const dist = Math.hypot(dx, dy);
-  const step = enemy.speed * dt;
+  const step = speed * dt;
 
   if (step >= dist) {
     enemy.x = target.x;
@@ -90,6 +108,9 @@ export function damageEnemy(enemy, amount) {
   if (enemy.hp <= 0) {
     enemy.hp = 0;
     enemy.alive = false;
+  } else if (enemy.type === "soldier" && !(enemy.sprintCooldown > 0)) {
+    enemy.sprint = SOLDIER_SPRINT_TIME;
+    enemy.sprintCooldown = SOLDIER_SPRINT_COOLDOWN;
   }
   return enemy.alive;
 }
@@ -99,16 +120,7 @@ export function stepEnemyFire(enemy, towers, dt) {
   enemy.fireTimer -= dt;
   if (enemy.fireTimer > 0) return null;
 
-  let best = null;
-  let bestDist = Infinity;
-  for (const t of towers) {
-    if (t.hp <= 0) continue;
-    const d = Math.hypot(t.x - enemy.x, t.y - enemy.y);
-    if (d <= enemy.fireRange && d < bestDist) {
-      best = t;
-      bestDist = d;
-    }
-  }
+  const best = pickTowerTarget(enemy, towers);
   if (!best) return null;
 
   enemy.fireTimer = enemy.fireCooldown;

@@ -15,6 +15,7 @@ import {
   togglePause,
 } from "./simulate.js";
 import { MAX_LEVEL, levelData } from "./levels.js";
+import { pickTowerTarget } from "./ai.js";
 import { playSound, toggleMuted, startMusic, pauseMusic, resumeMusic } from "./audio.js";
 
 // Browsers refuse to start any audio (synthesized SFX or the background
@@ -438,6 +439,40 @@ function drawEnemy(e) {
   ctx.fillRect(e.x - barW / 2, barY, barW, barH);
   ctx.fillStyle = pct > 0.5 ? "#2ecc71" : pct > 0.25 ? "#f1c40f" : "#e74c3c";
   ctx.fillRect(e.x - barW / 2, barY, barW * pct, barH);
+  ctx.restore();
+}
+
+// A rocket truck stopped to shell a tower from out of its reach (ai.js's
+// holdsForSiege) paints its target with a pulsing red targeting line and
+// reticle -- so the player can see what's hitting them from out of range,
+// and which tower is in danger. Same target choice the simulation's own
+// fire uses (pickTowerTarget), recomputed here from the drawn state.
+function drawSiegeDesignator(e) {
+  const target = pickTowerTarget(e, state.towers);
+  if (!target) return;
+  const alpha = 0.5 + 0.3 * Math.sin(frameNow * 10);
+  ctx.save();
+  ctx.strokeStyle = `rgba(255, 50, 30, ${alpha})`;
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([7, 5]);
+  ctx.lineDashOffset = -frameNow * 40; // dashes march toward the target
+  ctx.beginPath();
+  ctx.moveTo(e.x, e.y);
+  ctx.lineTo(target.x, target.y);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  const r = 30;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(target.x, target.y, r, 0, Math.PI * 2);
+  ctx.stroke();
+  for (let k = 0; k < 4; k++) {
+    const a = (k * Math.PI) / 2 + frameNow * 1.5;
+    ctx.beginPath();
+    ctx.moveTo(target.x + Math.cos(a) * (r - 7), target.y + Math.sin(a) * (r - 7));
+    ctx.lineTo(target.x + Math.cos(a) * (r + 7), target.y + Math.sin(a) * (r + 7));
+    ctx.stroke();
+  }
   ctx.restore();
 }
 
@@ -1421,6 +1456,7 @@ function loop(now) {
   // removes the visual debug overlay.
   for (const t of state.towers) drawTower(t);
   for (const e of state.enemies) drawEnemy(e);
+  for (const e of state.enemies) if (e.holding) drawSiegeDesignator(e);
   for (const p of state.projectiles) drawProjectile(p);
   for (const bm of state.beams) drawBeam(bm);
   for (const ex of state.explosions) drawExplosion(ex);

@@ -77,6 +77,15 @@ test("damageEnemy scales incoming damage by armorMult", () => {
   assert.ok(Math.abs(before - e.hp - 100 * 0.85 ** 5) < 1e-6);
 });
 
+test("stepEnemyFire shoots the most damaged tower in range, not just the nearest", () => {
+  const e = createEnemy("tank", PATH);
+  e.fireTimer = 0;
+  const near = { x: 20, y: 0, hp: 80, maxHp: 80 };
+  const damaged = { x: 100, y: 0, hp: 15, maxHp: 80 };
+  const shot = stepEnemyFire(e, [near, damaged], 0.016);
+  assert.equal(shot.target, damaged);
+});
+
 test("stepEnemyFire returns null when no tower in range", () => {
   const e = createEnemy("soldier", PATH);
   e.x = 0; e.y = 0;

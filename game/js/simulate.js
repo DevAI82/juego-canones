@@ -18,6 +18,7 @@ import { createEconomy, earn, loseLife, spend, canAfford } from "./economy.js";
 import { createTower, stepTower, damageTower, TOWER_TYPES, MUZZLE_OFFSET } from "./tower.js";
 import { createProjectile, stepProjectile } from "./projectile.js";
 import { applyUpgrade, upgradeCost, canUpgrade } from "./upgrades.js";
+import { chooseRoute, SOLDIER_ROUTE_CANDIDATES, holdsForSiege } from "./ai.js";
 
 export const SELL_REFUND_FRACTION = 0.6;
 export const INTER_WAVE_DELAY = 4;
@@ -60,17 +61,26 @@ function assignId(obj) {
   return obj;
 }
 
-function pathForSpawn(type, level) {
-  const level_ = levelData(level);
-  if (type === "soldier") {
-    const entry = level_.soldierEntries ? level_.soldierEntries[Math.floor(Math.random() * level_.soldierEntries.length)] : level_.soldierEntry;
-    return randomPath(entry, level_.soldierExit, level_.worldHeight, level_.wall);
+// Returns { path, pathIndex } for a spawn-queue item. Soldiers weigh a few
+// random routes (from any of the level's entries) and take a weakly
+// defended one. Vehicles pick among the level's roads the same way (ai.js's
+// chooseRoute) -- except an escort, which takes the road its lead heavy
+// already took (stamped on it by trySpawn) -- then get their own lane
+// offset within it.
+function pathForSpawn(item, state) {
+  const level_ = levelData(state.level);
+  if (item.type === "soldier") {
+    const entries = level_.soldierEntries || [level_.soldierEntry];
+    const candidates = [];
+    for (let i = 0; i < SOLDIER_ROUTE_CANDIDATES; i++) {
+      const entry = entries[Math.floor(Math.random() * entries.length)];
+      candidates.push(randomPath(entry, level_.soldierExit, level_.worldHeight, level_.wall));
+    }
+    return { path: candidates[chooseRoute(candidates, state.towers)], pathIndex: null };
   }
-  // Levels can offer more than one road -- each vehicle
-  // spawn picks one at random, then gets its own lane offset within it.
-  const basePath = level_.paths[Math.floor(Math.random() * level_.paths.length)];
+  const pathIndex = item.pathIndex ?? chooseRoute(level_.paths, state.towers);
   const laneOffset = (Math.random() * 2 - 1) * VEHICLE_LANE_HALF_WIDTH;
-  return offsetPath(basePath, laneOffset);
+  return { path: offsetPath(level_.paths[pathIndex], laneOffset), pathIndex };
 }
 
 // Nudges any two alive enemies closer than ENEMY_SEPARATION_DIST directly
@@ -196,13 +206,19 @@ export function startNextLevel(state) {
 function trySpawn(state) {
   if (state.interWaveTimer > 0) return;
   while (state.spawnQueue.length && state.spawnQueue[0].time <= state.waveClock) {
-    const { type } = state.spawnQueue.shift();
+    const item = state.spawnQueue.shift();
     // Vehicles are confined to the current level's road(s) (in their own
     // randomized lane, see pathForSpawn); only foot soldiers roam the
     // whole map. waveIndex drives the tank/rocket's progressive
     // armor/range (enemy.js) -- resets with each new level, same as the
     // wave curve itself.
-    state.enemies.push(assignId(createEnemy(type, pathForSpawn(type, state.level), state.waveIndex)));
+    const { path, pathIndex } = pathForSpawn(item, state);
+    // A lead heavy's road is stamped on its escorts still in the queue
+    // (they always spawn after it, waves.js's ESCORT_DELAY).
+    if (item.convoy != null && item.pathIndex == null) {
+      for (const q of state.spawnQueue) if (q.convoy === item.convoy) q.pathIndex = pathIndex;
+    }
+    state.enemies.push(assignId(createEnemy(item.type, path, state.waveIndex, pathIndex)));
   }
 }
 
@@ -242,7 +258,9 @@ export function stepSimulation(state, dt) {
   }
   trySpawn(state);
 
+  const { worldWidth, worldHeight } = levelData(state.level);
   for (const e of state.enemies) {
+    if (holdsForSiege(e, state.towers, dt, worldWidth, worldHeight)) continue;
     const { reachedEnd } = stepEnemy(e, dt);
     if (reachedEnd) {
       e.alive = false;

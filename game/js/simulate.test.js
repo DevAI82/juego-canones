@@ -12,7 +12,7 @@ import {
   skipWave,
   togglePause,
 } from "./simulate.js";
-import { PATH } from "./map.js";
+import { PATH, distanceToPath } from "./map.js";
 import { MAX_LEVEL, LEVELS } from "./levels.js";
 import { WAVES } from "./waves.js";
 
@@ -169,6 +169,50 @@ test("level 3 offers multiple separate roads, each usable by vehicle spawns", ()
   assert.ok(LEVELS[3].paths.length >= 3);
   for (const path of LEVELS[3].paths) {
     assert.ok(path.length > 1);
+  }
+});
+
+test("on a level with several roads, vehicles mostly avoid the one the towers cover", (t) => {
+  // Deterministic randomness, so this statistical check can't flake.
+  let seed = 3;
+  t.mock.method(Math, "random", () => {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return seed / 2 ** 32;
+  });
+  const s = createGameState(3);
+  s.economy.money = 100000;
+  const { paths, buildSlots } = LEVELS[3];
+  const defended = paths[1];
+  // Slots next to road 1 and out of every tower's reach of the others.
+  const slots = buildSlots.filter(
+    (sl) => distanceToPath(defended, sl.x, sl.y) < 90 && paths.every((p) => p === defended || distanceToPath(p, sl.x, sl.y) > 300)
+  );
+  for (const [type, n] of [["double", 4], ["basic", 6]]) {
+    for (let i = 0; i < n; i++) {
+      const sl = slots.shift();
+      assert.equal(placeTower(s, type, sl.x, sl.y).ok, true);
+    }
+  }
+  s.spawnQueue = Array.from({ length: 300 }, () => ({ type: "buggy", time: 0 }));
+  stepSimulation(s, 0.001);
+  assert.equal(s.enemies.length, 300);
+  const onDefended = s.enemies.filter((e) => e.pathIndex === 1).length;
+  // A random pick would put ~60 of 300 on it (1 road in 5); the AI keeps
+  // it to roughly the share it explores at random (~24).
+  assert.ok(onDefended < 40, `${onDefended} of 300 vehicles took the defended road`);
+});
+
+test("escorts take the same road as the heavy they escort", () => {
+  for (let trial = 0; trial < 10; trial++) {
+    const s = createGameState(3);
+    s.spawnQueue = [
+      { type: "tank", time: 0, convoy: 1 },
+      { type: "buggy", time: 0.5, convoy: 1 },
+      { type: "motorcycle", time: 0.6, convoy: 1 },
+    ];
+    for (let i = 0; i < 20; i++) stepSimulation(s, 0.05);
+    assert.equal(s.enemies.length, 3);
+    assert.equal(new Set(s.enemies.map((e) => e.pathIndex)).size, 1);
   }
 });
 

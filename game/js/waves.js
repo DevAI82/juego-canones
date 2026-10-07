@@ -69,6 +69,13 @@ export const WAVES = [
 // maintaining tight convoy formation so heavies take the frontline damage.
 const ESCORT_DELAY = 0.45;
 
+// Each lead heavy and the escorts assigned to it share a `convoy` key,
+// unique within a level (waveIndex * CONVOY_KEY_STRIDE + the lead's
+// number in its wave -- no wave has anywhere near this many heavies), so
+// simulate.js can send the escorts down whichever road their lead took
+// on the levels with more than one.
+const CONVOY_KEY_STRIDE = 1000;
+
 export function buildSpawnQueue(waveIndex) {
   const wave = WAVES[waveIndex];
   const queue = [];
@@ -85,7 +92,7 @@ export function buildSpawnQueue(waveIndex) {
 
   for (const group of wave.enemies) {
     if (group === leadGroup) {
-      for (const t of leadTimes) queue.push({ type: group.type, time: t });
+      leadTimes.forEach((t, i) => queue.push({ type: group.type, time: t, convoy: waveIndex * CONVOY_KEY_STRIDE + i }));
       continue;
     }
     // Motorcycles and buggies ride closely behind the armored vanguard, cycling through
@@ -96,7 +103,12 @@ export function buildSpawnQueue(waveIndex) {
       if (isEscort) {
         const lap = Math.floor(i / leadTimes.length);
         const stagger = group.type === "motorcycle" ? 0.15 : 0;
-        queue.push({ type: group.type, time: leadTimes[i % leadTimes.length] + ESCORT_DELAY + lap * 0.25 + stagger });
+        const lead = i % leadTimes.length;
+        queue.push({
+          type: group.type,
+          time: leadTimes[lead] + ESCORT_DELAY + lap * 0.25 + stagger,
+          convoy: waveIndex * CONVOY_KEY_STRIDE + lead,
+        });
       } else {
         queue.push({ type: group.type, time: t });
       }

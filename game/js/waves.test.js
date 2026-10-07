@@ -34,6 +34,22 @@ test("buggies/motorcycles spawn shortly after a tank when the wave has one, not 
   }
 });
 
+test("every escort shares a convoy key with a lead heavy that spawns before it", () => {
+  for (let w = 0; w < WAVES.length; w++) {
+    const queue = buildSpawnQueue(w);
+    const leads = new Map();
+    for (const item of queue) {
+      if (item.convoy == null) continue;
+      if (item.type === "tank" || item.type === "rocket") {
+        if (!leads.has(item.convoy)) leads.set(item.convoy, item.time);
+      } else {
+        assert.ok(leads.has(item.convoy), `wave ${w + 1}: ${item.type} at t=${item.time} has no lead spawned before it`);
+        assert.ok(leads.get(item.convoy) < item.time);
+      }
+    }
+  }
+});
+
 test("every enemy type referenced in WAVES is a known ENEMY_TYPES key", () => {
   for (const wave of WAVES) {
     for (const group of wave.enemies) {
