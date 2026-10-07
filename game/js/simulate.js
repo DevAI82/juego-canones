@@ -15,7 +15,7 @@ import { MAX_LEVEL, levelData } from "./levels.js";
 import { createEnemy, stepEnemy, damageEnemy, stepEnemyFire } from "./enemy.js";
 import { WAVES, buildSpawnQueue } from "./waves.js";
 import { createEconomy, earn, loseLife, spend, canAfford } from "./economy.js";
-import { createTower, stepTower, damageTower, TOWER_TYPES } from "./tower.js";
+import { createTower, stepTower, damageTower, TOWER_TYPES, MUZZLE_OFFSET } from "./tower.js";
 import { createProjectile, stepProjectile } from "./projectile.js";
 import { applyUpgrade, upgradeCost, canUpgrade } from "./upgrades.js";
 
@@ -152,6 +152,12 @@ export function createGameState(level = 1) {
     // difficulty curve, fresh), but scoring.js wants a number that keeps
     // counting through a level transition.
     totalWavesCleared: 0,
+    // How many waves are on the board right now and not yet counted in
+    // totalWavesCleared -- normally 1, more when the player calls the next
+    // wave early (skipWave) before clearing the current one. They're only
+    // credited once the board actually clears (nextWaveIfDone), so calling
+    // waves early and then losing doesn't score waves that were never won.
+    wavesInPlay: 1,
     // Feeds the end-of-game stats screen and scoring.js's score breakdown.
     // Deliberately NOT reset by anything mid-match (including a level
     // transition, see startNextLevel) -- these accumulate for the whole
@@ -204,14 +210,16 @@ function nextWaveIfDone(state) {
   if (state.interWaveTimer > 0) return;
   if (state.spawnQueue.length === 0 && state.enemies.length === 0) {
     if (state.waveIndex < WAVES.length - 1) {
+      state.totalWavesCleared += state.wavesInPlay;
+      state.wavesInPlay = 1;
       state.waveIndex++;
-      state.totalWavesCleared++;
       state.economy.wave = state.waveIndex + 1;
       state.spawnQueue = buildSpawnQueue(state.waveIndex);
       state.waveClock = 0;
       state.interWaveTimer = INTER_WAVE_DELAY;
     } else if (!state.win && !state.levelComplete) {
-      state.totalWavesCleared++; // the final wave counts too
+      state.totalWavesCleared += state.wavesInPlay; // the final wave(s) count too
+      state.wavesInPlay = 0;
       if (state.level < MAX_LEVEL) {
         state.levelComplete = true;
       } else {
@@ -247,10 +255,9 @@ export function stepSimulation(state, dt) {
   for (const t of state.towers) {
     const shot = stepTower(t, state.enemies, dt);
     if (shot) {
-      // Calculate muzzle position at the tip of the turret's cannon barrel
-      const barrelLen = t.type === "laser" ? 34 : t.type === "double" ? 32 : 30;
-      const muzzleX = t.x + Math.cos(t.angle) * barrelLen;
-      const muzzleY = t.y + Math.sin(t.angle) * barrelLen;
+      // Rounds leave from the tip of the turret's barrel, not its center.
+      const muzzleX = t.x + Math.cos(t.angle) * MUZZLE_OFFSET;
+      const muzzleY = t.y + Math.sin(t.angle) * MUZZLE_OFFSET;
 
       if (t.type === "laser") {
         // A railgun beam travels instantly from the muzzle to the target
@@ -416,10 +423,14 @@ export function skipWave(state) {
     state.interWaveTimer = 0;
     return { ok: true, wave: state.waveIndex + 1 };
   }
-  // If wave is running, allow calling the next wave early to speed up the game!
+  // Mid-wave: call the next wave in early to speed things up -- but only
+  // once everything already queued has spawned, so the button can't be
+  // mashed to dump all 40 waves onto the board at once (thousands of
+  // enemies, and an O(n^2) separation pass every tick).
+  if (state.spawnQueue.length > 0) return { ok: false, reason: "wave-still-spawning" };
   if (state.waveIndex < WAVES.length - 1) {
     state.waveIndex++;
-    state.totalWavesCleared++;
+    state.wavesInPlay++; // credited only once the board clears, see nextWaveIfDone
     state.economy.wave = state.waveIndex + 1;
     const nextQueue = buildSpawnQueue(state.waveIndex);
     // Offset spawn times so they begin spawning from the current clock

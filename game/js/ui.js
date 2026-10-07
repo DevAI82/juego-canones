@@ -209,7 +209,15 @@ export function renderStatsModal(overlay, state, rankingEntries) {
       rankingEntries.forEach((entry, i) => {
         const li = document.createElement("li");
         li.className = "stats-ranking-row";
-        li.innerHTML = `<span class="ranking-pos">#${i + 1}</span><span class="ranking-name">${entry.name}</span><span class="ranking-score">${entry.score} pts</span>`;
+        // Built with textContent, not innerHTML: names are typed by players
+        // (and shared across every co-op browser via the server), so they
+        // must never be parsed as HTML.
+        for (const [cls, text] of [["ranking-pos", `#${i + 1}`], ["ranking-name", entry.name], ["ranking-score", `${entry.score} pts`]]) {
+          const span = document.createElement("span");
+          span.className = cls;
+          span.textContent = text;
+          li.appendChild(span);
+        }
         list.appendChild(li);
       });
     }

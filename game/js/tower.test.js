@@ -66,6 +66,29 @@ test("stepTower enters reload after maxAmmo shots", () => {
   assert.equal(t.ammo, 0);
 });
 
+test("stepTower doesn't fire until the barrel has turned to face the target", () => {
+  const t = createTower("basic", 0, 0);
+  t.buildTimeRemaining = 0;
+  t.fireTimer = 0;
+  t.angle = 0; // barrel pointing +x...
+  const behind = fakeEnemy(-50, 0); // ...target directly behind it
+  assert.equal(stepTower(t, [behind], 0.016), null);
+  for (let i = 0; i < 120; i++) stepTower(t, [behind], 0.016);
+  assert.equal(t.ammo < TOWER_TYPES.basic.maxAmmo, true); // fired once it came round
+});
+
+test("the muzzle flash lights only right after a shot, not while idle or reloading", () => {
+  const t = createTower("basic", 0, 0);
+  t.buildTimeRemaining = 0;
+  stepTower(t, [], 0.016);
+  assert.equal(t.muzzleFlash, 0); // idle, nothing to shoot
+  t.fireTimer = 0;
+  stepTower(t, [fakeEnemy(10, 0)], 0.016);
+  assert.ok(t.muzzleFlash > 0);
+  stepTower(t, [], 1); // target gone -- flash must still expire
+  assert.equal(t.muzzleFlash, 0);
+});
+
 // --- Build delay ---------------------------------------------------------
 // Per user request: placing a tower shouldn't make it combat-ready
 // instantly -- it spends BUILD_DURATION "under construction" first (see

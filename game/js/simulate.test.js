@@ -314,6 +314,31 @@ test("skipWave zeroes the inter-wave timer", () => {
   assert.equal(s.interWaveTimer, 0);
 });
 
+test("skipWave mid-wave refuses while the current wave is still spawning", () => {
+  const s = createGameState();
+  assert.ok(s.spawnQueue.length > 0);
+  const r = skipWave(s);
+  assert.equal(r.ok, false);
+  assert.equal(s.waveIndex, 0);
+});
+
+test("calling a wave early doesn't credit it as cleared until the board actually clears", () => {
+  const s = createGameState();
+  s.spawnQueue = []; // wave 1 fully spawned
+  s.enemies = [{ alive: true, hp: 1 }]; // ...but not beaten yet
+  assert.equal(skipWave(s).ok, true);
+  assert.equal(s.waveIndex, 1);
+  assert.equal(s.totalWavesCleared, 0); // nothing actually won yet
+  assert.equal(s.wavesInPlay, 2);
+
+  // Board clears -> both waves count at once.
+  s.spawnQueue = [];
+  s.enemies = [];
+  stepSimulation(s, 0.016);
+  assert.equal(s.totalWavesCleared, 2);
+  assert.equal(s.wavesInPlay, 1);
+});
+
 test("togglePause flips state.paused and stepSimulation no-ops while paused", () => {
   const s = createGameState();
   assert.equal(s.paused, false);

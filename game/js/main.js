@@ -1,6 +1,6 @@
 import { CANVAS_WIDTH, CANVAS_HEIGHT, drawMap } from "./map.js";
 import { WAVES } from "./waves.js";
-import { TOWER_TYPES, BUILD_DURATION } from "./tower.js";
+import { TOWER_TYPES, BUILD_DURATION, MUZZLE_OFFSET } from "./tower.js";
 import { initBuildMenu, updateBuildMenu, initUpgradePanel, updateUpgradePanel, renderGameEndScreen, renderRanking, renderStatsModal } from "./ui.js";
 import {
   createGameState,
@@ -154,12 +154,22 @@ const sprites = {
   projectile: loadImage("assets/projectile.png"),
 };
 
-// Build animation sheets are 6x5 grids of 30 frames (see tools/extract_all_turrets.py)
-// extracted from the 720p 4-second videos for basic, double, and laser turrets.
-const BUILD_ANIM_COLS = 6;
-const BUILD_ANIM_ROWS = 5;
+// Build-animation sheets: 8x6 grids of 48 frames each, keyed from the 720p
+// 4-second build videos (tools/extract_all_turrets.py -- COLS/ROWS there
+// must match these). Their baked-in progress bars are cut out at
+// extraction; drawTowerBuilding draws one progress bar for every type.
+const BUILD_ANIM_COLS = 8;
+const BUILD_ANIM_ROWS = 6;
 const BUILD_ANIM_FRAME_COUNT = BUILD_ANIM_COLS * BUILD_ANIM_ROWS;
-const BUILD_CROSSFADE_FRACTION = 0.1;
+// On-screen size of a build-animation frame: sized so the holographic build
+// grid spans about the tower pedestal's width (drawTowerBase, 80px).
+const BUILD_ANIM_DRAW_SIZE = 96;
+// The final stretch of the build crossfades from the animation's last frame
+// (a 3/4-view render) into the tower's top-down resting sprite, so the
+// switch reads as the effect settling rather than a hard pop.
+const BUILD_CROSSFADE_FRACTION = 0.15;
+// Resting tower sprites are drawn at this size (square PNGs).
+const TOWER_DRAW_SIZE = 76;
 
 function ready(img) {
   return img.complete && img.naturalWidth > 0;
@@ -431,20 +441,34 @@ function drawEnemy(e) {
   ctx.restore();
 }
 
+// The resting (built) turret sprite, rotated so its barrel points along
+// t.angle -- shared by drawTower and the end of drawTowerBuilding's
+// crossfade.
+function drawTurretSprite(t, alpha = 1) {
+  const img = sprites[`tower_${t.type}`];
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(t.x, t.y);
+  ctx.rotate(t.angle - (TOWER_RESTING_ANGLES[t.type] || 0));
+  if (ready(img)) {
+    ctx.drawImage(img, -TOWER_DRAW_SIZE / 2, -TOWER_DRAW_SIZE / 2, TOWER_DRAW_SIZE, TOWER_DRAW_SIZE);
+  } else {
+    ctx.fillStyle = t.type === "laser" ? "#8a6a3a" : t.type === "double" ? "#888" : "#6b7a4a";
+    ctx.fillRect(-14, -10, 28, 20);
+  }
+  ctx.restore();
+}
+
 // Renders a tower that's still under construction (t.buildTimeRemaining
-// > 0): the basic tower plays its build-animation sheet (see the
-// BUILD_ANIM_* constants and tools/extract_assets.py's
-// extract_tower_basic_build), crossfading into the real static sprite
-// over the final BUILD_CROSSFADE_FRACTION of the build; every other type
-// has no footage to work with, so it just fades its own real sprite in
-// instead of popping in instantly, with an hp/ammo-bar-replacing
-// progress bar main.js draws itself. The basic tower's animation frames
-// already have their OWN progress-percentage bar baked in (per user
-// request, from a second purpose-made source with one included), so
-// that fallback bar is skipped there -- drawing both would double up.
+// > 0): its build-animation sheet (BUILD_ANIM_* above), crossfading into
+// the resting sprite over the final BUILD_CROSSFADE_FRACTION, plus a
+// progress bar in place of the hp/ammo bars. Falls back to fading the
+// resting sprite in if the sheet hasn't loaded.
 function drawTowerBuilding(t) {
   const progress = 1 - t.buildTimeRemaining / BUILD_DURATION; // 0 -> 1
   const sheet = sprites[`tower_${t.type}_build`];
+  const crossfadeStart = 1 - BUILD_CROSSFADE_FRACTION;
+  const settle = Math.max(0, (progress - crossfadeStart) / BUILD_CROSSFADE_FRACTION); // 0 -> 1 over the crossfade
 
   if (sheet && ready(sheet)) {
     const frameIndex = Math.min(BUILD_ANIM_FRAME_COUNT - 1, Math.floor(progress * BUILD_ANIM_FRAME_COUNT));
@@ -452,23 +476,14 @@ function drawTowerBuilding(t) {
     const row = Math.floor(frameIndex / BUILD_ANIM_COLS);
     const fw = sheet.naturalWidth / BUILD_ANIM_COLS;
     const fh = sheet.naturalHeight / BUILD_ANIM_ROWS;
-
-    // Sized to match resting turret scale with radial construction base
-    const drawSize = 76;
-    ctx.drawImage(sheet, col * fw, row * fh, fw, fh, t.x - drawSize / 2, t.y - drawSize / 2, drawSize, drawSize);
-  } else {
-    const img = sprites[`tower_${t.type}`];
+    const s = BUILD_ANIM_DRAW_SIZE;
     ctx.save();
-    ctx.globalAlpha = Math.max(0.2, progress);
-    if (ready(img)) {
-      const h = 76;
-      const w = 76;
-      ctx.drawImage(img, t.x - w / 2, t.y - h / 2, w, h);
-    } else {
-      ctx.fillStyle = t.type === "laser" ? "#8a6a3a" : "#888";
-      ctx.fillRect(t.x - 14, t.y - 10, 28, 20);
-    }
+    ctx.globalAlpha = 1 - settle;
+    ctx.drawImage(sheet, col * fw, row * fh, fw, fh, t.x - s / 2, t.y - s / 2, s, s);
     ctx.restore();
+    if (settle > 0) drawTurretSprite(t, settle);
+  } else {
+    drawTurretSprite(t, Math.max(0.2, progress));
   }
 
   // Tactical RTS / Command & Conquer Progress Bar
@@ -565,12 +580,17 @@ function drawTowerBase(t) {
   ctx.restore();
 }
 
-// Natural resting angle of the cannon barrel in each upright 3D sprite:
-// basic points at -59.5°, double points at +90.0° (straight down), laser points at +90.3°
+// Which way each tower sprite's barrel points as drawn in its PNG, so the
+// sprite can be rotated to match t.angle (0 = +x). Measured from the
+// sprites' own alpha (direction of the farthest opaque pixels from the
+// hull's centroid): tower_basic.png's barrel points straight down,
+// tower_double/tower_laser.png's straight up. The previous values here
+// (-59.5/+90/+90) didn't match the PNGs, which left every turret aiming
+// well off its target while its rounds still left from the correct side.
 const TOWER_RESTING_ANGLES = {
-  basic: -59.5 * (Math.PI / 180),
-  double: 90.0 * (Math.PI / 180),
-  laser: 90.3 * (Math.PI / 180),
+  basic: Math.PI / 2,
+  double: -Math.PI / 2,
+  laser: -Math.PI / 2,
 };
 
 function drawTower(t) {
@@ -580,10 +600,7 @@ function drawTower(t) {
   if (t.buildTimeRemaining > 0) {
     drawTowerBuilding(t);
   } else {
-    const img = sprites[`tower_${t.type}`];
     const levelSum = t.level.damage + t.level.range + t.level.fireRate;
-    const restingAngle = TOWER_RESTING_ANGLES[t.type] || 0;
-    const drawAngle = t.angle - restingAngle;
 
     // Dynamic drop shadow under the rotating turret body
     ctx.save();
@@ -595,43 +612,30 @@ function drawTower(t) {
     ctx.fill();
     ctx.restore();
 
-    ctx.save();
-    ctx.translate(t.x, t.y);
-    ctx.rotate(drawAngle);
     if (levelSum > 0) {
       ctx.save();
       ctx.globalAlpha = Math.min(0.15 + levelSum * 0.06, 0.6);
       ctx.fillStyle = "#ffd700";
       ctx.beginPath();
-      ctx.arc(0, 0, 52, 0, Math.PI * 2);
+      ctx.arc(t.x, t.y, 52, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     }
-    if (ready(img)) {
-      const h = 76;
-      const w = 76;
-      ctx.drawImage(img, -w / 2, -h / 2, w, h);
 
-      const damagePct = 1 - t.hp / t.maxHp;
-      if (damagePct > 0) {
-        ctx.globalAlpha = damagePct * 0.6;
-        ctx.fillStyle = "#000";
-        ctx.fillRect(-w / 2, -h / 2, w, h);
-        ctx.globalAlpha = 1;
-      }
-    } else {
-      ctx.fillStyle = t.type === "laser" ? "#8a6a3a" : t.type === "double" ? "#888" : "#6b7a4a";
-      ctx.fillRect(-14, -10, 28, 20);
-      ctx.fillRect(0, -3, 22, 6);
-    }
-    ctx.restore();
+    // Damage darkens the turret itself (a brightness filter only touches
+    // its opaque pixels) -- the old black fillRect over the sprite's whole
+    // square showed up as a dark box around a damaged turret.
+    const damagePct = 1 - t.hp / t.maxHp;
+    if (damagePct > 0) ctx.filter = `brightness(${(1 - damagePct * 0.55).toFixed(2)})`;
+    drawTurretSprite(t);
+    ctx.filter = "none";
 
-    // 3D dynamic muzzle flash positioned exactly at the cannon tip in world space
-    if (t.fireTimer > t.fireRate - 0.09) {
+    // Muzzle flash at the cannon tip, only for the brief window right after
+    // a shot (tower.js's muzzleFlash countdown).
+    if (t.muzzleFlash > 0) {
       ctx.save();
-      const flashLen = t.type === "laser" ? 34 : t.type === "double" ? 32 : 30;
-      const flashX = t.x + Math.cos(t.angle) * flashLen;
-      const flashY = t.y + Math.sin(t.angle) * flashLen;
+      const flashX = t.x + Math.cos(t.angle) * MUZZLE_OFFSET;
+      const flashY = t.y + Math.sin(t.angle) * MUZZLE_OFFSET;
       ctx.fillStyle = t.type === "laser" ? "#4fd1c5" : "#ffb700";
       ctx.shadowColor = t.type === "laser" ? "#81e6d9" : "#ff8800";
       ctx.shadowBlur = 12;
@@ -815,9 +819,8 @@ function drawHud() {
   ctx.fillText(`Nivel ${state.level}/${MAX_LEVEL} — Oleada ${state.economy.wave}/${WAVES.length}`, 20, 30);
   ctx.fillText(`Vidas: ${state.economy.lives}`, 20, 55);
   ctx.fillText(`$${state.economy.money}`, 20, 80);
-  if (state.interWaveTimer > 0 && !state.gameOver && !state.win && !state.levelComplete) {
-    ctx.fillText(`Siguiente oleada en ${Math.ceil(state.interWaveTimer)}s`, 20, 105);
-  }
+  // (The between-waves countdown is shown on #skip-wave-btn itself, which
+  // sits right where a canvas line here would be drawn.)
   if (networked) {
     ctx.font = "13px sans-serif";
     ctx.fillStyle = "#8f8";
@@ -884,14 +887,11 @@ const statsCloseBtn = document.getElementById("stats-close-btn");
 
 async function openStatsModal() {
   statsOverlay.classList.remove("hidden");
-  let entries = [];
-  try {
-    const res = await fetch("/api/ranking");
-    if (res.ok) entries = await res.json();
-  } catch (err) {
-    entries = JSON.parse(localStorage.getItem("td_ranking") || "[]");
-  }
-  renderStatsModal(statsOverlay, state, entries);
+  // Same source the end-of-game screen uses (server's /api/leaderboard in
+  // co-op, this browser's localStorage in solo play) -- this used to ask
+  // for a nonexistent /api/ranking and a different localStorage key, so
+  // the ranking here was always empty.
+  renderStatsModal(statsOverlay, state, await fetchLeaderboard());
 }
 
 function closeStatsModal() {
@@ -1473,12 +1473,19 @@ function loop(now) {
   });
   updateUpgradePanel(upgradePanelEl, selectedTower);
 
-  // Play / Advance Wave button:
-  const canAdvanceWave = !state.gameOver && !state.win && !state.levelComplete && state.waveIndex < 39;
+  // Play / Advance Wave button: during the countdown it starts the next
+  // wave now (and carries the countdown itself -- the canvas HUD line it
+  // used to sit on top of is gone); mid-wave it calls the next wave in
+  // early, but only once the current one has finished spawning (see
+  // simulate.js's skipWave).
+  const playing = !state.gameOver && !state.win && !state.levelComplete;
+  const inCountdown = state.interWaveTimer > 0;
+  const canCallEarly = state.spawnQueue.length === 0 && state.waveIndex < WAVES.length - 1;
+  const canAdvanceWave = playing && (inCountdown || canCallEarly);
   skipWaveBtn.classList.toggle("hidden", !canAdvanceWave);
   if (canAdvanceWave) {
-    if (state.interWaveTimer > 0) {
-      skipWaveBtn.textContent = `▶ Iniciar Oleada ${state.waveIndex + 1}`;
+    if (inCountdown) {
+      skipWaveBtn.textContent = `▶ Iniciar Oleada ${state.waveIndex + 1} (${Math.ceil(state.interWaveTimer)}s)`;
       skipWaveBtn.classList.add("pulse");
       skipWaveBtn.title = "Comenzar oleada inmediatamente";
     } else {

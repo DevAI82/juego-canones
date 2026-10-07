@@ -6,6 +6,25 @@ import { lerpAngle } from "./util.js";
 // frames, closer to a real turret's slew rate.
 const TURN_RATE = 6;
 
+// A turret only fires once its barrel is within this many radians of the
+// target -- now that the sprites visibly rotate, shooting the instant the
+// cooldown is up made rounds leave a barrel still pointing somewhere else
+// mid-turn.
+const AIM_TOLERANCE = 0.3;
+
+// How long the muzzle flash stays visible after a shot, in seconds. Tracked
+// as its own countdown (not inferred from fireTimer, which sits at a full
+// fireRate for as long as a tower is idle or reloading -- that left the
+// flash permanently lit on any tower with nothing to shoot at).
+export const MUZZLE_FLASH_TIME = 0.08;
+
+// Distance from a tower's center to its barrel tip, in world px, at the
+// size main.js draws the tower sprites (76px) -- measured from the PNGs
+// (all three barrels end ~110px from center in their 256px sources).
+// Shared by simulate.js (where rounds spawn) and main.js (where the
+// muzzle flash draws) so the two always agree.
+export const MUZZLE_OFFSET = 33;
+
 // armor is a damage-taken multiplier, not a stat that varies by tower
 // type (all three start equally unarmored) -- it's here, at 1 for every
 // type, purely so applyUpgrade's `baseStats.<skill>` lookup in
@@ -20,14 +39,9 @@ export const TOWER_TYPES = {
 // How long a freshly-placed tower spends "under construction" before it
 // can target/fire, per user request for a Command & Conquer/Dune
 // 2000-style build effect that visibly takes effort to deploy rather
-// than appearing instantly. Matches the basic tower's build-animation
-// GIF's own native runtime (4s/64 frames -- see main.js and tools/
-// extract_assets.py's extract_tower_basic_build) exactly, so the
-// percentage the animation's own baked-in progress bar shows stays in
-// sync with real elapsed build time. Only the basic tower has its own
-// build animation today, but the delay itself applies to every type so
-// double/laser aren't placed "for free" faster than basic while they
-// still just fade in (see main.js's drawTowerBuilding).
+// than appearing instantly. Matches the 4s runtime of the build videos
+// each tower's animation sheet is cut from (tools/extract_all_turrets.py;
+// played back by main.js's drawTowerBuilding).
 export const BUILD_DURATION = 4;
 
 export function createTower(type, x, y) {
@@ -53,6 +67,7 @@ export function createTower(type, x, y) {
     armorMult: def.armor,
     level: { damage: 0, range: 0, fireRate: 0, armor: 0 },
     buildTimeRemaining: BUILD_DURATION,
+    muzzleFlash: 0,
   };
 }
 
@@ -84,6 +99,7 @@ export function findTarget(tower, enemies) {
 
 export function stepTower(tower, enemies, dt) {
   if (tower.hp <= 0) return null;
+  if (tower.muzzleFlash > 0) tower.muzzleFlash = Math.max(0, tower.muzzleFlash - dt);
 
   // Under construction -- can be damaged/destroyed like any other tower
   // (matches how a half-built structure works in the games this is
@@ -108,8 +124,10 @@ export function stepTower(tower, enemies, dt) {
   const targetAngle = Math.atan2(tower.target.y - tower.y, tower.target.x - tower.x);
   tower.angle = lerpAngle(tower.angle, targetAngle, TURN_RATE * dt);
   tower.fireTimer -= dt;
-  if (tower.fireTimer <= 0 && tower.ammo > 0) {
+  const aimError = Math.abs(Math.atan2(Math.sin(targetAngle - tower.angle), Math.cos(targetAngle - tower.angle)));
+  if (tower.fireTimer <= 0 && tower.ammo > 0 && aimError <= AIM_TOLERANCE) {
     tower.fireTimer = tower.fireRate;
+    tower.muzzleFlash = MUZZLE_FLASH_TIME;
     tower.ammo--;
     const shot = { x: tower.x, y: tower.y, target: tower.target, damage: tower.damage, projectilesPerShot: tower.projectilesPerShot };
     if (tower.ammo <= 0) {
