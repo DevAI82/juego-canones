@@ -2,3 +2,6 @@
 # Runtime-generated shared leaderboard (server.js writes/reads this) --
 # not source, and each host's own scores shouldn't overwrite a teammate's.
 data/leaderboard.json
+# Saved games of the co-op game at home (server.js / server-saves.js).
+data/saves.json
+data/saves.json.tmp

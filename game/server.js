@@ -34,13 +34,23 @@ import {
   placeWall,
   skipWave,
   togglePause,
+  canSaveNow,
+  createSave,
+  restoreSave,
 } from "./js/simulate.js";
+import { createSaveScheduler } from "./js/autosave.js";
+import { readSaveFile, writeSaveSlot, listSaveFile } from "./server-saves.js";
 
 // PORT env var: lets a throwaway test instance run without touching the
 // real LAN game on 8420.
 const PORT = Number(process.env.PORT) || 8420;
 const TICK_MS = 50; // 20 ticks/sec -- plenty smooth for this game's pace
 const GAME_DIR = path.dirname(fileURLToPath(import.meta.url));
+
+// This host's runtime files: the shared ranking and the saved games.
+// DATA_DIR lets a test instance keep its own, away from the family's.
+const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(GAME_DIR, "data");
+const SAVES_PATH = path.join(DATA_DIR, "saves.json");
 
 const CONTENT_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -52,12 +62,27 @@ const CONTENT_TYPES = {
   ".mp3": "audio/mpeg",
 };
 
-let state = createGameState();
+// Saves are written as the game goes (autosave.js): the autosave between
+// waves, and a save asked for mid-wave once the wave is over. Writing is
+// asynchronous here, so a failure is only logged.
+const saves = createSaveScheduler((slot, save) => {
+  writeSaveSlot(SAVES_PATH, slot, save).catch((err) => console.error(`Couldn't save (slot ${slot}):`, err.message));
+  return true;
+});
+
+// Per user request, the game picks up where it was: restarting the server
+// (to update the game, say) resumes the last autosave -- paused, for
+// whoever reconnects -- instead of starting over.
+const resumed = restoreSave((await readSaveFile(SAVES_PATH)).auto);
+let state = resumed || createGameState();
+saves.reset(state, { saved: Boolean(resumed) });
+if (resumed) console.log(`Resumed the saved game: level ${state.level}, wave ${state.waveIndex + 1} (paused).`);
 let lastTick = Date.now();
 setInterval(() => {
   const now = Date.now();
   const dt = Math.min((now - lastTick) / 1000, 0.1);
   lastTick = now;
+  saves.tick(state);
   stepSimulation(state, dt);
 }, TICK_MS);
 
@@ -69,11 +94,38 @@ const ACTION_HANDLERS = {
   placeWall: (body) => placeWall(state, body.x, body.y),
   skip: () => skipWave(state),
   pause: () => togglePause(state),
+  // Saved games (data/saves.json). A save asked for mid-wave is made when
+  // the wave ends; loading changes the game for everyone connected, like
+  // restart does.
+  save: async (body) => {
+    const slot = Number(body.slot);
+    if (![1, 2, 3].includes(slot)) return { ok: false, reason: "bad-slot" };
+    if (state.gameOver || state.win || state.levelComplete) return { ok: false, reason: "game-over" };
+    if (!canSaveNow(state)) {
+      saves.request(slot, state);
+      return { ok: true, queued: true };
+    }
+    try {
+      await writeSaveSlot(SAVES_PATH, slot, createSave(state));
+      return { ok: true, queued: false };
+    } catch {
+      return { ok: false, reason: "write-failed" };
+    }
+  },
+  load: async (body) => {
+    const slot = body.slot === "auto" ? "auto" : Number(body.slot);
+    const restored = restoreSave((await readSaveFile(SAVES_PATH))[slot]);
+    if (!restored) return { ok: false, reason: "unreadable" };
+    state = restored;
+    saves.reset(state); // «Continuar» now means this game
+    return { ok: true };
+  },
   restart: (body) => {
     // Backs the level-select start menu -- every connected player's next
     // poll sees the fresh campaign on whichever map was chosen, not just
     // whoever clicked.
     state = createGameState(body.level || 1);
+    saves.reset(state);
     return { ok: true };
   },
   nextLevel: () => {
@@ -96,7 +148,7 @@ async function readBody(req) {
 // (not a real database) to match the rest of this project's
 // dependency-free approach; survives server restarts, which localStorage
 // alone wouldn't need to but a shared multi-device ranking does.
-const LEADERBOARD_PATH = path.join(GAME_DIR, "data", "leaderboard.json");
+const LEADERBOARD_PATH = path.join(DATA_DIR, "leaderboard.json");
 const LEADERBOARD_MAX_ENTRIES = 20;
 
 async function loadLeaderboard() {
@@ -175,12 +227,18 @@ const server = http.createServer(async (req, res) => {
     try {
       const body = await readBody(req);
       const handler = ACTION_HANDLERS[body.type];
-      result = handler ? handler(body) : { ok: false, reason: "unknown-action" };
+      result = handler ? await handler(body) : { ok: false, reason: "unknown-action" };
     } catch (err) {
       result = { ok: false, reason: "bad-request" };
     }
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(result));
+    return;
+  }
+
+  if (urlPath === "/api/saves" && req.method === "GET") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(await listSaveFile(SAVES_PATH)));
     return;
   }
 
