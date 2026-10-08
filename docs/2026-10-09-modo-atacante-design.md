@@ -105,6 +105,21 @@ Las unidades no tienen cargador como las torres: por eso la mejora de munición 
 - **Entradas:** el comienzo de cada carretera en el borde del mapa. Las unidades aparecen en el primer punto de esa carretera que queda dentro del mapa.
 - **La base:** el punto al que llegan hoy los enemigos en cada mapa (en el nivel 3, el patio de la fortaleza, entrando por sus puertas; en el nivel 4, la puerta del cuartel).
 
+### 3.10 Niebla de guerra (petición del usuario: «con niebla gris»)
+
+Solo en modo ataque, y solo para el atacante: la defensa del ordenador ve todo el mapa (no hace trampas: no ve nada que un jugador defensor no vería, porque el defensor siempre ve su propio terreno).
+
+- **Tres estados para cada zona del mapa** (una cuadrícula de 32 px):
+  - **Sin explorar (negro):** no se ve nada.
+  - **Explorada pero sin unidades cerca ahora (gris):** se ve el terreno oscurecido y las torres **tal como estaban la última vez que se vieron** (en gris); las torres construidas, mejoradas o destruidas desde entonces no se notan hasta volver.
+  - **A la vista (normal):** se ve todo en tiempo real.
+- **Qué destapa:** cada unidad ve a su alrededor, según su tipo (valores iniciales): moto 240 px, buggy 200, soldado 150, tanque 170, lanzacohetes 160. Las entradas del mapa tienen siempre a la vista un círculo de 150 px.
+- **La base** se marca siempre (en el mapa y en el minimapa) aunque esté sin explorar: es el objetivo.
+- **Disparos:** los proyectiles y explosiones solo se ven en las zonas a la vista; una torre oculta que dispara a tus unidades se adivina por sus proyectiles al entrar en la zona visible.
+- **Órdenes:** solo se puede atacar con clic derecho a torres y muros visibles o recordados (en gris); el alcance al pasar el ratón también.
+- **Minimapa:** con la misma niebla (negro y gris) y las torres recordadas.
+- **Guardado:** se guardan lo explorado y lo recordado de cada torre.
+
 ## 4. Controles (al estilo Command & Conquer)
 
 ### 4.1 Seleccionar
@@ -167,6 +182,7 @@ En esta parte el modo ataque solo funciona en partida individual. Si el juego se
 - `js/roadGraph.js` (nuevo): red de calles de un mapa (carreteras + calles extra, con sus cruces); punto de calle más cercano a un clic; camino más corto entre dos puntos; puntos de parada repartidos para un grupo.
 - `js/attack.js` (nuevo): reglas del modo ataque: dinero del atacante, catálogo y precios, tope, mejoras por tipo, compras y despliegue, órdenes (mover, atacar torre, entrar, parar), rondas, premios, victoria y derrota.
 - `js/defenseAI.js` (nuevo): la defensa del ordenador, que solo usa las acciones públicas de `simulate.js`.
+- `js/fog.js` (nuevo): la niebla de guerra del atacante: cuadrícula de explorado y visible, recuerdo de las torres vistas; lógica pura que avanza con la simulación y se guarda con la partida.
 - `js/selection.js` (nuevo): lógica pura de selección (unidad bajo el cursor, recuadro, Mayús, doble clic por tipo) y grupos.
 - `js/attackControls.js` y `js/attackUI.js` (nuevos): ratón, teclado y cámara del modo ataque; tienda, panel de mejoras, banderas, marcador. `main.js` solo los conecta según el modo.
 - `js/simulate.js`: un campo de modo en el estado; en modo ataque, nada de oleadas prefijadas, unidades con órdenes, llegar al final de una orden = pararse (salvo la orden de entrar), premios por daño, fin de partida con ganador. El modo defensa no cambia.
@@ -184,6 +200,7 @@ En esta parte el modo ataque solo funciona en partida individual. Si el juego se
   - Fin: la base a 0 vidas da la victoria al atacante; acabar la ronda 15 se la da a la base.
   - Defensa del ordenador: gasta su dinero en torres en puntos válidos que cubren caminos, repara y mejora; en Difícil pone muros; nunca hace acciones inválidas.
   - Selección y grupos: recuadro, Mayús, doble clic por tipo, grupos y su limpieza.
+  - Niebla: lo que ven las unidades se explora y queda a la vista mientras siguen cerca; al irse pasa a gris; las torres se recuerdan como estaban; una torre construida en zona gris no aparece hasta volver; las entradas siempre a la vista.
   - Guardado: ida y vuelta en modo ataque; los guardados de defensa siguen cargando.
 - **Partidas completas automáticas:** un bot atacante sencillo (compra unidades, las agrupa y las manda por la carretera menos defendida) contra la defensa del ordenador, en los 4 mapas y las 3 dificultades. Objetivos de equilibrio para ese bot: en **Fácil** gana la mayoría de partidas; en **Normal**, alrededor de la mitad; en **Difícil**, pocas. Precios, ingresos y presupuestos de la defensa se ajustan hasta conseguirlo.
 - **Navegador:** recorrido completo (menú → mapa → dificultad → preparación → rondas → victoria o derrota), con selección, grupos, órdenes, tienda, mejoras, cámara, guardar y cargar.
@@ -194,6 +211,5 @@ En esta parte el modo ataque solo funciona en partida individual. Si el juego se
 - Atacante contra defensor humano (partes 3 y 4) y modo ataque en la red de casa.
 - Moverse fuera de calles y carreteras.
 - Tipos de unidad nuevos o arte nuevo (salvo iconos y marcas sencillas dibujadas por el juego).
-- Niebla de guerra: el atacante ve todo el mapa y todas las torres.
 - Formaciones elaboradas más allá de repartir las paradas a lo largo de la calle.
 - Ranking de puntuaciones del modo ataque.
