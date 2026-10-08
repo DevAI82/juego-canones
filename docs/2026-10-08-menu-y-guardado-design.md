@@ -44,7 +44,7 @@ Un botón **☰** en los controles de arriba (sustituye al ⟲ actual) y la tecl
 Opciones:
 
 - **Seguir** — cierra el menú.
-- **Guardar partida** — elige hueco 1, 2 o 3 (sobrescribir uno ocupado pide confirmación). Solo entre oleadas; durante una oleada aparece en gris con el aviso «Podrás guardar al terminar la oleada».
+- **Guardar partida** — elige hueco 1, 2 o 3 (sobrescribir uno ocupado pide confirmación). Entre oleadas se guarda al momento; durante una oleada el guardado queda pedido y se hace solo al terminarla (aviso «Se guardará al terminar la oleada»). La cuenta atrás entre oleadas dura 4 segundos: esperar a ella para poder guardar sería muy incómodo.
 - **Cargar partida** — la misma lista que en el menú principal. Pide confirmación porque se pierde lo no guardado.
 - **Nueva partida** — vuelve a «¿Cómo quieres jugar?». Pide confirmación.
 - **Ajustes**.
@@ -57,7 +57,7 @@ Al terminar una partida (derrota o victoria final), «Jugar de nuevo» y la tecl
 ### 4.1 Cuándo
 
 - **Autoguardado:** al terminar cada oleada (cuando el tablero queda vacío y empieza la cuenta atrás de la siguiente) y al empezar un nivel nuevo.
-- **Guardado manual:** desde el menú de pausa, solo entre oleadas.
+- **Guardado manual:** desde el menú de pausa, en cualquier momento; si es durante una oleada, se hace al terminarla.
 
 Solo entre oleadas porque en ese momento no hay enemigos ni disparos en el campo: no hace falta guardar cada unidad en movimiento ni cada proyectil, y los guardados no se rompen si se retocan las carreteras de un mapa. Si se sale a mitad de una oleada, «Continuar» retoma desde el principio de esa oleada.
 

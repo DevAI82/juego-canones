@@ -15,9 +15,9 @@ import { MAX_LEVEL, levelData, narrowsOf, solidSegmentsOf } from "./levels.js";
 import { createEnemy, stepEnemy, damageEnemy, stepEnemyFire } from "./enemy.js";
 import { WAVES, buildSpawnQueue } from "./waves.js";
 import { createEconomy, earn, loseLife, spend, canAfford } from "./economy.js";
-import { createTower, stepTower, damageTower, TOWER_TYPES, MUZZLE_OFFSET } from "./tower.js";
+import { createTower, stepTower, damageTower, TOWER_TYPES, MUZZLE_OFFSET, BUILD_DURATION } from "./tower.js";
 import { createProjectile, stepProjectile } from "./projectile.js";
-import { applyUpgrade, upgradeCost, canUpgrade } from "./upgrades.js";
+import { applyUpgrade, upgradeCost, canUpgrade, UPGRADE_DEFS } from "./upgrades.js";
 import { chooseRoute, SOLDIER_ROUTE_CANDIDATES, holdsForSiege } from "./ai.js";
 import { WALL, wallCell, segmentNearBlock } from "./walls.js";
 
@@ -151,10 +151,15 @@ function separateEnemies(enemies, dt, walls) {
   }
 }
 
+// What every game starts with (createGameState) -- also what a save with
+// no money or lives recorded falls back to (restoreSave).
+const START_MONEY = 150;
+const START_LIVES = 20;
+
 export function createGameState(level = 1) {
   return {
     level,
-    economy: createEconomy(150, 20),
+    economy: createEconomy(START_MONEY, START_LIVES),
     waveIndex: 0,
     spawnQueue: buildSpawnQueue(0),
     waveClock: 0,
@@ -557,4 +562,131 @@ export function skipWave(state) {
 export function togglePause(state) {
   state.paused = !state.paused;
   return { ok: true, paused: state.paused };
+}
+
+// --- Saved games -------------------------------------------------------
+// Per user request (docs/2026-10-08-menu-y-guardado-design.md): a game is
+// saved, and loaded back, between waves -- the only moments nothing is on
+// the field. So a save holds the player's decisions (level, wave, money,
+// lives, each tower's type, place and upgrades, the walls, the campaign
+// stats) and none of the moving parts. Shared by main.js (solo: the
+// browser's storage) and server.js (co-op at home: a file on its PC).
+export const SAVE_VERSION = 1;
+
+// Between waves: no one on the field and the current wave not begun --
+// the countdown before it, or a level just started.
+export function canSaveNow(state) {
+  return !state.gameOver && !state.win && !state.levelComplete && state.enemies.length === 0 && state.waveClock === 0;
+}
+
+// Which between-waves moment a save would capture (autosave.js writes the
+// autosave once per moment, not on every tick of a countdown).
+export function saveMoment(state) {
+  return `${state.level}:${state.waveIndex}:${state.totalWavesCleared}`;
+}
+
+export function createSave(state, now = new Date()) {
+  return {
+    version: SAVE_VERSION,
+    savedAt: now.toISOString(),
+    level: state.level,
+    waveIndex: state.waveIndex,
+    totalWavesCleared: state.totalWavesCleared,
+    money: state.economy.money,
+    lives: state.economy.lives,
+    stats: JSON.parse(JSON.stringify(state.stats)),
+    towers: state.towers
+      .filter((t) => t.hp > 0)
+      .map((t) => ({
+        type: t.type,
+        x: t.x,
+        y: t.y,
+        level: { ...t.level },
+        hp: t.hp,
+        ammo: t.ammo,
+        buildTimeRemaining: t.buildTimeRemaining,
+      })),
+    walls: state.walls.filter((w) => w.hp > 0).map((w) => ({ x: w.x, y: w.y, hp: w.hp })),
+  };
+}
+
+const num = (v, fallback) => (typeof v === "number" && Number.isFinite(v) ? v : fallback);
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+// The level a save is for, or null if it isn't a save this version reads.
+function readableLevel(save) {
+  if (!save || typeof save !== "object" || save.version !== SAVE_VERSION) return null;
+  return Number.isInteger(save.level) && save.level >= 1 && save.level <= MAX_LEVEL ? save.level : null;
+}
+
+// The game a save describes, ready to play: paused in the countdown
+// before its next wave. Every tower is rebuilt from its type with its
+// upgrades applied again level by level, so a save made before a balance
+// change loads with today's values -- and stays where it stood even if
+// that's no longer a build slot. Everything gets a fresh id (assignId,
+// like anything placed in play), so nothing can clash with what comes
+// later. Fields it doesn't know are ignored, missing ones take their
+// defaults; null if it isn't a save this version can read.
+export function restoreSave(save) {
+  const level = readableLevel(save);
+  if (level == null) return null;
+  const state = createGameState(level);
+  state.waveIndex = clamp(Math.floor(num(save.waveIndex, 0)), 0, WAVES.length - 1);
+  state.economy.wave = state.waveIndex + 1;
+  state.spawnQueue = buildSpawnQueue(state.waveIndex);
+  state.interWaveTimer = INTER_WAVE_DELAY;
+  state.paused = true;
+  state.totalWavesCleared = Math.max(0, Math.floor(num(save.totalWavesCleared, 0)));
+  state.economy.money = Math.max(0, num(save.money, START_MONEY));
+  state.economy.lives = Math.max(1, Math.floor(num(save.lives, START_LIVES)));
+  const stats = save.stats && typeof save.stats === "object" ? save.stats : {};
+  const kills = stats.kills && typeof stats.kills === "object" ? stats.kills : {};
+  for (const type of Object.keys(state.stats.kills)) state.stats.kills[type] = Math.max(0, num(kills[type], 0));
+  for (const key of ["towersBuilt", "towersLost", "moneySpent"]) state.stats[key] = Math.max(0, num(stats[key], 0));
+
+  for (const saved of Array.isArray(save.towers) ? save.towers : []) {
+    if (!saved || !TOWER_TYPES[saved.type]) continue;
+    const x = num(saved.x, NaN);
+    const y = num(saved.y, NaN);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    const tower = createTower(saved.type, x, y);
+    const levels = saved.level && typeof saved.level === "object" ? saved.level : {};
+    for (const skill of Object.keys(UPGRADE_DEFS)) {
+      const target = Math.floor(num(levels[skill], 0));
+      for (let i = tower.level[skill]; i < target; i++) {
+        if (!applyUpgrade(tower, skill, TOWER_TYPES[saved.type])) break;
+      }
+    }
+    tower.hp = clamp(num(saved.hp, tower.maxHp), 1, tower.maxHp);
+    tower.ammo = clamp(Math.floor(num(saved.ammo, tower.maxAmmo)), 0, tower.maxAmmo);
+    // An empty magazine only refills by reloading (stepTower starts that
+    // when the last round is fired) -- start it here, or it never would.
+    if (tower.ammo === 0) {
+      tower.reloading = true;
+      tower.reloadTimer = tower.reloadTime;
+    }
+    tower.buildTimeRemaining = clamp(num(saved.buildTimeRemaining, 0), 0, BUILD_DURATION);
+    state.towers.push(assignId(tower));
+  }
+
+  for (const saved of Array.isArray(save.walls) ? save.walls : []) {
+    const x = num(saved?.x, NaN);
+    const y = num(saved?.y, NaN);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    state.walls.push(assignId({ kind: "wall", x, y, hp: clamp(num(saved.hp, WALL.hp), 1, WALL.hp), maxHp: WALL.hp }));
+  }
+  return state;
+}
+
+// What the menu lists for a save (null: it can't be loaded).
+export function saveSummary(save) {
+  const level = readableLevel(save);
+  if (level == null) return null;
+  return {
+    level,
+    wave: clamp(Math.floor(num(save.waveIndex, 0)), 0, WAVES.length - 1) + 1,
+    lives: Math.max(1, Math.floor(num(save.lives, START_LIVES))),
+    money: Math.max(0, Math.floor(num(save.money, START_MONEY))),
+    savedAt: typeof save.savedAt === "string" ? save.savedAt : null,
+  };
 }
