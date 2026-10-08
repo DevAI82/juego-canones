@@ -17,13 +17,19 @@ import {
   canPlaceWall,
   skipWave,
   togglePause,
+  canSaveNow,
+  restoreSave,
 } from "./simulate.js";
 import { MAX_LEVEL, levelData } from "./levels.js";
 import { pickTowerTarget } from "./ai.js";
 import { lerpAngle } from "./util.js";
 import { createEffects, clearEffects, stepEffects, hitFlash, drawGroundEffects, drawAirEffects } from "./effects.js";
 import { minimapRect, minimapToWorld, drawMinimap } from "./minimap.js";
-import { playSound, toggleMuted, startMusic, pauseMusic, resumeMusic } from "./audio.js";
+import { playSound, toggleMuted, startMusic, pauseMusic, resumeMusic, setMusicOn, setEffectsOn } from "./audio.js";
+import { createSaveScheduler } from "./autosave.js";
+import { readSave, writeSave, listSaves, canStore } from "./saves.js";
+import { loadSettings, saveSettings } from "./settings.js";
+import { createMenu } from "./menu.js";
 
 // Browsers refuse to start any audio (synthesized SFX or the background
 // music) before a real user gesture. Fire once, on whichever happens
@@ -1097,61 +1103,161 @@ pauseBtn.addEventListener("click", () => {
   actions.pause();
 });
 
-// --- Level-select start screen -------------------------------------------
-// Shown before any campaign begins -- first load, and again any time the
-// player starts a fresh one (the reset button, R after a true match end,
-// or the game-end screen's "Jugar de nuevo") -- so they pick which map to
-// start on, per user request. `started` gates stepSimulation in LOCAL
-// mode only: a fresh createGameState() is NOT gameOver/win/levelComplete,
-// so without this the level-1 campaign would silently start ticking
-// (enemies spawning) underneath the menu the moment the page loads,
-// before the player has chosen anything. Networked mode never needs this
-// gate -- the server ticks on its own regardless, and a client that
-// joins an already-running co-op match should see it immediately, not a
-// menu forced on top of what everyone else is already playing.
+// --- Menus, saved games, settings ----------------------------------------
+// Per user request (docs/2026-10-08-menu-y-guardado-design.md): a main
+// menu first, a pause menu during play (☰ or Esc), saving and loading.
+// `started` gates stepSimulation in LOCAL mode only: a fresh
+// createGameState() isn't over, so without it the level-1 game would tick
+// along under the main menu before the player has chosen anything.
+// Networked mode never needs it -- the server ticks on its own, and a
+// player joining the co-op game sees it straight away.
 let started = false;
-const startMenuOverlay = document.getElementById("start-menu");
-function showStartMenu() {
-  startMenuOverlay.classList.remove("hidden");
+
+// Solo games save into this browser (saves.js); the co-op game at home
+// asks the server, which keeps its saves on its PC. The scheduler writes
+// the autosave between waves and a save asked for mid-wave once the wave
+// is over (autosave.js).
+const saveScheduler = createSaveScheduler((slot, save) => writeSave(slot, save));
+
+let settings = loadSettings();
+setMusicOn(settings.music);
+setEffectsOn(settings.effects);
+
+const toastEl = document.getElementById("toast");
+let toastTimer = null;
+function showToast(message) {
+  toastEl.textContent = message;
+  toastEl.classList.remove("hidden");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.add("hidden"), 2500);
 }
-function hideStartMenu() {
-  startMenuOverlay.classList.add("hidden");
+const savedMessage = (slot, ok) => (ok ? `Partida guardada en el hueco ${slot}` : "Este navegador no permite guardar");
+
+// Asks the server and waits for its answer (postAction above doesn't).
+async function askServer(body) {
+  try {
+    const res = await fetch("/api/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return await res.json();
+  } catch {
+    return { ok: false, reason: "network" };
+  }
 }
-function chooseLevel(level) {
-  hideStartMenu();
+
+async function listSavesForMenu() {
+  if (!networked) return listSaves();
+  try {
+    const res = await fetch("/api/saves");
+    return res.ok ? await res.json() : [];
+  } catch {
+    return [];
+  }
+}
+
+// Back to the board, with nothing left selected or showing from before.
+function enterGame() {
+  menu.close();
   selectedId = null;
   selectedBuildType = null;
-  // Forces loop()'s "state.level changed" check to re-fire even when
-  // picking the SAME level number again (e.g. replaying level 3 after a
-  // loss) -- otherwise the camera would just stay wherever it had been
-  // scrolled to last time instead of recentering on the fresh game.
+  // Forces loop()'s "state.level changed" check to re-fire even for the
+  // SAME level number (replaying level 3 after a loss, loading another
+  // level-3 game) so the camera recenters on the new game.
   lastCameraLevel = null;
+  gameEndOverlay.classList.add("hidden");
+  gameEndShown = false;
+}
+
+function startNewGame(level) {
   if (networked) {
     postAction({ type: "restart", level });
   } else {
     state = createGameState(level);
+    saveScheduler.reset(state);
+    started = true;
   }
-  started = true;
-}
-for (const btn of document.querySelectorAll(".start-level-btn")) {
-  btn.addEventListener("click", () => chooseLevel(Number(btn.dataset.level)));
+  enterGame();
 }
 
-// Used by every "start a new campaign" entry point below (not a plain
-// mid-match restart, which doesn't exist as a separate concept here --
-// resetting always means starting over) to bring back the level picker
-// instead of silently defaulting to level 1.
-function restartToLevelSelect() {
-  selectedId = null;
-  selectedBuildType = null;
+async function loadSlot(slot) {
+  if (networked) {
+    const result = await askServer({ type: "load", slot });
+    if (!result.ok) return showToast("No se puede cargar esta partida");
+  } else {
+    const restored = restoreSave(readSave(slot));
+    if (!restored) return showToast("No se puede cargar esta partida");
+    state = restored;
+    saveScheduler.reset(state); // «Continuar» now means this game
+    started = true;
+  }
+  enterGame();
+}
+
+async function saveToSlot(slot) {
+  if (networked) {
+    const result = await askServer({ type: "save", slot });
+    if (!result.ok) showToast("No se ha podido guardar");
+    else showToast(result.queued ? "Se guardará al terminar la oleada" : `Partida guardada en el hueco ${slot}`);
+    return;
+  }
+  const result = saveScheduler.request(slot, state);
+  showToast(result.done ? savedMessage(slot, result.result) : "Se guardará al terminar la oleada");
+}
+
+// The pause menu pauses a solo game while it's open, and leaves it as it
+// was on closing (paused with ⏸ beforehand: still paused). In co-op it
+// pauses nobody -- the shared ⏸ is for that.
+let pausedBeforeMenu = false;
+function openPauseMenu() {
+  if (menu.isOpen() || gameEndShown) return;
+  if (!networked) {
+    if (!started) return;
+    pausedBeforeMenu = state.paused;
+    state.paused = true;
+  }
+  menu.openPause();
+}
+
+// After a finished game ("Jugar de nuevo", or R): pick how to play the next.
+function backToNewGame() {
   gameEndOverlay.classList.add("hidden");
   gameEndShown = false;
-  started = false;
-  showStartMenu();
+  if (!networked) started = false;
+  menu.openNewGame();
 }
 
-const resetBtn = document.getElementById("reset-btn");
-resetBtn.addEventListener("click", restartToLevelSelect);
+const menu = createMenu(document.getElementById("menu"), {
+  get networked() {
+    return networked;
+  },
+  listSaves: listSavesForMenu,
+  canStore: () => networked || canStore(),
+  canSaveNow: () => canSaveNow(state),
+  hasGame: () => !networked && started,
+  getSettings: () => settings,
+  onContinue: () => (networked ? enterGame() : loadSlot("auto")),
+  onNewGame: startNewGame,
+  onLoad: loadSlot,
+  onSave: saveToSlot,
+  onRecords: openStatsModal,
+  onQuitToMain: () => {
+    if (!networked) started = false;
+    menu.openMain();
+  },
+  onResume: () => {
+    if (!networked) state.paused = pausedBeforeMenu;
+  },
+  onSettingsChange: (next) => {
+    settings = next;
+    saveSettings(settings);
+    setMusicOn(settings.music);
+    setEffectsOn(settings.effects);
+  },
+});
+
+document.getElementById("menu-btn").addEventListener("click", openPauseMenu);
 
 // --- End-of-game stats/score screen -------------------------------------
 // Shown once per match, the tick state.gameOver/state.win first becomes
@@ -1264,9 +1370,9 @@ gameEndCloseBtn.addEventListener("click", () => {
     selectedId = null;
     selectedBuildType = null;
   } else {
-    // A true match end (loss, or beating the final level) -- start a new
-    // campaign via the level picker rather than defaulting to level 1.
-    restartToLevelSelect();
+    // A true match end (loss, or beating the final level) -- choose how
+    // to play the next game on the menu rather than defaulting to level 1.
+    backToNewGame();
   }
 });
 
@@ -1501,13 +1607,26 @@ const PAN_SPEED = 600; // world px/sec
 
 window.addEventListener("keydown", (evt) => {
   const key = evt.key.toLowerCase();
+  if (key === "escape") {
+    // Esc first lets go of a tower or wall picked to build; otherwise it
+    // opens the pause menu, or (in a menu) goes back a screen.
+    if (selectedBuildType) {
+      selectedBuildType = null;
+    } else if (menu.isOpen()) {
+      menu.back();
+    } else {
+      openPauseMenu();
+    }
+    return;
+  }
+  if (menu.isOpen()) return; // no panning or R under a menu
   if (key === "r") {
     if (!state.gameOver && !state.win) return;
-    // Same as the reset button and the game-end screen's "Jugar de
-    // nuevo" -- back to the level picker rather than silently defaulting
-    // to level 1 (or, in networked mode, re-fetching the same still-ended
-    // shared state instead of actually resetting it).
-    restartToLevelSelect();
+    // Same as the game-end screen's "Jugar de nuevo" -- on to choosing
+    // the next game on the menu rather than silently defaulting to level 1
+    // (or, in networked mode, re-fetching the same still-ended shared
+    // state instead of actually resetting it).
+    backToNewGame();
     return;
   }
   if (PAN_KEYS.has(key)) pressedPanKeys.add(key);
@@ -1650,11 +1769,11 @@ async function boot() {
   }
   if (networked) {
     // Joining an already-running (or already-ended) shared match --
-    // show it immediately rather than forcing a level picker on top of
+    // show it immediately rather than forcing the main menu on top of
     // whatever the other players are already looking at.
     started = true;
   } else {
-    showStartMenu();
+    menu.openMain();
   }
   requestAnimationFrame(loop);
 }
@@ -1669,6 +1788,9 @@ function loop(now) {
   frameNow = now / 1000;
 
   if (!networked && started) {
+    // Before stepping: a level's start is only between waves until its
+    // first tick spawns the opening units.
+    saveScheduler.tick(state, (slot, ok) => showToast(savedMessage(slot, ok)));
     stepSimulation(state, dt);
   }
   playNewShotSounds();

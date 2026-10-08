@@ -14,6 +14,18 @@ function getCtx() {
 }
 
 let muted = false;
+// Per user request, music and sound effects can each be switched off for
+// good from the settings menu (settings.js remembers them), on top of the
+// 🔊 button muting everything at once.
+let musicOn = true;
+let effectsOn = true;
+export function setMusicOn(on) {
+  musicOn = on;
+  syncMusicMute();
+}
+export function setEffectsOn(on) {
+  effectsOn = on;
+}
 export function setMuted(value) {
   muted = value;
   syncMusicMute();
@@ -47,7 +59,7 @@ function getMusicEl() {
   return musicEl;
 }
 function syncMusicMute() {
-  if (musicEl) musicEl.muted = muted;
+  if (musicEl) musicEl.muted = muted || !musicOn;
 }
 
 // Browsers block audio (even a plain <audio> element) from starting before
@@ -213,7 +225,7 @@ const MIN_INTERVAL_MS = { machinegun: 40, cannon: 90, missile: 140, laser: 60, e
 const lastPlayedAt = {};
 
 export function playSound(name) {
-  if (muted) return;
+  if (muted || !effectsOn) return;
   const fn = PLAYERS[name];
   if (!fn) return;
   const now = performance.now();

@@ -12,29 +12,110 @@
       <canvas id="game-canvas" width="1200" height="750"></canvas>
       <button id="skip-wave-btn" class="hidden">▶</button>
       <div id="upgrade-panel" class="hidden"></div>
-      <div id="start-menu" class="hidden">
-        <div id="start-menu-modal">
-          <div id="start-menu-title">Elige nivel</div>
-          <div id="start-menu-levels">
-            <button class="start-level-btn" data-level="1">
-              <span class="start-level-name">Nivel 1</span>
-              <span class="start-level-subtitle">Campo</span>
-            </button>
-            <button class="start-level-btn" data-level="2">
-              <span class="start-level-name">Nivel 2</span>
-              <span class="start-level-subtitle">Ciudad</span>
-            </button>
-            <button class="start-level-btn" data-level="3">
-              <span class="start-level-name">Nivel 3</span>
-              <span class="start-level-subtitle">Base (mapa grande)</span>
-            </button>
-            <button class="start-level-btn" data-level="4">
-              <span class="start-level-name">Nivel 4</span>
-              <span class="start-level-subtitle">Ciudad en ruinas (mapa grande)</span>
-            </button>
+      <div id="menu" class="hidden">
+        <div class="menu-panel">
+          <div class="menu-title">TOWER DEFENSE</div>
+          <div class="menu-screen" data-screen="home">
+            <button class="menu-btn hidden" data-do="continue">Continuar</button>
+            <button class="menu-btn" data-go="mode">Nueva partida</button>
+            <button class="menu-btn" data-go="load">Cargar partida</button>
+            <button class="menu-btn" data-go="multiplayer">Multijugador</button>
+            <button class="menu-btn" data-do="records">Récords</button>
+            <button class="menu-btn" data-go="settings">Ajustes</button>
+          </div>
+          <div class="menu-screen hidden" data-screen="pause">
+            <button class="menu-btn" data-do="resume">Seguir</button>
+            <button class="menu-btn" data-go="save">Guardar partida</button>
+            <button class="menu-btn" data-go="load">Cargar partida</button>
+            <button class="menu-btn" data-go="mode">Nueva partida</button>
+            <button class="menu-btn" data-go="settings">Ajustes</button>
+            <button class="menu-btn" data-do="quit">Salir al menú principal</button>
+          </div>
+          <div class="menu-screen hidden" data-screen="mode">
+            <div class="menu-subtitle">¿Cómo quieres jugar?</div>
+            <div class="menu-choices">
+              <button class="menu-choice" data-go="levels">
+                <span class="menu-choice-name">Defender</span>
+                <span class="menu-choice-desc">Construye torres y protege la base</span>
+              </button>
+              <button class="menu-choice" disabled>
+                <span class="menu-choice-name">Atacar</span>
+                <span class="menu-choice-desc">Próximamente</span>
+              </button>
+            </div>
+            <button class="menu-back">Volver</button>
+          </div>
+          <div class="menu-screen hidden" data-screen="levels">
+            <div class="menu-subtitle">Elige nivel</div>
+            <div id="start-menu-levels">
+              <button class="start-level-btn" data-level="1">
+                <span class="start-level-name">Nivel 1</span>
+                <span class="start-level-subtitle">Campo</span>
+              </button>
+              <button class="start-level-btn" data-level="2">
+                <span class="start-level-name">Nivel 2</span>
+                <span class="start-level-subtitle">Ciudad</span>
+              </button>
+              <button class="start-level-btn" data-level="3">
+                <span class="start-level-name">Nivel 3</span>
+                <span class="start-level-subtitle">Base (mapa grande)</span>
+              </button>
+              <button class="start-level-btn" data-level="4">
+                <span class="start-level-name">Nivel 4</span>
+                <span class="start-level-subtitle">Ciudad en ruinas (mapa grande)</span>
+              </button>
+            </div>
+            <button class="menu-back">Volver</button>
+          </div>
+          <div class="menu-screen hidden" data-screen="load">
+            <div class="menu-subtitle">Cargar partida</div>
+            <div class="menu-note"></div>
+            <div class="save-list"></div>
+            <button class="menu-back">Volver</button>
+          </div>
+          <div class="menu-screen hidden" data-screen="save">
+            <div class="menu-subtitle">Guardar partida</div>
+            <div class="menu-note"></div>
+            <div class="save-list"></div>
+            <button class="menu-back">Volver</button>
+          </div>
+          <div class="menu-screen hidden" data-screen="multiplayer">
+            <div class="menu-subtitle">Multijugador</div>
+            <div class="menu-options">
+              <div class="menu-option">
+                <div class="menu-option-name">En casa (red local)</div>
+                <div class="menu-option-desc lan-info"></div>
+                <button class="menu-btn hidden" data-do="continue-lan">Volver a la partida</button>
+              </div>
+              <div class="menu-option soon">
+                <div class="menu-option-name">2 jugadores en este PC</div>
+                <div class="menu-option-desc">Próximamente</div>
+              </div>
+              <div class="menu-option soon">
+                <div class="menu-option-name">En línea</div>
+                <div class="menu-option-desc">Próximamente: salas con código para invitar a amigos</div>
+              </div>
+            </div>
+            <button class="menu-back">Volver</button>
+          </div>
+          <div class="menu-screen hidden" data-screen="settings">
+            <div class="menu-subtitle">Ajustes</div>
+            <label class="menu-toggle"><input type="checkbox" data-setting="music" /> Música</label>
+            <label class="menu-toggle"><input type="checkbox" data-setting="effects" /> Efectos de sonido</label>
+            <button class="menu-back">Volver</button>
+          </div>
+        </div>
+        <div class="menu-confirm hidden">
+          <div class="menu-confirm-box">
+            <div class="menu-confirm-text"></div>
+            <div class="menu-confirm-buttons">
+              <button class="menu-confirm-yes">Sí</button>
+              <button class="menu-confirm-no">No</button>
+            </div>
           </div>
         </div>
       </div>
+      <div id="toast" class="hidden"></div>
       <div id="gameend-overlay" class="hidden">
         <div id="gameend-modal">
           <div id="gameend-title"></div>
@@ -69,7 +150,7 @@
     <button id="stats-btn" title="Ranking y Estadísticas">🏆</button>
     <button id="mute-btn" title="Silenciar sonido">🔊</button>
     <button id="pause-btn" title="Pausar">⏸</button>
-    <button id="reset-btn" title="Reiniciar partida">⟲</button>
+    <button id="menu-btn" title="Menú (Esc)">☰</button>
   </div>
   <!-- On-screen D-pad -->
   <div id="nav-controls">
