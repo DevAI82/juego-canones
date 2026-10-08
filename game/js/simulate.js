@@ -10,7 +10,7 @@
 // Every action function returns { ok: boolean, reason?: string } instead of
 // throwing, so a caller (a click handler, an HTTP request handler) can
 // report *why* an action was rejected without a try/catch.
-import { randomPath, offsetPath } from "./map.js";
+import { randomPath, offsetPath, crossesWall } from "./map.js";
 import { MAX_LEVEL, levelData } from "./levels.js";
 import { createEnemy, stepEnemy, damageEnemy, stepEnemyFire } from "./enemy.js";
 import { WAVES, buildSpawnQueue } from "./waves.js";
@@ -102,7 +102,16 @@ function pathForSpawn(item, state) {
 // crowded the spawn gets.
 const SEPARATION_SPEED = 20;
 
-function separateEnemies(enemies, dt) {
+// Moves `e` by (dx, dy) -- unless that would take it through solid wall
+// (level 3's fortress, which per user request nothing may cross).
+function nudge(e, dx, dy, walls) {
+  const to = { x: e.x + dx, y: e.y + dy };
+  if (walls && crossesWall(e, to, walls)) return;
+  e.x = to.x;
+  e.y = to.y;
+}
+
+function separateEnemies(enemies, dt, walls) {
   const maxPush = SEPARATION_SPEED * dt;
   for (let i = 0; i < enemies.length; i++) {
     const a = enemies[i];
@@ -119,20 +128,16 @@ function separateEnemies(enemies, dt) {
         const push = Math.min(ENEMY_SEPARATION_DIST - dist, maxPush) / 2;
         const nx = dx / dist;
         const ny = dy / dist;
-        a.x -= nx * push;
-        a.y -= ny * push;
-        b.x += nx * push;
-        b.y += ny * push;
+        nudge(a, -nx * push, -ny * push, walls);
+        nudge(b, nx * push, ny * push, walls);
       } else {
         // Exact same point (e.g. two enemies spawned at the same instant)
         // -- nudge apart in a random direction since there's no direction
         // to push "away from" yet.
         const angle = Math.random() * Math.PI * 2;
         const push = maxPush / 2;
-        a.x -= Math.cos(angle) * push;
-        a.y -= Math.sin(angle) * push;
-        b.x += Math.cos(angle) * push;
-        b.y += Math.sin(angle) * push;
+        nudge(a, -Math.cos(angle) * push, -Math.sin(angle) * push, walls);
+        nudge(b, Math.cos(angle) * push, Math.sin(angle) * push, walls);
       }
     }
   }
@@ -260,17 +265,18 @@ export function stepSimulation(state, dt) {
   trySpawn(state);
 
   const { worldWidth, worldHeight, wall } = levelData(state.level);
-  const narrow = wall ? wall.gates : [];
+  const gates = wall ? wall.gates : [];
+  const walls = wall ? wall.segments : null;
   for (const e of state.enemies) {
     const hold = holdsForSiege(e, state.towers, dt, worldWidth, worldHeight);
-    const { reachedEnd } = stepEnemy(e, dt, state.enemies, hold, narrow);
+    const { reachedEnd } = stepEnemy(e, dt, { others: state.enemies, hold, walls, gates });
     if (reachedEnd) {
       e.alive = false;
       if (loseLife(state.economy, e.damage)) state.gameOver = true;
     }
   }
   state.enemies = state.enemies.filter((e) => e.alive);
-  separateEnemies(state.enemies, dt);
+  separateEnemies(state.enemies, dt, walls);
 
   for (const t of state.towers) {
     const shot = stepTower(t, state.enemies, dt);

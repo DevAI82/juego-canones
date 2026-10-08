@@ -12,9 +12,9 @@ import {
   skipWave,
   togglePause,
 } from "./simulate.js";
-import { PATH, distanceToPath } from "./map.js";
+import { PATH, distanceToPath, crossesWall } from "./map.js";
 import { MAX_LEVEL, LEVELS } from "./levels.js";
-import { WAVES } from "./waves.js";
+import { WAVES, buildSpawnQueue } from "./waves.js";
 
 const SLOTS_1 = LEVELS[1].buildSlots;
 
@@ -200,6 +200,33 @@ test("on a level with several roads, vehicles mostly avoid the one the towers co
   // A random pick would put ~60 of 300 on it (1 road in 5); the AI keeps
   // it to roughly the share it explores at random (~24).
   assert.ok(onDefended < 40, `${onDefended} of 300 vehicles took the defended road`);
+});
+
+test("on level 3 the biggest wave gets all the way through without anyone crossing the fortress wall or getting stuck", (t) => {
+  let seed = 5;
+  t.mock.method(Math, "random", () => {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return seed / 2 ** 32;
+  });
+  const s = createGameState(3);
+  s.waveIndex = WAVES.length - 1; // the biggest wave
+  s.spawnQueue = buildSpawnQueue(s.waveIndex);
+  s.economy.lives = 1e9;
+  const { segments } = LEVELS[3].wall;
+  const prev = new Map();
+  let crossings = 0;
+  // Up to 6 minutes of game time; it normally clears in under 4.
+  for (let i = 0; i < 7200 && (s.enemies.length || s.spawnQueue.length); i++) {
+    stepSimulation(s, 0.05);
+    if (s.spawnQueue.length === 0) s.waveIndex = WAVES.length - 1; // clearing it mustn't start another wave
+    for (const e of s.enemies) {
+      const p = prev.get(e.id);
+      if (p && crossesWall(p, e, segments)) crossings++;
+      prev.set(e.id, { x: e.x, y: e.y });
+    }
+  }
+  assert.equal(crossings, 0);
+  assert.equal(s.enemies.length, 0, `${s.enemies.length} enemies still on the field`);
 });
 
 test("escorts take the same road as the heavy they escort", () => {

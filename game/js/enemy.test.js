@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ENEMY_TYPES, createEnemy, stepEnemy, damageEnemy, stepEnemyFire } from "./enemy.js";
+import { crossesWall } from "./map.js";
 
 const PATH = [{ x: 0, y: 0 }, { x: 100, y: 0 }];
 
@@ -36,7 +37,7 @@ function drive(e, seconds, dt = 0.05, others = [e], hold = false) {
   const trace = [];
   for (let t = 0; t < seconds; t += dt) {
     const prevAngle = e.angle;
-    if (stepEnemy(e, dt, others, hold).reachedEnd) break;
+    if (stepEnemy(e, dt, { others, hold }).reachedEnd) break;
     trace.push({ x: e.x, y: e.y, v: e.v, turn: Math.abs(e.angle - prevAngle) });
   }
   return trace;
@@ -51,7 +52,7 @@ test("a vehicle rounds a corner in an arc, turning no faster than its handling a
   const closest = Math.min(...trace.map((s) => Math.hypot(s.x - 300, s.y)));
   assert.ok(closest > 3 && closest < 20, `closest approach to the corner tip: ${closest}`);
   // ...and still finishes the route.
-  assert.equal(stepEnemy(e, 0.05, [e]).reachedEnd, true);
+  assert.equal(stepEnemy(e, 0.05, { others: [e] }).reachedEnd, true);
 });
 
 test("a vehicle brakes into a sharp corner and picks its speed back up after it", () => {
@@ -81,7 +82,7 @@ test("a faster vehicle catching up with a slower one overtakes it with room to s
   let closest = Infinity;
   let tankSwerve = 0;
   for (let t = 0; t < 20; t += 0.05) {
-    for (const u of units) stepEnemy(u, 0.05, units);
+    for (const u of units) stepEnemy(u, 0.05, { others: units });
     closest = Math.min(closest, Math.hypot(tank.x - buggy.x, tank.y - buggy.y));
     tankSwerve = Math.max(tankSwerve, Math.abs(tank.y));
   }
@@ -93,7 +94,7 @@ test("a faster vehicle catching up with a slower one overtakes it with room to s
   assert.ok(tankSwerve < 10, `the tank shouldn't be pushed off its line (${tankSwerve.toFixed(1)}px)`);
 });
 
-test("a vehicle doesn't overtake near one of the level's narrow points (a bridge), it waits behind", () => {
+test("a vehicle doesn't overtake near one of the level's gates (a bridge), it waits behind", () => {
   const road = [{ x: 0, y: 0 }, { x: 2000, y: 0 }];
   const bridge = { x: 300, y: 0 };
   const tank = createEnemy("tank", road);
@@ -101,9 +102,82 @@ test("a vehicle doesn't overtake near one of the level's narrow points (a bridge
   tank.x = 150;
   buggy.x = 60;
   const units = [tank, buggy];
-  for (let t = 0; t < 4; t += 0.05) for (const u of units) stepEnemy(u, 0.05, units, false, [bridge]);
+  for (let t = 0; t < 4; t += 0.05) for (const u of units) stepEnemy(u, 0.05, { others: units, gates: [bridge] });
   assert.ok(buggy.x < tank.x - 50, "still behind the tank, at a safe distance");
   assert.ok(Math.abs(buggy.y) < 7, `and in its lane (${buggy.y.toFixed(1)}px off)`);
+});
+
+test("two units that each see the other in front of them don't wait on each other forever", () => {
+  // Reproduced from a full level-1 wave: side by side on converging
+  // stretches of road, both stopped, each braking for the other.
+  const a = createEnemy("tank", [{ x: 434, y: 401 }, { x: 399, y: 447 }, { x: 394, y: 520 }, { x: 394, y: 900 }]);
+  const b = createEnemy("tank", [{ x: 394, y: 445 }, { x: 394, y: 502 }, { x: 394, y: 900 }]);
+  a.id = 31;
+  b.id = 45;
+  Object.assign(a, { x: 428.2, y: 455.2, angle: (49 * Math.PI) / 180, v: 0 });
+  Object.assign(b, { x: 395.4, y: 455.1, angle: (118 * Math.PI) / 180, v: 0 });
+  const units = [a, b];
+  for (let t = 0; t < 20; t += 0.05) for (const u of units) stepEnemy(u, 0.05, { others: units });
+  assert.ok(a.y > 600 && b.y > 600, `both should have driven on (a at y=${a.y.toFixed(0)}, b at y=${b.y.toFixed(0)})`);
+});
+
+test("a unit swerving round another never steers through a wall -- it goes round the other side", () => {
+  const walls = [[{ x: 100, y: 0 }, { x: 100, y: 1000 }]];
+  const road = [{ x: 130, y: 0 }, { x: 130, y: 1000 }];
+  const tank = createEnemy("tank", road);
+  const buggy = createEnemy("buggy", road);
+  tank.id = 1;
+  buggy.id = 2;
+  Object.assign(tank, { y: 200, v: 0, speed: 0 }); // stopped in the middle of the road
+  buggy.y = 60;
+  const units = [tank, buggy];
+  let minX = Infinity;
+  for (let t = 0; t < 15; t += 0.05) {
+    stepEnemy(buggy, 0.05, { others: units, walls });
+    minX = Math.min(minX, buggy.x);
+  }
+  assert.ok(minX > 100, `went through the wall (x=${minX.toFixed(1)})`);
+  assert.ok(buggy.y > 320, `and still got past the stopped tank (y=${buggy.y.toFixed(0)})`);
+});
+
+test("a unit that ends up against a wall beside a gate works its way back round through the gate", () => {
+  // Wall along y=100 with a gate between x=200 and x=250.
+  const walls = [
+    [{ x: 0, y: 100 }, { x: 200, y: 100 }],
+    [{ x: 250, y: 100 }, { x: 500, y: 100 }],
+  ];
+  const tank = createEnemy("tank", [{ x: 225, y: 0 }, { x: 225, y: 100 }, { x: 225, y: 400 }]);
+  // Already through the gate by its route's reckoning, but actually still
+  // outside, pressed against the wall a little to the gate's left.
+  Object.assign(tank, { x: 180, y: 99, waypointIndex: 1, angle: Math.PI / 2 });
+  let crossed = false;
+  for (let t = 0; t < 15; t += 0.05) {
+    const from = { x: tank.x, y: tank.y };
+    stepEnemy(tank, 0.05, { others: [tank], walls });
+    crossed ||= walls.some(([a, b]) => crossesWall(from, tank, [[a, b]]));
+  }
+  assert.equal(crossed, false, "went through the wall");
+  assert.ok(tank.y > 200, `should have got through the gate (y=${tank.y.toFixed(0)})`);
+});
+
+test("a unit that has strayed in through a gate its route only ran past finds its way back out", () => {
+  // Wall along y=100 with a gate between x=200 and x=250; the route runs
+  // along the outside of the wall, but the unit has ended up just inside.
+  const walls = [
+    [{ x: 0, y: 100 }, { x: 200, y: 100 }],
+    [{ x: 250, y: 100 }, { x: 500, y: 100 }],
+  ];
+  const gates = [{ x: 225, y: 100 }];
+  const soldier = createEnemy("soldier", [{ x: 0, y: 60 }, { x: 900, y: 60 }]);
+  Object.assign(soldier, { x: 300, y: 101, angle: 0 });
+  let crossed = false;
+  for (let t = 0; t < 20; t += 0.05) {
+    const from = { x: soldier.x, y: soldier.y };
+    stepEnemy(soldier, 0.05, { others: [soldier], walls, gates });
+    crossed ||= crossesWall(from, soldier, walls);
+  }
+  assert.equal(crossed, false, "went through the wall");
+  assert.ok(soldier.y < 100 && soldier.x > 500, `should be back out and on its way (at ${soldier.x.toFixed(0)},${soldier.y.toFixed(0)})`);
 });
 
 test("damageEnemy reduces hp and reports death at 0", () => {

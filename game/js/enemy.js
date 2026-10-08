@@ -1,5 +1,5 @@
 import { angleDiff } from "./util.js";
-import { distToSegment } from "./map.js";
+import { distToSegment, crossesWall } from "./map.js";
 import { pickTowerTarget, ROCKET_SIEGE_TIME, SOLDIER_SPRINT_TIME, SOLDIER_SPRINT_MULT, SOLDIER_SPRINT_COOLDOWN } from "./ai.js";
 
 // Driving model, per user request ("mejorar el movimiento de las
@@ -26,6 +26,12 @@ const HANDLING = {
 // Speed lost when the way ahead bends 90 degrees or more from the current
 // heading (scaled down for gentler bends).
 const CORNER_SLOWDOWN = 0.55;
+const TURN_FREE = Math.PI / 4;
+
+// The look-ahead shrinks with speed, down to this at a standstill: a unit
+// crawling out from behind a stopped one aims sharply sideways instead of
+// mostly ahead (into the unit it's trying to get round).
+const LOOK_MIN = 8;
 
 // Each unit's footprint as drawn (main.js's ENEMY_DRAW_SIZES with each
 // sprite's aspect ratio), [length, width] in px -- what spacing is
@@ -42,17 +48,20 @@ export const FOOTPRINT = {
 
 // Collision avoidance (avoidance below). A unit with another one ahead or
 // alongside it, closer sideways than their half-widths plus SIDE_MARGIN,
-// steers to the side, out of its way. One of its own kind going the same
-// way in front of it sets its speed: that unit's own, plus FOLLOW_CLOSING
-// px/s for every px of gap beyond bumper-to-bumper -- closing up smoothly
-// and holding there. If that unit is slower than it wants to go, it pulls
-// right out alongside and overtakes, so escorts still pass their slow
-// tank instead of queueing behind it, and a rocket truck stopped to shell
-// a tower gets driven round -- except that it won't start a pass within
-// NO_PASSING_RADIUS of the level's narrow points (level 3's bridges through
-// the fortress wall), far enough out for a pass already under way to
-// finish before the bridge; there it waits its turn. Vehicles follow and
-// overtake vehicles, and soldiers soldiers; everyone steers round everyone.
+// steers to the side, out of its way -- one coming up behind a slower one
+// of its own kind pulls right out alongside and overtakes it, holding its
+// line until fully past, so escorts pass their slow tank and a rocket
+// truck stopped to shell a tower gets driven round. It doesn't slow down
+// to do it: in bot games, letting units queue behind slower ones (even
+// down to 85% of their own speed) had whole waves crawling along at tank
+// pace through the towers' fire, and made level 1 far easier than it was
+// designed. The one place units do queue is at the level's gates (level
+// 3's bridges through the fortress wall): no pass is started within
+// NO_PASSING_RADIUS of one -- far enough out for a pass already under way
+// to finish before the bridge -- and there a unit follows the one in front,
+// at its speed plus FOLLOW_CLOSING px/s for every px of gap, closing up
+// smoothly and holding there. Vehicles overtake and queue behind vehicles,
+// and soldiers behind soldiers; everyone steers round everyone.
 const SIDE_MARGIN = 4;
 const SIDE_HOLD = 10;
 const PASS_MARGIN = 6;
@@ -189,15 +198,15 @@ function pointAhead(e, t, dist) {
 // unit vector ux, uy here, `offset` px to the right of it right now,
 // wanting to go `cruise`): `shift` is where to steer to, in px to the
 // right of the route (0: back on it), and `follow` a cap on its speed
-// from a unit in front (Infinity if none). `narrow`: points where
+// from a unit in front (Infinity if none). `gates`: points where
 // overtaking isn't allowed. Ahead/sideways are measured along the route,
 // not the unit's own heading: with the heading, every small swerve swung
 // a unit 50px ahead several px sideways, which flipped the decision to
 // pass it on and off every tick.
-function avoidance(e, others, ux, uy, cruise, offset, narrow) {
+function avoidance(e, others, ux, uy, cruise, offset, gates) {
   const kind = e.type === "soldier" ? "soldier" : "vehicle";
   const [eLen, eWid] = FOOTPRINT[e.type] || FOOTPRINT.buggy;
-  const canPass = !narrow.some((p) => Math.hypot(p.x - e.x, p.y - e.y) < NO_PASSING_RADIUS);
+  const canPass = !gates.some((p) => Math.hypot(p.x - e.x, p.y - e.y) < NO_PASSING_RADIUS);
   let shift = null;
   let follow = Infinity;
   for (const o of others) {
@@ -226,14 +235,18 @@ function avoidance(e, others, ux, uy, cruise, offset, narrow) {
     // Just clear of it, measured from our route: its own offset from our
     // route (ours plus its offset from us), plus `clear` on the far side.
     let want = offset + lat + away * clear;
-    // Only follow a unit we're also behind by its own reckoning (along its
-    // heading): two units each "ahead" of the other in their own route's
-    // frame used to wait on each other forever.
-    const behindIt = -(dx * Math.cos(o.angle) + dy * Math.sin(o.angle)) < 0;
-    if (sameKindSameWay && Math.abs(lat) < clear - 2) {
-      if (lon > 0 && behindIt) follow = Math.min(follow, Math.max(0, oSpeed + (lon - bumper) * FOLLOW_CLOSING));
-      // Slower than we'd go: overtake -- unless at a bridge: wait behind.
-      if (oSpeed < cruise * 0.9 && !canPass) want = 0;
+    // Only ever brake for a unit that entered the map before us (lower id).
+    // Who's in front of whom is judged along each unit's own route, so two
+    // units side by side on converging roads could each see the other in
+    // front and both stop for good. With braking only ever "downhill" in
+    // spawn order, the oldest unit in any knot never waits on the others,
+    // so every knot unties. (Steering clear and overtaking still apply to
+    // everyone.)
+    const yields = (e.id ?? Infinity) > (o.id ?? -Infinity);
+    if (sameKindSameWay && Math.abs(lat) < clear - 2 && !canPass) {
+      // At a bridge: queue behind it in our lane instead of overtaking.
+      if (lon > 0 && yields) follow = Math.min(follow, Math.max(0, oSpeed + (lon - bumper) * FOLLOW_CLOSING));
+      if (oSpeed < cruise * 0.9) want = 0;
     }
     // The unit needing the biggest move out of the way wins.
     if (shift === null || Math.abs(want - offset) > Math.abs(shift - offset)) shift = want;
@@ -241,10 +254,32 @@ function avoidance(e, others, ux, uy, cruise, offset, narrow) {
   return { shift: shift === null ? 0 : Math.max(-MAX_SHIFT, Math.min(MAX_SHIFT, shift)), follow };
 }
 
-// others: every unit on the field (for avoidance). hold: brake to a stop
-// and stay put (a rocket truck sieging, ai.js's holdsForSiege). narrow:
-// points with no overtaking around them (avoidance).
-export function stepEnemy(enemy, dt, others = [], hold = false, narrow = []) {
+// The look-ahead point moved `shift` px to the right of the route there
+// (negative: left), to swerve -- unless the way there runs through a wall:
+// then round the other side instead, or failing that straight on along
+// the route. If even that is behind a wall, the unit has ended up on the
+// wrong side of it -- nudged against the wall beside a gate with its route
+// carrying on through the gate, say, or sidestepped in through a gate its
+// route only ran past: then it heads for where its current stretch of
+// route starts or ends, or failing those the nearest gate it can reach,
+// and so works its way back round through the opening instead of pushing
+// against the wall for good.
+function aimPoint(e, look, shift, walls, gates) {
+  const offRoute = (s) => ({ x: look.x - look.uy * s, y: look.y + look.ux * s });
+  if (!walls) return offRoute(shift);
+  const options = shift === 0 ? [offRoute(0)] : [offRoute(shift), offRoute(-shift), offRoute(0)];
+  options.push(e.path[e.waypointIndex], e.path[e.waypointIndex + 1]);
+  options.push(...[...gates].sort((a, b) => Math.hypot(a.x - e.x, a.y - e.y) - Math.hypot(b.x - e.x, b.y - e.y)));
+  return options.find((p) => !crossesWall(e, p, walls)) || offRoute(0);
+}
+
+// Options: others -- every unit on the field (for avoidance); hold --
+// brake to a stop and stay put (a rocket truck sieging, ai.js's
+// holdsForSiege); walls -- solid wall segments (level 3's fortress, per
+// user request impassable everywhere but its gates) never to move
+// through; gates -- the openings in them, where nobody overtakes and
+// which a unit walled off from its route makes for (aimPoint).
+export function stepEnemy(enemy, dt, { others = [], hold = false, walls = null, gates = [] } = {}) {
   if (!enemy.alive) return { reachedEnd: false };
   if (!enemy.path[enemy.waypointIndex + 1]) return { reachedEnd: true };
 
@@ -259,7 +294,11 @@ export function stepEnemy(enemy, dt, others = [], hold = false, narrow = []) {
   const t = advanceAlongPath(enemy, h.look);
   // Just finished the route: stop here; the next call reports reachedEnd.
   if (!enemy.path[enemy.waypointIndex + 1]) return { reachedEnd: false };
-  const look = pointAhead(enemy, t, h.look);
+  // Braking looks the full distance ahead to see a bend coming; steering
+  // aims closer in the slower the unit is going (LOOK_MIN).
+  const far = pointAhead(enemy, t, h.look);
+  const speedFrac = cruise > 0 ? Math.min(1, (enemy.v ?? cruise) / cruise) : 1;
+  const look = speedFrac < 1 ? pointAhead(enemy, t, Math.max(LOOK_MIN, h.look * speedFrac)) : far;
   // The route's direction here, and how far right of it the unit is.
   const a = enemy.path[enemy.waypointIndex];
   const b = enemy.path[enemy.waypointIndex + 1];
@@ -267,24 +306,38 @@ export function stepEnemy(enemy, dt, others = [], hold = false, narrow = []) {
   const ux = (b.x - a.x) / segLen;
   const uy = (b.y - a.y) / segLen;
   const offset = ux * (enemy.y - a.y) - uy * (enemy.x - a.x);
-  const { shift, follow } = avoidance(enemy, others, ux, uy, cruise, offset, narrow);
-  // Aim point: the look-ahead point, moved `shift` px to the right of the
-  // route there (negative: left) to swerve.
-  const aimX = look.x - look.uy * shift;
-  const aimY = look.y + look.ux * shift;
-  const err = angleDiff(enemy.angle, Math.atan2(aimY - enemy.y, aimX - enemy.x));
+  const { shift, follow } = avoidance(enemy, others, ux, uy, cruise, offset, gates);
+  const aim = aimPoint(enemy, look, shift, walls, gates);
+  const err = angleDiff(enemy.angle, Math.atan2(aim.y - enemy.y, aim.x - enemy.x));
   const maxTurn = h.turn * dt;
   enemy.angle += Math.max(-maxTurn, Math.min(maxTurn, err));
 
   let targetSpeed = 0;
   if (!hold) {
-    const corner = 1 - CORNER_SLOWDOWN * Math.min(1, Math.abs(err) / (Math.PI / 2));
+    // How sharply the road itself turns between here and a full look-ahead
+    // on -- measured off the route, not the heading, which already starts
+    // turning in early and would make every bend look gentler than it is.
+    const bend = Math.abs(angleDiff(Math.atan2(uy, ux), Math.atan2(far.uy, far.ux)));
+    // Slow for the road's own bends, and for a turn sharp enough to need it
+    // (past TURN_FREE) -- but not for the small swerves round other units:
+    // braking for those had a whole crowd dawdling as they weaved past
+    // each other.
+    const sharpTurn = Math.max(0, Math.abs(err) - TURN_FREE);
+    const corner = 1 - CORNER_SLOWDOWN * Math.min(1, Math.max(bend, sharpTurn) / (Math.PI / 2));
     targetSpeed = Math.min(cruise * corner, follow);
   }
   const v = enemy.v ?? enemy.speed;
   enemy.v = v < targetSpeed ? Math.min(targetSpeed, v + h.accel * dt) : Math.max(targetSpeed, v - h.brake * dt);
-  enemy.x += Math.cos(enemy.angle) * enemy.v * dt;
-  enemy.y += Math.sin(enemy.angle) * enemy.v * dt;
+  const to = { x: enemy.x + Math.cos(enemy.angle) * enemy.v * dt, y: enemy.y + Math.sin(enemy.angle) * enemy.v * dt };
+  if (walls && crossesWall(enemy, to, walls)) {
+    // Up against the wall: it stops dead there, still turning toward its
+    // aim (aimPoint keeps that on this side), and pulls away once it faces
+    // a way it can actually go.
+    enemy.v = 0;
+  } else {
+    enemy.x = to.x;
+    enemy.y = to.y;
+  }
   return { reachedEnd: false };
 }
 
