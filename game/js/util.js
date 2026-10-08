@@ -14,3 +14,13 @@ export function angleDiff(from, to) {
 export function lerpAngle(from, to, t) {
   return from + angleDiff(from, to) * Math.min(t, 1);
 }
+
+// The browser's localStorage -- or null where there isn't one (Node, or a
+// browser blocking site data, where even reading the property can throw).
+export function browserStorage() {
+  try {
+    return globalThis.localStorage ?? null;
+  } catch {
+    return null;
+  }
+}
