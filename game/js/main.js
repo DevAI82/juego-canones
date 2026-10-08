@@ -17,6 +17,8 @@ import {
 import { MAX_LEVEL, levelData } from "./levels.js";
 import { pickTowerTarget } from "./ai.js";
 import { lerpAngle } from "./util.js";
+import { createEffects, clearEffects, stepEffects, hitFlash, drawGroundEffects, drawAirEffects } from "./effects.js";
+import { minimapRect, minimapToWorld, drawMinimap } from "./minimap.js";
 import { playSound, toggleMuted, startMusic, pauseMusic, resumeMusic } from "./audio.js";
 
 // Browsers refuse to start any audio (synthesized SFX or the background
@@ -259,9 +261,26 @@ function recenterCamera(level) {
 }
 let lastCameraLevel = null;
 
+function centerCameraOn(p) {
+  camera.x = p.x - CANVAS_WIDTH / zoom / 2;
+  camera.y = p.y - CANVAS_HEIGHT / zoom / 2;
+  clampCamera(state.level);
+}
+
+// Only a level bigger than the screen (level 3) gets a minimap.
+function currentMinimap() {
+  const { w, h } = worldSize(state.level);
+  if (w <= CANVAS_WIDTH && h <= CANVAS_HEIGHT) return null;
+  return minimapRect(w, h, CANVAS_HEIGHT);
+}
+
 // Running clock (seconds) used only for cosmetic animation phase (the
 // enemy walking bob) -- deliberately not gameplay state.
 let frameNow = 0;
+
+// Particles and ground marks (effects.js) -- local to this tab, like the
+// camera: worked out from what this tab sees change, never shared.
+const fx = createEffects();
 
 // Every projectile/beam id we've already played a firing sound for.
 // Rebuilt from the CURRENT state each frame (rather than only ever
@@ -422,6 +441,17 @@ function drawEnemy(e) {
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
     ctx.drawImage(img, -w / 2, -h / 2, w, h);
+    // Just hit: flare up for a moment (effects.js) -- the sprite added over
+    // itself, so it brightens but keeps its detail (a flat white overlay
+    // turned these near-rectangular vehicles into a grey box).
+    const flash = hitFlash(fx, e.id);
+    if (flash > 0) {
+      ctx.globalCompositeOperation = "lighter";
+      ctx.globalAlpha = 0.65 * flash;
+      ctx.drawImage(img, -w / 2, -h / 2, w, h);
+      ctx.globalCompositeOperation = "source-over";
+      ctx.globalAlpha = 1;
+    }
   } else {
     const FALLBACK_COLOR = { tank: "#635843", buggy: "#786d52", soldier: "#5f6848", motorcycle: "#555246", rocket: "#66614f" };
     ctx.fillStyle = FALLBACK_COLOR[e.type] || "#5f6848";
@@ -431,19 +461,32 @@ function drawEnemy(e) {
   }
   ctx.restore();
 
-  // Tactical health bar
+  // Health bar, in the enemy side's red (the towers' are green), as in the
+  // RTS screenshots the user gave as reference. Placed just above the
+  // sprite however it's turned, so a long vehicle heading up or down the
+  // screen doesn't end up with its bar drawn across its own hull.
   const barW = Math.max(22, Math.min(38, w * 0.75));
   const barH = 4;
-  const barY = e.y - h / 2 - 9;
+  const halfTall = Math.abs(Math.sin(e.angle)) * (w / 2) + Math.abs(Math.cos(e.angle)) * (h / 2);
+  const barY = e.y - halfTall - 8;
   const pct = Math.max(0, Math.min(1, e.hp / e.maxHp));
   ctx.save();
   ctx.fillStyle = "rgba(0, 0, 0, 0.75)";
   ctx.fillRect(e.x - barW / 2 - 1, barY - 1, barW + 2, barH + 2);
-  ctx.fillStyle = "#330000";
+  ctx.fillStyle = "#3a0d0d";
   ctx.fillRect(e.x - barW / 2, barY, barW, barH);
-  ctx.fillStyle = pct > 0.5 ? "#2ecc71" : pct > 0.25 ? "#f1c40f" : "#e74c3c";
+  ctx.fillStyle = "#e5392f";
   ctx.fillRect(e.x - barW / 2, barY, barW * pct, barH);
   ctx.restore();
+}
+
+// What effects.js draws a destroyed vehicle's wreck from: its sprite at the
+// same size drawEnemy draws it, or null until the image has loaded.
+function wreckSprite(type) {
+  const img = sprites[`enemy_${type}`];
+  if (!ready(img)) return null;
+  const h = (ENEMY_DRAW_SIZES[type] || { h: 28 }).h;
+  return { img, w: h * (img.naturalWidth / img.naturalHeight), h };
 }
 
 // A rocket truck stopped to shell a tower from out of its reach (ai.js's
@@ -1209,6 +1252,18 @@ function handleClick(pos) {
 // tower is the right behavior there too.
 const DRAG_THRESHOLD = 15; // screen px before a press counts as a drag, not a click
 let dragState = null; // { startClientX, startClientY, startCamX, startCamY, startWorldPos, moved }
+// A press that starts on the minimap moves the camera to that spot, and
+// keeps it following the pointer until released -- instead of panning
+// or placing a tower.
+let minimapDragging = false;
+
+function canvasPoint(evt) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: ((evt.clientX - rect.left) / rect.width) * CANVAS_WIDTH,
+    y: ((evt.clientY - rect.top) / rect.height) * CANVAS_HEIGHT,
+  };
+}
 
 canvas.addEventListener("contextmenu", (evt) => evt.preventDefault());
 
@@ -1221,6 +1276,14 @@ canvas.addEventListener("pointerdown", (evt) => {
     return;
   }
   if (evt.button !== 0) return;
+  const mini = currentMinimap();
+  const cp = canvasPoint(evt);
+  const onMinimap = mini && minimapToWorld(mini, cp.x, cp.y);
+  if (onMinimap) {
+    minimapDragging = true;
+    centerCameraOn(onMinimap);
+    return;
+  }
   const startWorldPos = worldPos(evt);
   dragState = {
     startClientX: evt.clientX,
@@ -1236,6 +1299,12 @@ canvas.addEventListener("pointermove", (evt) => {
   const pos = worldPos(evt);
   mouseX = pos.x;
   mouseY = pos.y;
+  if (minimapDragging) {
+    const mini = currentMinimap();
+    const cp = canvasPoint(evt);
+    if (mini) centerCameraOn(minimapToWorld(mini, cp.x, cp.y, true));
+    return;
+  }
   if (!dragState) return;
   const dxScreen = evt.clientX - dragState.startClientX;
   const dyScreen = evt.clientY - dragState.startClientY;
@@ -1249,6 +1318,7 @@ canvas.addEventListener("pointermove", (evt) => {
 });
 
 window.addEventListener("pointerup", (evt) => {
+  minimapDragging = false;
   if (!dragState) return;
   const dxScreen = evt.clientX - dragState.startClientX;
   const dyScreen = evt.clientY - dragState.startClientY;
@@ -1483,6 +1553,7 @@ function loop(now) {
   if (state.level !== lastCameraLevel) {
     lastCameraLevel = state.level;
     recenterCamera(state.level);
+    clearEffects(fx);
   }
   updateCameraFromKeys(dt);
 
@@ -1510,12 +1581,16 @@ function loop(now) {
   // rocket) still follow it exactly via simulate.js/enemy.js, this only
   // removes the visual debug overlay.
   const view = drawnView(now);
+  // Effects freeze with the game when it's paused.
+  if (!state.paused) stepEffects(fx, view, dt);
+  drawGroundEffects(fx, ctx, wreckSprite);
   for (const t of view.towers) drawTower(t);
   for (const e of view.enemies) drawEnemy(e);
   for (const e of view.enemies) if (e.holding) drawSiegeDesignator(e);
   for (const p of view.projectiles) drawProjectile(p);
   for (const bm of view.beams) drawBeam(bm);
   for (const ex of view.explosions) drawExplosion(ex);
+  drawAirEffects(fx, ctx);
 
   if (selectedBuildType) {
     // A slot-based level (levels.js's buildSlots) only allows building at
@@ -1553,6 +1628,17 @@ function loop(now) {
     ctx.restore();
   }
   ctx.restore();
+
+  const mini = currentMinimap();
+  if (mini) {
+    drawMinimap(ctx, mini, {
+      mapImage: ready(currentMapImage) ? currentMapImage : null,
+      enemies: view.enemies,
+      towers: view.towers,
+      base: levelData(state.level).soldierExit,
+      view: { camera, w: CANVAS_WIDTH / zoom, h: CANVAS_HEIGHT / zoom },
+    });
+  }
 
   drawHud();
   const selectedTower = state.towers.find((t) => t.id === selectedTowerId) || null;

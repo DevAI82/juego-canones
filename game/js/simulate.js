@@ -334,14 +334,18 @@ export function stepSimulation(state, dt) {
   // Counted here, before the filter removes them, so a tower that died in
   // combat this tick is tallied -- sellTower() removes towers by its own
   // reference filter instead, so a voluntary sale never lands here.
-  state.stats.towersLost += state.towers.filter((t) => t.hp <= 0).length;
+  for (const t of state.towers) {
+    if (t.hp > 0) continue;
+    state.stats.towersLost++;
+    state.explosions.push(assignId(createExplosion(t.x, t.y, "tower")));
+  }
   state.towers = state.towers.filter((t) => t.hp > 0);
 
   const killedEnemies = state.enemies.filter((e) => !e.alive);
   for (const e of killedEnemies) {
     earn(state.economy, e.bounty);
     state.stats.kills[e.type] = (state.stats.kills[e.type] || 0) + 1;
-    state.explosions.push(createExplosion(e.x, e.y));
+    state.explosions.push(assignId(createExplosion(e.x, e.y, e.type, e.angle)));
   }
   state.enemies = state.enemies.filter((e) => e.alive);
 
@@ -356,11 +360,14 @@ function makeDebris() {
   };
 }
 
-export function createExplosion(x, y) {
+// kind: what blew up -- an enemy type, or "tower" -- and angle which way it
+// was facing: main.js's effects size the blast by it and leave a burnt-out
+// wreck of a vehicle where it died, turned the way it was driving.
+export function createExplosion(x, y, kind = "soldier", angle = 0) {
   const count = 6 + Math.floor(Math.random() * 5);
   const debris = [];
   for (let i = 0; i < count; i++) debris.push(makeDebris());
-  return { x, y, age: 0, duration: 0.5, debris };
+  return { x, y, kind, angle, age: 0, duration: 0.5, debris };
 }
 
 // --- Player actions -- identical validation whether called from main.js's
