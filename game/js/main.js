@@ -1,6 +1,7 @@
 import { CANVAS_WIDTH, CANVAS_HEIGHT, drawMap } from "./map.js";
 import { WAVES } from "./waves.js";
 import { TOWER_TYPES, BUILD_DURATION, MUZZLE_OFFSET } from "./tower.js";
+import { topValue } from "./upgrades.js";
 import { initBuildMenu, updateBuildMenu, initUpgradePanel, updateUpgradePanel, renderGameEndScreen, renderRanking, renderStatsModal } from "./ui.js";
 import {
   createGameState,
@@ -675,6 +676,17 @@ const TOWER_RESTING_ANGLES = {
   laser: -Math.PI / 2,
 };
 
+const TOWER_BAR_FULL = 64; // px, a fully upgraded tower's bars
+
+function drawTowerBar(cx, y, h, w, frac, fill, back) {
+  ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
+  ctx.fillRect(cx - w / 2 - 1, y - 1, w + 2, h + 2);
+  ctx.fillStyle = back;
+  ctx.fillRect(cx - w / 2, y, w, h);
+  ctx.fillStyle = fill;
+  ctx.fillRect(cx - w / 2, y, w * Math.max(0, Math.min(1, frac)), h);
+}
+
 function drawTower(t) {
   // Render the volumetric 3D base pedestal
   drawTowerBase(t);
@@ -740,19 +752,13 @@ function drawTower(t) {
       ctx.restore();
     }
 
-    // Floating tactical HUD bars (Health and Ammo)
-    const w = 54;
-    const pct = t.hp / t.maxHp;
-    ctx.fillStyle = "#400";
-    ctx.fillRect(t.x - w / 2, t.y - 46, w, 5);
-    ctx.fillStyle = "#3c3";
-    ctx.fillRect(t.x - w / 2, t.y - 46, w * pct, 5);
-
-    const ammoPct = t.ammo / t.maxAmmo;
-    ctx.fillStyle = "#225";
-    ctx.fillRect(t.x - w / 2, t.y - 38, w, 4);
-    ctx.fillStyle = "#5af";
-    ctx.fillRect(t.x - w / 2, t.y - 38, w * ammoPct, 4);
+    // Health and ammo bars. Per user request, each bar's LENGTH is the
+    // tower's capacity -- short on a fresh tower, growing with every
+    // armor/ammo upgrade to full length at level 5 (upgrades.js's
+    // topValue) -- and its fill how much of it is left.
+    const def = TOWER_TYPES[t.type];
+    drawTowerBar(t.x, t.y - 46, 5, TOWER_BAR_FULL * (t.maxHp / topValue("armor", def)), t.hp / t.maxHp, "#3c3", "#400");
+    drawTowerBar(t.x, t.y - 38, 4, TOWER_BAR_FULL * (t.maxAmmo / topValue("ammo", def)), t.ammo / t.maxAmmo, "#5af", "#225");
   }
 
   if (t.id === selectedTowerId) {

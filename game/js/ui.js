@@ -3,7 +3,7 @@ import { UPGRADE_DEFS, upgradeCost, canUpgrade } from "./upgrades.js";
 import { computeScoreBreakdown } from "./scoring.js";
 
 const LABELS = { basic: "Básica", double: "Doble", laser: "Láser" };
-const SKILL_LABELS = { damage: "Daño", range: "Alcance", fireRate: "Vel. disparo", armor: "Blindaje" };
+const SKILL_LABELS = { damage: "Daño", range: "Alcance", fireRate: "Vel. disparo", armor: "Blindaje", ammo: "Munición" };
 // Reuse each tower's own premium render (game/assets/tower_*.png, extracted
 // from the user's "diseño torres" reference images) as the build menu's
 // icon, instead of a plain text button -- per user request for a more
@@ -24,6 +24,9 @@ const SKILL_ICON = {
   range: "assets/ui_icon_range.png",
   fireRate: "assets/ui_icon_firerate.png",
   armor: "assets/ui_icon_armor.png",
+  // Drawn to match the others (tools/ isn't involved: a one-off made with
+  // PIL from ui_icon_firerate.png's panel background).
+  ammo: "assets/ui_icon_ammo.png",
 };
 
 export function initBuildMenu(container, { onSelect, onRepair, onSell }) {

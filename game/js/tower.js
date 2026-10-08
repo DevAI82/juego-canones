@@ -25,15 +25,10 @@ export const MUZZLE_FLASH_TIME = 0.08;
 // muzzle flash draws) so the two always agree.
 export const MUZZLE_OFFSET = 33;
 
-// armor is a damage-taken multiplier, not a stat that varies by tower
-// type (all three start equally unarmored) -- it's here, at 1 for every
-// type, purely so applyUpgrade's `baseStats.<skill>` lookup in
-// upgrades.js works the same uniform way for armor as it does for
-// damage/range/fireRate, instead of special-casing it.
 export const TOWER_TYPES = {
-  basic: { cost: 50, damage: 12, range: 140, fireRate: 0.6, maxAmmo: 20, reloadTime: 2, maxCount: 6, hp: 80, projectilesPerShot: 1, armor: 1 },
-  double: { cost: 90, damage: 8, range: 150, fireRate: 0.35, maxAmmo: 20, reloadTime: 3, maxCount: 4, hp: 90, projectilesPerShot: 2, armor: 1 },
-  laser: { cost: 160, damage: 35, range: 220, fireRate: 1.2, maxAmmo: 20, reloadTime: 5, maxCount: 2, hp: 100, projectilesPerShot: 1, armor: 1 },
+  basic: { cost: 50, damage: 12, range: 140, fireRate: 0.6, maxAmmo: 20, reloadTime: 2, maxCount: 6, hp: 80, projectilesPerShot: 1 },
+  double: { cost: 90, damage: 8, range: 150, fireRate: 0.35, maxAmmo: 20, reloadTime: 3, maxCount: 4, hp: 90, projectilesPerShot: 2 },
+  laser: { cost: 160, damage: 35, range: 220, fireRate: 1.2, maxAmmo: 20, reloadTime: 5, maxCount: 2, hp: 100, projectilesPerShot: 1 },
 };
 
 // How long a freshly-placed tower spends "under construction" before it
@@ -64,8 +59,7 @@ export function createTower(type, x, y) {
     fireTimer: def.fireRate,
     angle: 0,
     target: null,
-    armorMult: def.armor,
-    level: { damage: 0, range: 0, fireRate: 0, armor: 0 },
+    level: { damage: 0, range: 0, fireRate: 0, armor: 0, ammo: 0 },
     buildTimeRemaining: BUILD_DURATION,
     muzzleFlash: 0,
   };
@@ -140,7 +134,7 @@ export function stepTower(tower, enemies, dt) {
 }
 
 export function damageTower(tower, amount) {
-  tower.hp -= amount * tower.armorMult;
+  tower.hp -= amount;
   if (tower.hp < 0) tower.hp = 0;
   return tower.hp > 0;
 }

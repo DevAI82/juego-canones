@@ -138,9 +138,8 @@ test("damageTower reduces hp and reports death at 0", () => {
   assert.equal(damageTower(t, 999), false);
 });
 
-test("damageTower scales incoming damage by armorMult", () => {
+test("damageTower takes damage at face value (armor adds health instead of cutting damage)", () => {
   const t = createTower("basic", 0, 0);
-  t.armorMult = 0.5;
   damageTower(t, 20);
-  assert.equal(t.hp, TOWER_TYPES.basic.hp - 10);
+  assert.equal(t.hp, TOWER_TYPES.basic.hp - 20);
 });
