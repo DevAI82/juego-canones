@@ -16,6 +16,7 @@ import {
 } from "./simulate.js";
 import { MAX_LEVEL, levelData } from "./levels.js";
 import { pickTowerTarget } from "./ai.js";
+import { lerpAngle } from "./util.js";
 import { playSound, toggleMuted, startMusic, pauseMusic, resumeMusic } from "./audio.js";
 
 // Browsers refuse to start any audio (synthesized SFX or the background
@@ -400,8 +401,11 @@ function drawEnemy(e) {
   ctx.save();
   // A small side-to-side bob while moving, out of phase per-enemy
   // (bobPhase) so a wave doesn't all bounce in unison -- makes movement
-  // read as walking/driving instead of a sprite gliding in place.
-  const bob = Math.sin(frameNow * BOB_SPEED + e.bobPhase) * 1.4;
+  // read as walking/driving instead of a sprite gliding in place. Scaled
+  // by how fast it's going, so a unit that's stopped (a rocket truck
+  // shelling a tower) sits still.
+  const moving = e.v == null || !e.speed ? 1 : Math.min(1, e.v / e.speed);
+  const bob = Math.sin(frameNow * BOB_SPEED + e.bobPhase) * 1.4 * moving;
   ctx.translate(e.x, e.y + bob);
 
   // Subtle directional ground shadow under vehicles and soldiers
@@ -1377,11 +1381,59 @@ const POLL_MS = 120;
 async function pollState() {
   try {
     const res = await fetch("/api/state");
-    if (res.ok) state = await res.json();
+    if (res.ok) receiveSnapshot(await res.json());
   } catch {
     // transient network hiccup on a LAN -- just try again next tick
   }
   setTimeout(pollState, POLL_MS);
+}
+
+// The snapshot before the latest one, and when the latest arrived -- see
+// drawnView.
+let prevSnapshot = null;
+let snapshotAt = 0;
+
+function receiveSnapshot(next) {
+  prevSnapshot = { state, at: snapshotAt };
+  state = next;
+  snapshotAt = performance.now();
+}
+
+// What to draw this frame. Solo play simulates every frame, so that's the
+// state itself. In networked play the state only changes every POLL_MS,
+// and drawn as-is everything moved in jumps several times a second; so
+// units, shells and turrets are drawn partway from where they were in the
+// previous snapshot to where they are in the latest (running one poll
+// behind, which nobody notices at this game's pace), and explosions and
+// beams keep ageing locally in between.
+function drawnView(now) {
+  if (!networked || !prevSnapshot) return state;
+  const span = snapshotAt - prevSnapshot.at;
+  const elapsed = now - snapshotAt;
+  const k = span > 0 ? Math.min(1, elapsed / span) : 1;
+  const between = (list, prevList, fields) => {
+    const prevById = new Map(prevList.map((o) => [o.id, o]));
+    return list.map((o) => {
+      const p = prevById.get(o.id);
+      if (!p) return o;
+      const out = { ...o };
+      if (fields.includes("pos")) {
+        out.x = p.x + (o.x - p.x) * k;
+        out.y = p.y + (o.y - p.y) * k;
+      }
+      if (fields.includes("angle")) out.angle = lerpAngle(p.angle, o.angle, k);
+      return out;
+    });
+  };
+  const aged = (list) => list.map((o) => ({ ...o, age: Math.min(o.duration, o.age + elapsed / 1000) }));
+  const prev = prevSnapshot.state;
+  return {
+    towers: between(state.towers, prev.towers, ["angle"]),
+    enemies: between(state.enemies, prev.enemies, ["pos", "angle"]),
+    projectiles: between(state.projectiles, prev.projectiles, ["pos"]),
+    beams: aged(state.beams),
+    explosions: aged(state.explosions),
+  };
 }
 
 // Detects, once at startup, whether this page is being served by
@@ -1395,6 +1447,7 @@ async function boot() {
     if (res.ok) {
       networked = true;
       state = await res.json();
+      snapshotAt = performance.now();
       pollState();
     }
   } catch {
@@ -1414,7 +1467,9 @@ async function boot() {
 let lastTime = performance.now();
 
 function loop(now) {
-  const dt = Math.min((now - lastTime) / 1000, 0.05);
+  // Never negative: a frame stamped earlier than the last one (it can
+  // happen on the very first frame) must not run the game backwards.
+  const dt = Math.max(0, Math.min((now - lastTime) / 1000, 0.05));
   lastTime = now;
   frameNow = now / 1000;
 
@@ -1454,12 +1509,13 @@ function loop(now) {
   // player. PATH itself is untouched -- vehicles (buggy/tank/motorcycle/
   // rocket) still follow it exactly via simulate.js/enemy.js, this only
   // removes the visual debug overlay.
-  for (const t of state.towers) drawTower(t);
-  for (const e of state.enemies) drawEnemy(e);
-  for (const e of state.enemies) if (e.holding) drawSiegeDesignator(e);
-  for (const p of state.projectiles) drawProjectile(p);
-  for (const bm of state.beams) drawBeam(bm);
-  for (const ex of state.explosions) drawExplosion(ex);
+  const view = drawnView(now);
+  for (const t of view.towers) drawTower(t);
+  for (const e of view.enemies) drawEnemy(e);
+  for (const e of view.enemies) if (e.holding) drawSiegeDesignator(e);
+  for (const p of view.projectiles) drawProjectile(p);
+  for (const bm of view.beams) drawBeam(bm);
+  for (const ex of view.explosions) drawExplosion(ex);
 
   if (selectedBuildType) {
     // A slot-based level (levels.js's buildSlots) only allows building at

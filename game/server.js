@@ -35,7 +35,9 @@ import {
   togglePause,
 } from "./js/simulate.js";
 
-const PORT = 8420;
+// PORT env var: lets a throwaway test instance run without touching the
+// real LAN game on 8420.
+const PORT = Number(process.env.PORT) || 8420;
 const TICK_MS = 50; // 20 ticks/sec -- plenty smooth for this game's pace
 const GAME_DIR = path.dirname(fileURLToPath(import.meta.url));
 
@@ -146,12 +148,23 @@ async function serveStatic(req, res) {
   }
 }
 
+// What browsers need from the state rather than everything in it: every
+// enemy's whole route, and a full copy of whatever each tower and shell is
+// aiming at (that enemy's route included, once per shell in flight), went
+// out on every poll, several times a second, to every player. Browsers
+// draw from positions; a shell only needs to know where its target is.
+function forBrowsers(key, value) {
+  if (key === "path") return undefined;
+  if (key === "target" && value) return { id: value.id, x: value.x, y: value.y };
+  return value;
+}
+
 const server = http.createServer(async (req, res) => {
   const urlPath = new URL(req.url, "http://x").pathname;
 
   if (urlPath === "/api/state" && req.method === "GET") {
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(state));
+    res.end(JSON.stringify(state, forBrowsers));
     return;
   }
 
