@@ -133,6 +133,54 @@ export function pointInPolygon(pt, corners) {
   return inside;
 }
 
+// Moves p (in place) out of whichever of `polygons` it's inside, to just
+// past the nearest of that polygon's edges -- level 4's river and sea
+// (levels.js's water), so a unit swerving round another one slides along
+// the shore instead of driving into the water. Edges along the world's
+// border (width x height) don't count: that's no shore to be put back on.
+export function pushOutOfPolygons(p, polygons, width, height) {
+  for (const poly of polygons) {
+    if (!pointInPolygon(p, poly)) continue;
+    let best = null;
+    let bestD = Infinity;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const a = poly[j];
+      const b = poly[i];
+      const onBorder = (a.x === b.x && (a.x <= 0 || a.x >= width)) || (a.y === b.y && (a.y <= 0 || a.y >= height));
+      if (onBorder) continue;
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const lenSq = dx * dx + dy * dy || 1;
+      const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq));
+      const q = { x: a.x + t * dx, y: a.y + t * dy, nx: dy, ny: -dx };
+      const d = Math.hypot(q.x - p.x, q.y - p.y);
+      if (d < bestD) {
+        bestD = d;
+        best = q;
+      }
+    }
+    if (!best) continue;
+    // 1px past the edge, along the way out -- or, from right on the edge,
+    // along whichever of its normals leads out.
+    let ux = best.x - p.x;
+    let uy = best.y - p.y;
+    if (bestD < 0.01) {
+      const n = Math.hypot(best.nx, best.ny) || 1;
+      ux = best.nx / n;
+      uy = best.ny / n;
+      if (pointInPolygon({ x: best.x + ux, y: best.y + uy }, poly)) {
+        ux = -ux;
+        uy = -uy;
+      }
+    } else {
+      ux /= bestD;
+      uy /= bestD;
+    }
+    p.x = best.x + ux;
+    p.y = best.y + uy;
+  }
+}
+
 export function crossesWall(a, b, wallSegments) {
   return wallSegments.some(([w1, w2]) => segmentsIntersect(a, b, w1, w2));
 }

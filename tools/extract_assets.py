@@ -516,6 +516,109 @@ def extract_map_level3():
     im.save(OUT / "map_bg_level3.jpg", quality=88, optimize=True)
 
 
+# Level 4 (per user request: a ruined city of photorealistic Manhattan/
+# Dubai-style skyscrapers, sea along one edge, a river crossed by bridges).
+# The image is a slightly oblique aerial view, so every tower leans north of
+# its base and hides the street behind it -- the riverside avenue and the
+# east end of the lower bridge behind the two white towers, the coast road
+# behind two more. These are those four towers' outlines, traced on the
+# image; their pixels are cut out into map_fg_level4.png, which
+# game/js/main.js draws again over the enemies, so traffic disappears
+# behind a tower instead of driving across its facade.
+LEVEL4_TOWERS_IN_FRONT = {
+    "white tower on the riverside, upper": [(536, 336), (647, 353), (672, 467), (688, 578), (697, 644), (647, 661), (608, 739), (577, 739), (560, 633), (538, 522), (516, 403)],
+    "white tower on the riverside, lower": [(335, 651), (447, 674), (470, 770), (495, 870), (515, 995), (521, 1035), (377, 1022), (350, 920), (321, 820), (292, 727)],
+    "burnt-out tower on the coast road": [(1073, 395), (1138, 382), (1202, 410), (1198, 536), (1194, 654), (1190, 780), (1150, 805), (1052, 805), (1049, 772), (1049, 654), (1052, 536), (1066, 425)],
+    "tower by the beach": [(1613, 668), (1655, 655), (1710, 658), (1724, 676), (1697, 759), (1686, 840), (1683, 898), (1672, 968), (1663, 1040), (1660, 1068), (1597, 1068), (1588, 1009), (1574, 898), (1578, 840), (1586, 787), (1602, 703)],
+}
+# Where map_fg_level4.png sits on the map, and its size -- game/js/levels.js's
+# LEVEL4_FOREGROUND has to say the same.
+LEVEL4_FOREGROUND_BOX = (288, 328, 1728, 1072)
+
+# The base the enemies head for is the big flat-roofed building by the park
+# (its roof's corners, measured from the image); a helipad painted on the
+# roof marks it as the HQ.
+LEVEL4_HQ_ROOF = [(142, 1355), (307, 1399), (221, 1565), (50, 1519)]
+
+
+def paint_helipad(im, roof, radius=60):
+    """A helipad -- dark pad, white rim, yellow ring, white H -- centred on
+    the quadrilateral `roof` and turned to line up with its edges. Drawn 4x
+    oversize and scaled down for smooth edges, then softened a touch to sit
+    in the photo instead of looking pasted on."""
+    import math
+    from PIL import ImageDraw, ImageFilter
+
+    cx = sum(x for x, _ in roof) / len(roof)
+    cy = sum(y for _, y in roof) / len(roof)
+    angle = math.degrees(math.atan2(roof[1][1] - roof[0][1], roof[1][0] - roof[0][0]))
+    ss = 4
+    size = (2 * radius + 8) * ss
+    c = size / 2
+    layer = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    d = ImageDraw.Draw(layer)
+
+    def disc(r, fill):
+        d.ellipse([c - r * ss, c - r * ss, c + r * ss, c + r * ss], fill=fill)
+
+    disc(radius, (238, 236, 228, 255))  # white rim
+    disc(radius - 3, (70, 76, 73, 255))  # pad
+    disc(radius - 11, (226, 186, 58, 255))  # yellow ring
+    disc(radius - 17, (70, 76, 73, 255))
+    # The H, upright here and turned with the whole layer below.
+    w, h, t = 30, 46, 9
+    for box in (
+        (-w / 2, -h / 2, -w / 2 + t, h / 2),
+        (w / 2 - t, -h / 2, w / 2, h / 2),
+        (-w / 2, -t / 2, w / 2, t / 2),
+    ):
+        d.rectangle([c + box[0] * ss, c + box[1] * ss, c + box[2] * ss, c + box[3] * ss], fill=(240, 240, 234, 255))
+    layer = layer.rotate(-angle, resample=Image.Resampling.BICUBIC)
+    layer = layer.resize((size // ss, size // ss), Image.Resampling.LANCZOS).filter(ImageFilter.GaussianBlur(0.5))
+    left, top = round(cx - size / ss / 2), round(cy - size / ss / 2)
+    out = im.convert("RGBA")
+    out.alpha_composite(layer, (left, top))
+    # Carry the roof's own fine grain over onto the paint, so it looks
+    # weathered like the rest of the roof rather than freshly printed --
+    # clipped, so the edges of what the pad covers (a rooftop hut) don't
+    # show through as ghost lines.
+    grey = im.convert("L")
+    grain = np.asarray(grey, dtype=float) - np.asarray(grey.filter(ImageFilter.GaussianBlur(1.5)), dtype=float)
+    grain = np.clip(grain, -5, 5)
+    cover = np.zeros(grain.shape)
+    lw, lh = layer.size
+    cover[top : top + lh, left : left + lw] = np.asarray(layer)[..., 3] / 255
+    res = np.asarray(out.convert("RGB"), dtype=float) + (grain * cover)[..., None]
+    return Image.fromarray(np.clip(res, 0, 255).astype(np.uint8))
+
+
+def extract_map_level4():
+    """Level 4's map ("mapas/mapa_nivel4_raw.png", 2048x2048, AI-generated)
+    at full size like level 3's, with the HQ's helipad painted on, plus the
+    foreground layer of the towers that stand in front of roads."""
+    from PIL import ImageDraw, ImageFilter
+
+    im = Image.open(ROOT / "mapas" / "mapa_nivel4_raw.png").convert("RGB")
+    im = paint_helipad(im, LEVEL4_HQ_ROOF)
+    im.save(OUT / "map_bg_level4.jpg", quality=88, optimize=True)
+
+    mask = Image.new("L", im.size, 0)
+    d = ImageDraw.Draw(mask)
+    for outline in LEVEL4_TOWERS_IN_FRONT.values():
+        d.polygon(outline, fill=255)
+    # Pulled in a pixel and softened, so the cut edge never lays a hard
+    # sliver of the street behind over a unit passing the tower's side.
+    mask = mask.filter(ImageFilter.MinFilter(3)).filter(ImageFilter.GaussianBlur(1.2))
+    x0, y0, x1, y1 = LEVEL4_FOREGROUND_BOX
+    bx0, by0, bx1, by1 = mask.getbbox()
+    assert x0 <= bx0 and y0 <= by0 and bx1 <= x1 and by1 <= y1, "a tower outline sticks out of LEVEL4_FOREGROUND_BOX"
+    # Blanked colour wherever it's fully transparent, or the PNG carries the
+    # whole photo behind the alpha (2.5MB instead of a fraction of that).
+    rgba = np.dstack([np.asarray(im), np.asarray(mask)])
+    rgba[rgba[..., 3] == 0] = 0
+    Image.fromarray(rgba, "RGBA").crop(LEVEL4_FOREGROUND_BOX).save(OUT / "map_fg_level4.png", optimize=True)
+
+
 def extract_armor_icon():
     """The original 3-skill upgrade panel (diseño mejoras.jpg -> ui_icon_
     damage/range/firerate.png) was cropped by hand in an earlier session
@@ -539,6 +642,7 @@ if __name__ == "__main__":
     extract_map()
     extract_map_level2()
     extract_map_level3()
+    extract_map_level4()
     from extract_all_turrets import main as extract_all_turrets_main
     extract_all_turrets_main()
     extract_armor_icon()

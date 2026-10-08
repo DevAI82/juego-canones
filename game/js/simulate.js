@@ -10,8 +10,8 @@
 // Every action function returns { ok: boolean, reason?: string } instead of
 // throwing, so a caller (a click handler, an HTTP request handler) can
 // report *why* an action was rejected without a try/catch.
-import { randomPath, offsetPath, crossesWall, pointInPolygon } from "./map.js";
-import { MAX_LEVEL, levelData } from "./levels.js";
+import { randomPath, offsetPath, crossesWall, pointInPolygon, pushOutOfPolygons } from "./map.js";
+import { MAX_LEVEL, levelData, narrowsOf, solidSegmentsOf } from "./levels.js";
 import { createEnemy, stepEnemy, damageEnemy, stepEnemyFire } from "./enemy.js";
 import { WAVES, buildSpawnQueue } from "./waves.js";
 import { createEconomy, earn, loseLife, spend, canAfford } from "./economy.js";
@@ -69,10 +69,14 @@ function assignId(obj) {
 // defended one. Vehicles pick among the level's roads the same way (ai.js's
 // chooseRoute) -- except an escort, which takes the road its lead heavy
 // already took (stamped on it by trySpawn) -- then get their own lane
-// offset within it.
+// offset within it. On a level whose buildings leave soldiers nowhere to
+// go but the streets (soldiersOnRoads -- level 4's city), they pick a road
+// too, in a narrower spread across it.
+const SOLDIER_LANE_HALF_WIDTH = 16;
+
 function pathForSpawn(item, state) {
   const level_ = levelData(state.level);
-  if (item.type === "soldier") {
+  if (item.type === "soldier" && !level_.soldiersOnRoads) {
     const entries = level_.soldierEntries || [level_.soldierEntry];
     const candidates = [];
     for (let i = 0; i < SOLDIER_ROUTE_CANDIDATES; i++) {
@@ -82,9 +86,9 @@ function pathForSpawn(item, state) {
     return { path: candidates[chooseRoute(candidates, state.towers, Math.random, state.walls)], pathIndex: null };
   }
   const pathIndex = item.pathIndex ?? chooseRoute(level_.paths, state.towers, Math.random, state.walls);
-  const laneOffset = (Math.random() * 2 - 1) * VEHICLE_LANE_HALF_WIDTH;
-  const gates = level_.wall ? level_.wall.gates : [];
-  return { path: offsetPath(level_.paths[pathIndex], laneOffset, gates), pathIndex };
+  const spread = item.type === "soldier" ? SOLDIER_LANE_HALF_WIDTH : VEHICLE_LANE_HALF_WIDTH;
+  const laneOffset = (Math.random() * 2 - 1) * spread;
+  return { path: offsetPath(level_.paths[pathIndex], laneOffset, narrowsOf(level_)), pathIndex };
 }
 
 // Nudges any two alive enemies closer than ENEMY_SEPARATION_DIST directly
@@ -105,8 +109,9 @@ function pathForSpawn(item, state) {
 // crowded the spawn gets.
 const SEPARATION_SPEED = 20;
 
-// Moves `e` by (dx, dy) -- unless that would take it through solid wall
-// (level 3's fortress, which per user request nothing may cross).
+// Moves `e` by (dx, dy) -- unless that would take it through something
+// solid (levels.js's solidSegmentsOf: level 3's fortress wall, which per
+// user request nothing may cross, and level 4's shores).
 function nudge(e, dx, dy, walls) {
   const to = { x: e.x + dx, y: e.y + dy };
   if (walls && crossesWall(e, to, walls)) return;
@@ -269,9 +274,9 @@ export function stepSimulation(state, dt) {
   }
   trySpawn(state);
 
-  const { worldWidth, worldHeight, wall } = levelData(state.level);
-  const gates = wall ? wall.gates : [];
-  const walls = wall ? wall.segments : null;
+  const { worldWidth, worldHeight, water } = levelData(state.level);
+  const gates = narrowsOf(levelData(state.level));
+  const walls = solidSegmentsOf(levelData(state.level));
   for (const e of state.enemies) {
     const hold = holdsForSiege(e, state.towers, dt, worldWidth, worldHeight);
     const { reachedEnd, blockedBy } = stepEnemy(e, dt, { others: state.enemies, hold, walls, gates, barriers: state.walls });
@@ -283,6 +288,9 @@ export function stepSimulation(state, dt) {
   }
   state.enemies = state.enemies.filter((e) => e.alive);
   separateEnemies(state.enemies, dt, walls);
+  // The shores are solid (solidSegmentsOf), so nobody should ever get into
+  // the river or the sea -- but if anyone does, they're put back ashore.
+  if (water) for (const e of state.enemies) pushOutOfPolygons(e, water, worldWidth, worldHeight);
 
   for (const t of state.towers) {
     const shot = stepTower(t, state.enemies, dt);

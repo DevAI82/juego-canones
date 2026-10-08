@@ -141,11 +141,15 @@ function loadImage(src) {
 
 // Every level's own background, preloaded up front (a handful of extra
 // KB) so switching levels never has to wait on a fresh image load.
-const mapImages = {
-  1: loadImage(levelData(1).mapImage),
-  2: loadImage(levelData(2).mapImage),
-  3: loadImage(levelData(3).mapImage),
-};
+const mapImages = {};
+// ...and the foreground some levels draw over the enemies (levels.js's
+// foreground: level 4's skyscrapers that stand in front of roads).
+const foregroundImages = {};
+for (let level = 1; level <= MAX_LEVEL; level++) {
+  const d = levelData(level);
+  mapImages[level] = loadImage(d.mapImage);
+  if (d.foreground) foregroundImages[level] = loadImage(d.foreground.image);
+}
 const sprites = {
   tower_basic: loadImage("assets/tower_basic.png"),
   tower_double: loadImage("assets/tower_double.png"),
@@ -740,6 +744,23 @@ function drawWalls(walls) {
       ctx.strokeRect(x + 1, y + 1, S - 2, S - 2);
     }
   }
+  ctx.restore();
+}
+
+// A level's foreground (levels.js -- level 4's skyscrapers that stand in
+// front of roads): the same pixels as the map under them, drawn again over
+// the enemies, so traffic passes behind those towers instead of across
+// their facades. Not quite opaque, so a convoy behind one still shows
+// faintly and the player can keep track of it.
+const FOREGROUND_ALPHA = 0.8;
+
+function drawForeground(level) {
+  const fg = levelData(level).foreground;
+  const img = foregroundImages[level];
+  if (!fg || !img || !ready(img)) return;
+  ctx.save();
+  ctx.globalAlpha = FOREGROUND_ALPHA;
+  ctx.drawImage(img, fg.x, fg.y);
   ctx.restore();
 }
 
@@ -1691,6 +1712,9 @@ function loop(now) {
   drawWalls(view.walls || []);
   for (const t of view.towers) drawTower(t);
   for (const e of view.enemies) drawEnemy(e);
+  drawForeground(state.level);
+  // Over the foreground: a rocket truck shelling from behind a skyscraper
+  // still shows where it's firing from.
   for (const e of view.enemies) if (e.holding) drawSiegeDesignator(e);
   for (const p of view.projectiles) drawProjectile(p);
   for (const bm of view.beams) drawBeam(bm);

@@ -313,10 +313,11 @@ function aroundBarriers(e, aim, probe, barriers) {
 
 // Options: others -- every unit on the field (for avoidance); hold --
 // brake to a stop and stay put (a rocket truck sieging, ai.js's
-// holdsForSiege); walls -- solid wall segments (level 3's fortress, per
-// user request impassable everywhere but its gates) never to move
-// through; gates -- the openings in them, where nobody overtakes and
-// which a unit walled off from its route makes for (aimPoint); barriers --
+// holdsForSiege); walls -- solid segments never to move through (level
+// 3's fortress, per user request impassable everywhere but its gates;
+// level 4's shores); gates -- the openings in them, where nobody overtakes
+// and which a unit walled off from its route makes for (aimPoint), and
+// level 4's bridges; barriers --
 // the player's wall blocks, which stop a unit that drives into one: it then
 // reports { blockedBy: that block's id } so simulate.js has it shoot the
 // block down.

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { PATH, randomPath, offsetPath, pathPointAt, distanceToPath, CANVAS_HEIGHT, pointInPolygon, crossesWall, wallSegmentsWithGates } from "./map.js";
+import { PATH, randomPath, offsetPath, pathPointAt, distanceToPath, CANVAS_HEIGHT, pointInPolygon, crossesWall, wallSegmentsWithGates, pushOutOfPolygons } from "./map.js";
 
 test("PATH has at least 2 waypoints", () => {
   assert.ok(PATH.length >= 2);
@@ -76,6 +76,26 @@ const WALL = { corners: SQUARE, segments: wallSegmentsWithGates(SQUARE, [GATE], 
 test("pointInPolygon is true for a point inside the square, false for one outside", () => {
   assert.equal(pointInPolygon({ x: 50, y: 50 }, SQUARE), true);
   assert.equal(pointInPolygon({ x: 200, y: 50 }, SQUARE), false);
+});
+
+test("pushOutOfPolygons puts a point inside a polygon just past its nearest edge, and leaves one outside alone", () => {
+  const water = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }];
+  const p = { x: 90, y: 40 };
+  pushOutOfPolygons(p, [water], 1000, 1000);
+  assert.ok(p.x > 100 && p.x < 102, `x=${p.x}`);
+  assert.equal(p.y, 40);
+  const dry = { x: 150, y: 40 };
+  pushOutOfPolygons(dry, [water], 1000, 1000);
+  assert.deepEqual(dry, { x: 150, y: 40 });
+});
+
+test("pushOutOfPolygons never pushes a point out across the edge of the world", () => {
+  // Water up against the world's left edge (x = 0): a point near that edge
+  // goes out the far side, not off the map.
+  const water = [{ x: 0, y: 0 }, { x: 60, y: 0 }, { x: 60, y: 100 }, { x: 0, y: 100 }];
+  const p = { x: 5, y: 50 };
+  pushOutOfPolygons(p, [water], 1000, 1000);
+  assert.ok(p.x >= 0 && !pointInPolygon(p, water), `ended up at ${p.x},${p.y}`);
 });
 
 test("wallSegmentsWithGates leaves a gap at the gate but stays solid elsewhere on that edge", () => {

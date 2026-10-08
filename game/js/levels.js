@@ -4,7 +4,14 @@
 // on whatever path array they're given, level-agnostic) and from the
 // level 1 trench's own waypoints, which stay in map.js as PATH for
 // backward compatibility with anything that imported it directly.
-import { PATH as LEVEL1_PATH, CANVAS_WIDTH, CANVAS_HEIGHT, wallSegmentsWithGates } from "./map.js";
+import {
+  PATH as LEVEL1_PATH,
+  CANVAS_WIDTH,
+  CANVAS_HEIGHT,
+  wallSegmentsWithGates,
+  distanceToPath,
+  pointInPolygon,
+} from "./map.js";
 
 // Level 2's road forks: two separate approaches (one entering from the
 // upper-left ruins, one from the upper-right) that merge into a single
@@ -347,7 +354,217 @@ const LEVEL3_BUILD_SLOTS = [
   { x: 1560, y: 1935 }, { x: 1635, y: 1935 }, { x: 1710, y: 1935 }, { x: 1785, y: 1935 }, { x: 1860, y: 1935 },
 ];
 
-export const MAX_LEVEL = 3;
+// Level 4: a ruined city, per user request ("un entorno plenamente urbano
+// de oficinas destruidas... rascacielos fotorrealistas de Manhattan o
+// Dubai... mar en un extremo y un río que atraviese el mapa con varios
+// puentes"). A 2048x2048 scrolling world like level 3's, also AI-generated
+// (mapas/mapa_nivel4_raw.png -> tools/extract_assets.py's
+// extract_map_level4): the sea along the north-east, a river from the top
+// edge out through the left one, crossed by two bridges. The base is the
+// flat-roofed HQ by the park in the bottom-left -- the building with the
+// helipad painted on its roof -- and seven roads lead to its door, traced
+// on the image's own streets (labelled pixel grids and asphalt-colour
+// scans of the image, see the conversation): two from the west over the
+// bridges, one from the north down the riverside, one from the north-east
+// along the beach, one from the east and two from the south.
+const LEVEL4_WORLD_SIZE = 2048;
+const P = (pairs) => pairs.map(([x, y]) => ({ x, y }));
+
+// Where every road ends: the HQ's door, on the lane beside its east wall.
+const LEVEL4_HQ_DOOR = { x: 322, y: 1492 };
+
+// The two bridges' decks. They're level 4's narrows (narrowsOf), and only
+// about two vehicles wide: traffic crosses single file, without overtaking.
+const LEVEL4_BRIDGE_NORTH = P([[300, 145], [400, 158], [500, 168], [600, 178]]);
+const LEVEL4_BRIDGE_SOUTH = P([[60, 658], [120, 666], [180, 674], [240, 683]]);
+
+// The east bank's avenue, from the north bridge's far end down the river
+// to where it meets the riverside road below the white towers...
+const LEVEL4_EAST_BANK = P([
+  [712, 200], [700, 226], [684, 255], [667, 282], [650, 305], [626, 345], [588, 412], [550, 480],
+  [522, 528], [496, 572], [466, 618], [436, 662], [404, 722], [372, 784], [340, 846], [310, 906], [286, 955],
+  [268, 1000],
+]);
+// ...and on down the riverside to the street along the park's south side.
+const LEVEL4_RIVERSIDE = P([[250, 1050], [222, 1100], [190, 1150], [152, 1200], [124, 1250], [96, 1300]]);
+// That park street, from its west end and from its east end, where the
+// roads from the north and the south come onto it...
+const LEVEL4_PARK_STREET_WEST = P([[122, 1334], [200, 1338], [250, 1344], [300, 1356], [350, 1369]]);
+const LEVEL4_PARK_STREET_EAST = P([[480, 1390], [440, 1386], [395, 1388]]);
+// ...and the lane from it down to the HQ's door, which every road ends on:
+// the kill zone in front of the base, the way level 3's roads all end in
+// its courtyard.
+const LEVEL4_LANE_TO_HQ = P([[372, 1400], [352, 1435], [336, 1465]]);
+// From the big crossroads south of the park, up the lane along the
+// building site's east side to the park street.
+const LEVEL4_JUNCTION_TO_PARK_STREET = P([
+  [505, 1790], [515, 1722], [500, 1665], [500, 1630], [514, 1575], [522, 1510], [532, 1480], [541, 1450],
+  [540, 1412], [515, 1392],
+]);
+const LEVEL4_RIVERSIDE_TO_HQ = [...LEVEL4_RIVERSIDE, ...LEVEL4_PARK_STREET_WEST, ...LEVEL4_LANE_TO_HQ, LEVEL4_HQ_DOOR];
+const LEVEL4_JUNCTION_TO_HQ = [...LEVEL4_JUNCTION_TO_PARK_STREET, ...LEVEL4_PARK_STREET_EAST, ...LEVEL4_LANE_TO_HQ, LEVEL4_HQ_DOOR];
+// The avenue from the bottom edge west to that crossroads.
+const LEVEL4_SOUTH_EAST_STREET = P([
+  [1290, 2028], [1200, 2006], [1100, 1980], [1000, 1962], [900, 1940], [800, 1915], [700, 1866], [620, 1836],
+]);
+// The big avenue down the east side, from the crossroads by the beach to
+// the bottom edge, where it hairpins back onto that street.
+const LEVEL4_EAST_AVENUE = P([
+  [1850, 935], [1800, 1000], [1757, 1100], [1725, 1200], [1678, 1300], [1618, 1400], [1580, 1500],
+  [1545, 1600], [1482, 1700], [1420, 1800], [1367, 1900], [1335, 1980], [1318, 2015],
+]);
+
+// 1. From the west, over the north bridge and down the east bank.
+export const LEVEL4_NORTH_BRIDGE_PATH = [
+  ...P([[-30, 120], [60, 120], [150, 125], [237, 138]]),
+  ...LEVEL4_BRIDGE_NORTH,
+  ...P([[660, 190]]),
+  ...LEVEL4_EAST_BANK,
+  ...LEVEL4_RIVERSIDE_TO_HQ,
+];
+
+// 2. From the west, over the south bridge -- whose east end, like that
+// stretch of the riverside, is hidden behind the lower white tower.
+export const LEVEL4_SOUTH_BRIDGE_PATH = [
+  ...P([[-30, 645], [10, 651]]),
+  ...LEVEL4_BRIDGE_SOUTH,
+  ...P([[300, 690], [360, 702], [398, 730]]),
+  ...LEVEL4_EAST_BANK.slice(LEVEL4_EAST_BANK.findIndex((p) => p.y > 760)),
+  ...LEVEL4_RIVERSIDE_TO_HQ,
+];
+
+// 3. From the north, down the avenue to the north bridge's far end and the
+// riverside, then left along the park's north side and round its east
+// side, reaching the HQ from the other end of the park's south street.
+export const LEVEL4_NORTH_PATH = [
+  ...P([[822, -30], [820, 0], [795, 50], [768, 100], [740, 150]]),
+  ...LEVEL4_EAST_BANK,
+  ...P([
+    [252, 1045], [270, 1084], [300, 1096], [400, 1106], [480, 1117], [535, 1130], [568, 1158], [586, 1205],
+    [590, 1300], [580, 1350], [550, 1382],
+  ]),
+  ...LEVEL4_PARK_STREET_EAST,
+  ...LEVEL4_LANE_TO_HQ,
+  LEVEL4_HQ_DOOR,
+];
+
+// 4. From the north-east: the coast road along the beach -- behind two
+// towers -- to the crossroads by the beach, then the long way round, down
+// the east avenue and back west along the south.
+export const LEVEL4_COAST_PATH = [
+  ...P([
+    [970, -30], [970, 0], [962, 100], [955, 200], [965, 260], [990, 310], [1005, 360], [1015, 410], [1040, 460],
+    [1090, 515], [1140, 565], [1190, 612], [1240, 650], [1300, 690], [1350, 713], [1400, 740], [1450, 778],
+    [1500, 805], [1550, 822], [1600, 840], [1650, 857], [1700, 875], [1750, 893], [1800, 915],
+  ]),
+  ...LEVEL4_EAST_AVENUE,
+  ...LEVEL4_SOUTH_EAST_STREET,
+  ...LEVEL4_JUNCTION_TO_HQ,
+];
+
+// 5. From the east edge, by the same route from the beach crossroads on.
+export const LEVEL4_EAST_PATH = [
+  ...P([[2078, 958], [2040, 956], [2000, 946], [1950, 936], [1900, 932]]),
+  ...LEVEL4_EAST_AVENUE,
+  ...LEVEL4_SOUTH_EAST_STREET,
+  ...LEVEL4_JUNCTION_TO_HQ,
+];
+
+// 6. From the bottom edge, at the foot of the east avenue.
+export const LEVEL4_SOUTH_EAST_PATH = [
+  ...P([[1310, 2078], [1312, 2045]]),
+  ...LEVEL4_SOUTH_EAST_STREET,
+  ...LEVEL4_JUNCTION_TO_HQ,
+];
+
+// 7. From the bottom edge, straight up to the crossroads -- the short one.
+export const LEVEL4_SOUTH_PATH = [
+  ...P([[395, 2078], [405, 2030], [420, 1990], [435, 1940], [460, 1880]]),
+  ...LEVEL4_JUNCTION_TO_HQ,
+];
+
+const LEVEL4_PATHS = [
+  LEVEL4_NORTH_BRIDGE_PATH,
+  LEVEL4_SOUTH_BRIDGE_PATH,
+  LEVEL4_NORTH_PATH,
+  LEVEL4_COAST_PATH,
+  LEVEL4_EAST_PATH,
+  LEVEL4_SOUTH_EAST_PATH,
+  LEVEL4_SOUTH_PATH,
+];
+
+// The river, in its three reaches between the bridges, and the sea --
+// no walls or towers on them (simulate.js's canPlaceWall, the build slots
+// below).
+const LEVEL4_WATER = [
+  P([
+    [340, 0], [750, 0], [734, 30], [723, 60], [700, 90], [700, 130], [672, 168], [640, 168], [600, 162],
+    [550, 157], [500, 152], [450, 148], [400, 143], [300, 118], [310, 100], [325, 50],
+  ]),
+  P([
+    [262, 166], [300, 166], [400, 175], [500, 186], [600, 196], [640, 201], [597, 280], [556, 340], [520, 400],
+    [495, 460], [467, 520], [447, 560], [423, 600], [402, 640], [400, 662], [300, 666], [240, 659], [180, 651],
+    [120, 644], [60, 636], [0, 628], [0, 560], [40, 500], [100, 400], [170, 300], [230, 215],
+  ]),
+  P([
+    [0, 672], [60, 681], [120, 689], [180, 697], [240, 707], [292, 712], [294, 740], [276, 780], [268, 820],
+    [259, 860], [222, 900], [218, 940], [199, 980], [177, 1020], [146, 1060], [90, 1100], [95, 1140], [84, 1180],
+    [62, 1220], [33, 1260], [20, 1300], [0, 1320],
+  ]),
+  P([
+    [1160, 0], [2048, 0], [2048, 783], [1870, 747], [1710, 697], [1565, 600], [1445, 500], [1345, 400],
+    [1245, 300], [1205, 200], [1175, 100],
+  ]),
+];
+
+// The skyscrapers' outlines on the image, roughly ([x0, y0, x1, y1]): a
+// tower placed on one, or right up against one (LEVEL4_SLOT_FACADE_MARGIN),
+// would stand on -- or behind -- a facade.
+const LEVEL4_SKYSCRAPERS = [
+  [510, 330, 700, 745], [288, 645, 525, 1040], [795, 225, 955, 545], [790, 520, 985, 925], [600, 645, 865, 1125],
+  [1045, 375, 1210, 810], [1570, 650, 1730, 1072], [975, 945, 1175, 1305], [1385, 895, 1635, 1245],
+  [1205, 1105, 1455, 1545], [825, 1265, 1068, 1795],
+];
+// The helipad painted on the HQ's roof (tools/extract_assets.py's
+// paint_helipad), with room round it.
+const LEVEL4_HELIPAD = { x: 180, y: 1460, r: 75 };
+
+// Build slots on level 3's 75px grid, wherever a tower can stand -- off
+// the water (with a margin) and the skyscrapers, off the HQ's helipad, at
+// least LEVEL4_SLOT_ROAD_CLEARANCE off the middle of every road -- and
+// near enough one (LEVEL4_SLOT_ROAD_REACH) to be any use...
+const LEVEL4_SLOT_ROAD_CLEARANCE = 60;
+const LEVEL4_SLOT_FACADE_MARGIN = 30;
+const LEVEL4_SLOT_ROAD_REACH = 330;
+// ...plus three by hand, in the corners of the HQ's roof round the
+// helipad, right over the door: the grid's points there all fall on the
+// helipad or too near the street.
+const LEVEL4_HQ_ROOF_SLOTS = P([[276, 1418], [213, 1544], [76, 1507]]);
+
+function level4BuildSlots() {
+  const slots = [];
+  const wet = (x, y) => LEVEL4_WATER.some((poly) => pointInPolygon({ x, y }, poly));
+  for (let y = 60; y < LEVEL4_WORLD_SIZE - 30; y += 75) {
+    for (let x = 60; x < LEVEL4_WORLD_SIZE - 30; x += 75) {
+      if ([[0, 0], [25, 0], [-25, 0], [0, 25], [0, -25]].some(([dx, dy]) => wet(x + dx, y + dy))) continue;
+      const m = LEVEL4_SLOT_FACADE_MARGIN;
+      if (LEVEL4_SKYSCRAPERS.some(([x0, y0, x1, y1]) => x >= x0 - m && x <= x1 + m && y >= y0 - m && y <= y1 + m)) continue;
+      if (Math.hypot(x - LEVEL4_HELIPAD.x, y - LEVEL4_HELIPAD.y) < LEVEL4_HELIPAD.r) continue;
+      const road = Math.min(...LEVEL4_PATHS.map((p) => distanceToPath(p, x, y)));
+      if (road >= LEVEL4_SLOT_ROAD_CLEARANCE && road <= LEVEL4_SLOT_ROAD_REACH) slots.push({ x, y });
+    }
+  }
+  const clear = slots.filter((s) => LEVEL4_HQ_ROOF_SLOTS.every((r) => Math.hypot(s.x - r.x, s.y - r.y) >= 60));
+  return [...clear, ...LEVEL4_HQ_ROOF_SLOTS];
+}
+
+// The towers standing in front of roads, cut out of the map
+// (tools/extract_assets.py's LEVEL4_TOWERS_IN_FRONT, whose
+// LEVEL4_FOREGROUND_BOX puts the image at this x, y): main.js draws it
+// over the enemies, so traffic passes behind those towers.
+const LEVEL4_FOREGROUND = { image: "assets/map_fg_level4.png", x: 288, y: 328 };
+
+export const MAX_LEVEL = 4;
 
 export const LEVELS = {
   1: {
@@ -391,8 +608,60 @@ export const LEVELS = {
     worldHeight: LEVEL3_WORLD_SIZE,
     wall: LEVEL3_WALL,
   },
+  4: {
+    paths: LEVEL4_PATHS,
+    // Soldiers can't cut across a city block the way they roam level 3's
+    // open ground -- they take the roads too (simulate.js's pathForSpawn).
+    soldiersOnRoads: true,
+    soldierEntries: LEVEL4_PATHS.map((p) => p[0]),
+    soldierEntry: LEVEL4_PATHS[0][0],
+    soldierExit: LEVEL4_HQ_DOOR,
+    narrows: [...LEVEL4_BRIDGE_NORTH, ...LEVEL4_BRIDGE_SOUTH],
+    water: LEVEL4_WATER,
+    shores: shoreSegments(LEVEL4_WATER, LEVEL4_WORLD_SIZE),
+    mapImage: "assets/map_bg_level4.jpg",
+    foreground: LEVEL4_FOREGROUND,
+    buildSlots: level4BuildSlots(),
+    worldWidth: LEVEL4_WORLD_SIZE,
+    worldHeight: LEVEL4_WORLD_SIZE,
+  },
 };
 
 export function levelData(level) {
   return LEVELS[level] || LEVELS[1];
+}
+
+// The edges of a level's water polygons where water meets land (not the
+// ones along the world's border), as [a, b] segments like a wall's.
+function shoreSegments(water, size) {
+  const border = (a, b) => (a.x === b.x && (a.x <= 0 || a.x >= size)) || (a.y === b.y && (a.y <= 0 || a.y >= size));
+  const out = [];
+  for (const poly of water) {
+    for (let i = 0; i < poly.length; i++) {
+      const a = poly[i];
+      const b = poly[(i + 1) % poly.length];
+      if (!border(a, b)) out.push([a, b]);
+    }
+  }
+  return out;
+}
+
+// Everything nothing may move through: level 3's fortress wall, level 4's
+// shores (so traffic keeps to the bridges and the banks). Worked out once
+// per level.
+const solidCache = new Map();
+export function solidSegmentsOf(level) {
+  if (!solidCache.has(level)) {
+    const segs = [...(level.wall ? level.wall.segments : []), ...(level.shores || [])];
+    solidCache.set(level, segs.length ? segs : null);
+  }
+  return solidCache.get(level);
+}
+
+// The narrow places on a level's roads -- level 3's gates through its
+// fortress wall, level 4's bridges -- where traffic squeezes into single
+// file: lanes pinch together (map.js's offsetPath) and nobody overtakes
+// (enemy.js's avoidance).
+export function narrowsOf(level) {
+  return [...(level.wall ? level.wall.gates : []), ...(level.narrows || [])];
 }
