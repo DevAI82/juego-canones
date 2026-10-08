@@ -24,3 +24,12 @@ export function browserStorage() {
     return null;
   }
 }
+
+// Whether a key press belongs to a text field being typed in (the
+// end-of-game name field) rather than to the game's keyboard shortcuts --
+// typing a name with an R in it used to start a new game.
+export function isTypingTarget(el) {
+  if (!el) return false;
+  if (el.tagName === "TEXTAREA") return true;
+  return el.tagName === "INPUT" && (el.type || "text") === "text";
+}

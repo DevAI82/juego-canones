@@ -22,7 +22,7 @@ import {
 } from "./simulate.js";
 import { MAX_LEVEL, levelData } from "./levels.js";
 import { pickTowerTarget } from "./ai.js";
-import { lerpAngle } from "./util.js";
+import { lerpAngle, isTypingTarget } from "./util.js";
 import { createEffects, clearEffects, stepEffects, hitFlash, drawGroundEffects, drawAirEffects } from "./effects.js";
 import { minimapRect, minimapToWorld, drawMinimap } from "./minimap.js";
 import { playSound, toggleMuted, startMusic, pauseMusic, resumeMusic, setMusicOn, setEffectsOn } from "./audio.js";
@@ -1606,6 +1606,7 @@ const pressedPanKeys = new Set();
 const PAN_SPEED = 600; // world px/sec
 
 window.addEventListener("keydown", (evt) => {
+  if (isTypingTarget(evt.target)) return; // a name being typed, not shortcuts
   const key = evt.key.toLowerCase();
   if (key === "escape") {
     // Esc first lets go of a tower or wall picked to build; otherwise it
