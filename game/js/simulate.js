@@ -534,9 +534,13 @@ export function placeWall(state, x, y) {
 
 export function skipWave(state) {
   if (state.gameOver || state.win || state.levelComplete) return { ok: false, reason: "game-over" };
+  // Calling a wave in gets the game going if it was paused: a loaded game
+  // waits paused in its countdown (restoreSave), and the button mustn't
+  // seem to do nothing.
   // If waiting in inter-wave countdown, start the wave immediately
   if (state.interWaveTimer > 0) {
     state.interWaveTimer = 0;
+    state.paused = false;
     return { ok: true, wave: state.waveIndex + 1 };
   }
   // Mid-wave: call the next wave in early to speed things up -- but only
@@ -554,6 +558,7 @@ export function skipWave(state) {
       item.time += state.waveClock;
     }
     state.spawnQueue = state.spawnQueue.concat(nextQueue).sort((a, b) => a.time - b.time);
+    state.paused = false;
     return { ok: true, wave: state.waveIndex + 1 };
   }
   return { ok: false, reason: "last-wave" };

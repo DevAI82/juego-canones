@@ -11,6 +11,7 @@ import {
   createSave,
   restoreSave,
   saveSummary,
+  skipWave,
   SAVE_VERSION,
   INTER_WAVE_DELAY,
 } from "./simulate.js";
@@ -144,4 +145,12 @@ test("saveSummary is what the menu shows for a save -- and null for one that can
   assert.deepEqual(saveSummary(save), { level: 1, wave: 4, lives: 14, money: 777, savedAt: "2026-10-08T18:30:00.000Z" });
   assert.equal(saveSummary({ version: 999, level: 1 }), null);
   assert.equal(saveSummary("nope"), null);
+});
+
+test("starting the next wave on a loaded (paused) game gets it going -- the button mustn't do nothing", () => {
+  const loaded = restoreSave(createSave(gameBetweenWaves()));
+  assert.equal(skipWave(loaded).ok, true);
+  assert.equal(loaded.paused, false);
+  stepSimulation(loaded, 0.05);
+  assert.ok(loaded.enemies.length > 0, "wave 4 starts arriving");
 });
