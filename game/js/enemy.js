@@ -1,5 +1,6 @@
 import { angleDiff } from "./util.js";
 import { distToSegment, crossesWall } from "./map.js";
+import { distToBlock, segmentNearBlock } from "./walls.js";
 import { pickTowerTarget, ROCKET_SIEGE_TIME, SOLDIER_SPRINT_TIME, SOLDIER_SPRINT_MULT, SOLDIER_SPRINT_COOLDOWN } from "./ai.js";
 
 // Driving model, per user request ("mejorar el movimiento de las
@@ -273,13 +274,53 @@ function aimPoint(e, look, shift, walls, gates) {
   return options.find((p) => !crossesWall(e, p, walls)) || offRoute(0);
 }
 
+// The player's wall blocks (walls.js): how far ahead a unit starts looking
+// out for them, and how far to either side of its route it will swerve to
+// slip past one -- enough to get round a block at the edge of the road, not
+// to drive off round the end of a proper wall across it.
+const BARRIER_SCAN = 160;
+const BYPASS = [12, -12, 24, -24];
+
+// How far the body of a `type` unit -- a capsule from its tail to its nose,
+// as wide as the unit (FOOTPRINT) -- is from wall block w, with its centre
+// at (x, y) facing `angle`; negative if they overlap.
+function gapToBlock(type, x, y, angle, w) {
+  const [len, wid] = FOOTPRINT[type] || FOOTPRINT.buggy;
+  const r = wid / 2;
+  const reach = Math.max(0, len / 2 - r);
+  const c = Math.cos(angle);
+  const s = Math.sin(angle);
+  let d = Infinity;
+  for (const k of [-1, -0.5, 0, 0.5, 1]) d = Math.min(d, distToBlock(x + c * reach * k, y + s * reach * k, w));
+  return d - r;
+}
+
+// If the way ahead runs into one of the player's wall blocks, aim a little
+// to one side of the route to slip past (BYPASS), checking the line out to
+// `probe` -- further ahead than the steering point, so the swerve starts in
+// good time. If every way past is blocked, keep the original aim: the unit
+// drives up to the wall and stops there (stepEnemy) to shoot it down.
+function aroundBarriers(e, aim, probe, barriers) {
+  const pad = (FOOTPRINT[e.type] || FOOTPRINT.buggy)[1] / 2 + 2;
+  const clear = (p) => !barriers.some((w) => segmentNearBlock(e, p, w, pad));
+  if (clear(probe)) return aim;
+  for (const s of BYPASS) {
+    const p = { x: probe.x - probe.uy * s, y: probe.y + probe.ux * s };
+    if (clear(p)) return p;
+  }
+  return aim;
+}
+
 // Options: others -- every unit on the field (for avoidance); hold --
 // brake to a stop and stay put (a rocket truck sieging, ai.js's
 // holdsForSiege); walls -- solid wall segments (level 3's fortress, per
 // user request impassable everywhere but its gates) never to move
 // through; gates -- the openings in them, where nobody overtakes and
-// which a unit walled off from its route makes for (aimPoint).
-export function stepEnemy(enemy, dt, { others = [], hold = false, walls = null, gates = [] } = {}) {
+// which a unit walled off from its route makes for (aimPoint); barriers --
+// the player's wall blocks, which stop a unit that drives into one: it then
+// reports { blockedBy: that block's id } so simulate.js has it shoot the
+// block down.
+export function stepEnemy(enemy, dt, { others = [], hold = false, walls = null, gates = [], barriers = [] } = {}) {
   if (!enemy.alive) return { reachedEnd: false };
   if (!enemy.path[enemy.waypointIndex + 1]) return { reachedEnd: true };
 
@@ -307,7 +348,9 @@ export function stepEnemy(enemy, dt, { others = [], hold = false, walls = null, 
   const uy = (b.y - a.y) / segLen;
   const offset = ux * (enemy.y - a.y) - uy * (enemy.x - a.x);
   const { shift, follow } = avoidance(enemy, others, ux, uy, cruise, offset, gates);
-  const aim = aimPoint(enemy, look, shift, walls, gates);
+  const near = barriers.filter((w) => w.hp > 0 && Math.hypot(w.x - enemy.x, w.y - enemy.y) < BARRIER_SCAN);
+  let aim = aimPoint(enemy, look, shift, walls, gates);
+  if (near.length) aim = aroundBarriers(enemy, aim, pointAhead(enemy, t, h.look + 50), near);
   const err = angleDiff(enemy.angle, Math.atan2(aim.y - enemy.y, aim.x - enemy.x));
   const maxTurn = h.turn * dt;
   enemy.angle += Math.max(-maxTurn, Math.min(maxTurn, err));
@@ -329,6 +372,16 @@ export function stepEnemy(enemy, dt, { others = [], hold = false, walls = null, 
   const v = enemy.v ?? enemy.speed;
   enemy.v = v < targetSpeed ? Math.min(targetSpeed, v + h.accel * dt) : Math.max(targetSpeed, v - h.brake * dt);
   const to = { x: enemy.x + Math.cos(enemy.angle) * enemy.v * dt, y: enemy.y + Math.sin(enemy.angle) * enemy.v * dt };
+  // A move that would push the unit's body into a wall block (or deeper
+  // into one it's already touching) doesn't happen: it's held up there.
+  const blocker = near.find((w) => {
+    const gap = gapToBlock(enemy.type, to.x, to.y, enemy.angle, w);
+    return gap < 0 && gap < gapToBlock(enemy.type, enemy.x, enemy.y, enemy.angle, w);
+  });
+  if (blocker) {
+    enemy.v = 0;
+    return { reachedEnd: false, blockedBy: blocker.id };
+  }
   if (walls && crossesWall(enemy, to, walls)) {
     // Up against the wall: it stops dead there, still turning toward its
     // aim (aimPoint keeps that on this side), and pulls away once it faces
@@ -353,12 +406,15 @@ export function damageEnemy(enemy, amount) {
   return enemy.alive;
 }
 
-export function stepEnemyFire(enemy, towers, dt) {
+// barriers: the player's wall blocks -- a unit held up by one (blockedBy,
+// set by simulate.js from stepEnemy) shoots that down first.
+export function stepEnemyFire(enemy, towers, dt, barriers = []) {
   if (!enemy.alive) return null;
   enemy.fireTimer -= dt;
   if (enemy.fireTimer > 0) return null;
 
-  const best = pickTowerTarget(enemy, towers);
+  const wall = enemy.blockedBy != null ? barriers.find((w) => w.id === enemy.blockedBy && w.hp > 0) : null;
+  const best = wall || pickTowerTarget(enemy, towers);
   if (!best) return null;
 
   enemy.fireTimer = enemy.fireCooldown;

@@ -2,6 +2,7 @@ import { CANVAS_WIDTH, CANVAS_HEIGHT, drawMap } from "./map.js";
 import { WAVES } from "./waves.js";
 import { TOWER_TYPES, BUILD_DURATION, MUZZLE_OFFSET } from "./tower.js";
 import { topValue } from "./upgrades.js";
+import { WALL } from "./walls.js";
 import { initBuildMenu, updateBuildMenu, initUpgradePanel, updateUpgradePanel, renderGameEndScreen, renderRanking, renderStatsModal } from "./ui.js";
 import {
   createGameState,
@@ -10,8 +11,10 @@ import {
   canPlaceTower,
   placeTower,
   upgradeTower,
-  repairTower,
-  sellTower,
+  repairStructure,
+  sellStructure,
+  placeWall,
+  canPlaceWall,
   skipWave,
   togglePause,
 } from "./simulate.js";
@@ -190,10 +193,10 @@ let state = createGameState();
 let networked = false; // set once, before the loop starts (see boot() below)
 
 let selectedBuildType = null;
-// The selected tower is tracked by id, not object reference: in networked
+// The selected tower or wall block is tracked by id, not object reference: in networked
 // mode `state` (and every tower object in it) is replaced wholesale on
 // every poll, so a direct reference would go stale within ~150ms.
-let selectedTowerId = null;
+let selectedId = null;
 const upgradePanelEl = document.getElementById("upgrade-panel");
 let mouseX = 0;
 let mouseY = 0;
@@ -346,19 +349,27 @@ const actions = {
     }
     upgradeTower(state, towerId, skill);
   },
-  repair(towerId) {
+  // id: a tower's or a wall block's.
+  repair(id) {
     if (networked) {
-      postAction({ type: "repair", towerId });
+      postAction({ type: "repair", id });
       return;
     }
-    repairTower(state, towerId);
+    repairStructure(state, id);
   },
-  sell(towerId) {
+  sell(id) {
     if (networked) {
-      postAction({ type: "sell", towerId });
+      postAction({ type: "sell", id });
       return;
     }
-    sellTower(state, towerId);
+    sellStructure(state, id);
+  },
+  placeWall(x, y) {
+    if (networked) {
+      postAction({ type: "placeWall", x, y });
+      return;
+    }
+    placeWall(state, x, y);
   },
   skip() {
     if (networked) {
@@ -676,6 +687,62 @@ const TOWER_RESTING_ANGLES = {
   laser: -Math.PI / 2,
 };
 
+// The player's concrete wall blocks (walls.js): beveled slabs drawn as one
+// continuous wall where blocks touch (no edge between neighbours), cracking
+// as they take damage, outlined when selected.
+function drawWalls(walls) {
+  if (!walls.length) return;
+  const S = WALL.size;
+  const at = new Set(walls.map((w) => `${w.x},${w.y}`));
+  const has = (x, y) => at.has(`${x},${y}`);
+  ctx.save();
+  // All the shadows first, so no block's shadow falls across its neighbour.
+  ctx.fillStyle = "rgba(0, 0, 0, 0.35)";
+  for (const w of walls) ctx.fillRect(w.x - S / 2 + 4, w.y - S / 2 + 5, S, S);
+  for (const w of walls) {
+    const x = w.x - S / 2;
+    const y = w.y - S / 2;
+    const dmg = 1 - w.hp / w.maxHp;
+    const tone = (v) => Math.round(v * (1 - 0.35 * dmg));
+    ctx.fillStyle = `rgb(${tone(134)}, ${tone(129)}, ${tone(120)})`;
+    ctx.fillRect(x, y, S, S);
+    // Lighter top face, inset on the sides with no neighbour.
+    const l = has(w.x - S, w.y) ? 0 : 4;
+    const r = has(w.x + S, w.y) ? 0 : 4;
+    const t = has(w.x, w.y - S) ? 0 : 4;
+    const b = has(w.x, w.y + S) ? 0 : 7;
+    ctx.fillStyle = `rgb(${tone(172)}, ${tone(167)}, ${tone(157)})`;
+    ctx.fillRect(x + l, y + t, S - l - r, S - t - b);
+    if (!has(w.x, w.y + S)) {
+      ctx.fillStyle = `rgb(${tone(84)}, ${tone(80)}, ${tone(73)})`;
+      ctx.fillRect(x, y + S - 4, S, 4);
+    }
+    // Cracks, the same ones every frame for a given block.
+    if (dmg > 0.3) {
+      ctx.strokeStyle = "rgba(40, 36, 32, 0.85)";
+      ctx.lineWidth = 1.5;
+      const n = dmg > 0.65 ? 3 : 1;
+      for (let i = 0; i < n; i++) {
+        const seed = (w.id * 7919 + i * 104729) % 1000;
+        const sx = x + 6 + (seed % 20);
+        const sy = y + 6 + ((seed * 7) % 20);
+        ctx.beginPath();
+        ctx.moveTo(sx, sy);
+        ctx.lineTo(sx + ((seed % 13) - 6), sy + 7);
+        ctx.lineTo(sx + ((seed % 9) - 2), sy + 13);
+        ctx.stroke();
+      }
+    }
+    if (w.hp < w.maxHp) drawTowerBar(w.x, y - 8, 3, S - 6, w.hp / w.maxHp, "#3c3", "#400");
+    if (w.id === selectedId) {
+      ctx.strokeStyle = "#5fe0f0";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x + 1, y + 1, S - 2, S - 2);
+    }
+  }
+  ctx.restore();
+}
+
 const TOWER_BAR_FULL = 64; // px, a fully upgraded tower's bars
 
 function drawTowerBar(cx, y, h, w, frac, fill, back) {
@@ -761,7 +828,7 @@ function drawTower(t) {
     drawTowerBar(t.x, t.y - 38, 4, TOWER_BAR_FULL * (t.maxAmmo / topValue("ammo", def)), t.ammo / t.maxAmmo, "#5af", "#225");
   }
 
-  if (t.id === selectedTowerId) {
+  if (t.id === selectedId) {
     ctx.save();
     ctx.strokeStyle = "#5af";
     ctx.beginPath();
@@ -944,22 +1011,22 @@ initBuildMenu(buildMenuEl, {
     selectedBuildType = selectedBuildType === type ? null : type;
   },
   onRepair: () => {
-    if (state.gameOver || state.win || state.levelComplete || selectedTowerId == null) return;
-    actions.repair(selectedTowerId);
+    if (state.gameOver || state.win || state.levelComplete || selectedId == null) return;
+    actions.repair(selectedId);
   },
   onSell: () => {
-    if (state.gameOver || state.win || state.levelComplete || selectedTowerId == null) return;
-    actions.sell(selectedTowerId);
-    selectedTowerId = null;
+    if (state.gameOver || state.win || state.levelComplete || selectedId == null) return;
+    actions.sell(selectedId);
+    selectedId = null;
   },
 });
 
 // Upgrade panel callbacks are defined once, here, and read the *current*
-// value of the module-level `selectedTowerId` variable at click time
+// value of the module-level `selectedId` variable at click time
 initUpgradePanel(upgradePanelEl, {
   onUpgrade: (skill) => {
-    if (state.gameOver || state.win || state.levelComplete || selectedTowerId == null) return;
-    actions.upgrade(selectedTowerId, skill);
+    if (state.gameOver || state.win || state.levelComplete || selectedId == null) return;
+    actions.upgrade(selectedId, skill);
   },
 });
 
@@ -1031,7 +1098,7 @@ function hideStartMenu() {
 }
 function chooseLevel(level) {
   hideStartMenu();
-  selectedTowerId = null;
+  selectedId = null;
   selectedBuildType = null;
   // Forces loop()'s "state.level changed" check to re-fire even when
   // picking the SAME level number again (e.g. replaying level 3 after a
@@ -1054,7 +1121,7 @@ for (const btn of document.querySelectorAll(".start-level-btn")) {
 // resetting always means starting over) to bring back the level picker
 // instead of silently defaulting to level 1.
 function restartToLevelSelect() {
-  selectedTowerId = null;
+  selectedId = null;
   selectedBuildType = null;
   gameEndOverlay.classList.add("hidden");
   gameEndShown = false;
@@ -1173,7 +1240,7 @@ gameEndCloseBtn.addEventListener("click", () => {
     gameEndOverlay.classList.add("hidden");
     gameEndShown = false;
     actions.nextLevel();
-    selectedTowerId = null;
+    selectedId = null;
     selectedBuildType = null;
   } else {
     // A true match end (loss, or beating the final level) -- start a new
@@ -1214,6 +1281,7 @@ function worldPos(evt) {
 
 function handleClick(pos) {
   if (state.gameOver || state.win || state.levelComplete) return;
+  if (selectedBuildType === "wall") return; // placed on press/drag instead (paintWall)
   if (selectedBuildType) {
     // Checked locally first (same check the ghost preview already used
     // to color itself red/green) so an invalid click gets an immediate
@@ -1243,7 +1311,26 @@ function handleClick(pos) {
       nearestTower = t;
     }
   }
-  selectedTowerId = nearestTower ? nearestTower.id : null;
+  const wall = state.walls.find((w) => Math.abs(w.x - pos.x) <= WALL.size / 2 && Math.abs(w.y - pos.y) <= WALL.size / 2);
+  selectedId = nearestTower ? nearestTower.id : wall ? wall.id : null;
+}
+
+// Wall mode: pressing lays a block in the grid cell under the pointer, and
+// dragging lays one in every further cell it passes over -- a whole row in
+// one stroke, like laying walls in Command & Conquer. An invalid first
+// press buzzes, same as an invalid tower placement.
+let wallPaint = null; // { lastKey } while the pointer is held down in wall mode
+
+function paintWall(pos, firstPress) {
+  const check = canPlaceWall(state, pos.x, pos.y);
+  if (!check.ok) {
+    if (firstPress) playSound("error");
+    return;
+  }
+  const key = `${check.x},${check.y}`;
+  if (key === wallPaint.lastKey) return;
+  wallPaint.lastKey = key;
+  actions.placeWall(check.x, check.y);
 }
 
 // Pointer-based (not separate mouse/touch handlers) so this works
@@ -1290,6 +1377,11 @@ canvas.addEventListener("pointerdown", (evt) => {
     centerCameraOn(onMinimap);
     return;
   }
+  if (selectedBuildType === "wall" && !state.gameOver && !state.win && !state.levelComplete) {
+    wallPaint = { lastKey: null };
+    paintWall(worldPos(evt), true);
+    return;
+  }
   const startWorldPos = worldPos(evt);
   dragState = {
     startClientX: evt.clientX,
@@ -1305,6 +1397,10 @@ canvas.addEventListener("pointermove", (evt) => {
   const pos = worldPos(evt);
   mouseX = pos.x;
   mouseY = pos.y;
+  if (wallPaint) {
+    paintWall(pos, false);
+    return;
+  }
   if (minimapDragging) {
     const mini = currentMinimap();
     const cp = canvasPoint(evt);
@@ -1325,6 +1421,7 @@ canvas.addEventListener("pointermove", (evt) => {
 
 window.addEventListener("pointerup", (evt) => {
   minimapDragging = false;
+  wallPaint = null;
   if (!dragState) return;
   const dxScreen = evt.clientX - dragState.startClientX;
   const dyScreen = evt.clientY - dragState.startClientY;
@@ -1509,6 +1606,7 @@ function drawnView(now) {
     projectiles: between(state.projectiles, prev.projectiles, ["pos"]),
     beams: aged(state.beams),
     explosions: aged(state.explosions),
+    walls: state.walls || [],
   };
 }
 
@@ -1590,6 +1688,7 @@ function loop(now) {
   // Effects freeze with the game when it's paused.
   if (!state.paused) stepEffects(fx, view, dt);
   drawGroundEffects(fx, ctx, wreckSprite);
+  drawWalls(view.walls || []);
   for (const t of view.towers) drawTower(t);
   for (const e of view.enemies) drawEnemy(e);
   for (const e of view.enemies) if (e.holding) drawSiegeDesignator(e);
@@ -1603,7 +1702,7 @@ function loop(now) {
     // fixed points -- show every unoccupied one faintly while placing so
     // it's clear where those are at a glance, not just wherever the mouse
     // happens to be hovering.
-    const slots = levelData(state.level).buildSlots;
+    const slots = selectedBuildType === "wall" ? null : levelData(state.level).buildSlots;
     if (slots) {
       ctx.save();
       ctx.globalAlpha = 0.35;
@@ -1622,16 +1721,26 @@ function loop(now) {
     // them), red anywhere it would be rejected -- live, as the mouse
     // moves, using the exact same check the click handler uses so the
     // preview is never lying about what a click will do.
-    const check = canPlaceTower(state, selectedBuildType, mouseX, mouseY);
-    const ghostX = check.ok ? check.x : mouseX;
-    const ghostY = check.ok ? check.y : mouseY;
-    ctx.save();
-    ctx.globalAlpha = 0.5;
-    ctx.fillStyle = check.ok ? "#5f5" : "#f55";
-    ctx.beginPath();
-    ctx.arc(ghostX, ghostY, 32, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
+    if (selectedBuildType === "wall") {
+      const check = canPlaceWall(state, mouseX, mouseY);
+      const cell = { x: Math.floor(mouseX / WALL.size) * WALL.size, y: Math.floor(mouseY / WALL.size) * WALL.size };
+      ctx.save();
+      ctx.globalAlpha = 0.5;
+      ctx.fillStyle = check.ok ? "#5f5" : "#f55";
+      ctx.fillRect(cell.x, cell.y, WALL.size, WALL.size);
+      ctx.restore();
+    } else {
+      const check = canPlaceTower(state, selectedBuildType, mouseX, mouseY);
+      const ghostX = check.ok ? check.x : mouseX;
+      const ghostY = check.ok ? check.y : mouseY;
+      ctx.save();
+      ctx.globalAlpha = 0.5;
+      ctx.fillStyle = check.ok ? "#5f5" : "#f55";
+      ctx.beginPath();
+      ctx.arc(ghostX, ghostY, 32, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
   }
   ctx.restore();
 
@@ -1641,19 +1750,22 @@ function loop(now) {
       mapImage: ready(currentMapImage) ? currentMapImage : null,
       enemies: view.enemies,
       towers: view.towers,
+      walls: view.walls || [],
       base: levelData(state.level).soldierExit,
       view: { camera, w: CANVAS_WIDTH / zoom, h: CANVAS_HEIGHT / zoom },
     });
   }
 
   drawHud();
-  const selectedTower = state.towers.find((t) => t.id === selectedTowerId) || null;
-  if (selectedTowerId != null && !selectedTower) selectedTowerId = null; // sold/destroyed
+  const selectedTower = state.towers.find((t) => t.id === selectedId) || null;
+  const selectedWall = (state.walls || []).find((w) => w.id === selectedId) || null;
+  if (selectedId != null && !selectedTower && !selectedWall) selectedId = null; // sold/destroyed
   updateBuildMenu(buildMenuEl, {
     towers: state.towers,
+    walls: state.walls || [],
     economy: state.economy,
     selectedType: selectedBuildType,
-    selectedTower,
+    selected: selectedTower || selectedWall,
   });
   updateUpgradePanel(upgradePanelEl, selectedTower);
 

@@ -10,7 +10,7 @@
 // Every action function returns { ok: boolean, reason?: string } instead of
 // throwing, so a caller (a click handler, an HTTP request handler) can
 // report *why* an action was rejected without a try/catch.
-import { randomPath, offsetPath, crossesWall } from "./map.js";
+import { randomPath, offsetPath, crossesWall, pointInPolygon } from "./map.js";
 import { MAX_LEVEL, levelData } from "./levels.js";
 import { createEnemy, stepEnemy, damageEnemy, stepEnemyFire } from "./enemy.js";
 import { WAVES, buildSpawnQueue } from "./waves.js";
@@ -19,6 +19,9 @@ import { createTower, stepTower, damageTower, TOWER_TYPES, MUZZLE_OFFSET } from 
 import { createProjectile, stepProjectile } from "./projectile.js";
 import { applyUpgrade, upgradeCost, canUpgrade } from "./upgrades.js";
 import { chooseRoute, SOLDIER_ROUTE_CANDIDATES, holdsForSiege } from "./ai.js";
+import { WALL, wallCell, segmentNearBlock } from "./walls.js";
+
+export { WALL };
 
 export const SELL_REFUND_FRACTION = 0.6;
 export const INTER_WAVE_DELAY = 4;
@@ -76,9 +79,9 @@ function pathForSpawn(item, state) {
       const entry = entries[Math.floor(Math.random() * entries.length)];
       candidates.push(randomPath(entry, level_.soldierExit, level_.worldHeight, level_.wall));
     }
-    return { path: candidates[chooseRoute(candidates, state.towers)], pathIndex: null };
+    return { path: candidates[chooseRoute(candidates, state.towers, Math.random, state.walls)], pathIndex: null };
   }
-  const pathIndex = item.pathIndex ?? chooseRoute(level_.paths, state.towers);
+  const pathIndex = item.pathIndex ?? chooseRoute(level_.paths, state.towers, Math.random, state.walls);
   const laneOffset = (Math.random() * 2 - 1) * VEHICLE_LANE_HALF_WIDTH;
   const gates = level_.wall ? level_.wall.gates : [];
   return { path: offsetPath(level_.paths[pathIndex], laneOffset, gates), pathIndex };
@@ -153,6 +156,8 @@ export function createGameState(level = 1) {
     interWaveTimer: 0,
     enemies: [],
     towers: [],
+    // The player's concrete wall blocks (walls.js), per user request.
+    walls: [],
     projectiles: [],
     explosions: [],
     beams: [],
@@ -269,7 +274,8 @@ export function stepSimulation(state, dt) {
   const walls = wall ? wall.segments : null;
   for (const e of state.enemies) {
     const hold = holdsForSiege(e, state.towers, dt, worldWidth, worldHeight);
-    const { reachedEnd } = stepEnemy(e, dt, { others: state.enemies, hold, walls, gates });
+    const { reachedEnd, blockedBy } = stepEnemy(e, dt, { others: state.enemies, hold, walls, gates, barriers: state.walls });
+    e.blockedBy = blockedBy ?? null;
     if (reachedEnd) {
       e.alive = false;
       if (loseLife(state.economy, e.damage)) state.gameOver = true;
@@ -302,7 +308,7 @@ export function stepSimulation(state, dt) {
   }
 
   for (const e of state.enemies) {
-    const shot = stepEnemyFire(e, state.towers, dt);
+    const shot = stepEnemyFire(e, state.towers, dt, state.walls);
     if (shot) {
       // Tank/rocket fire the same tank-shell sprite as the player's cannon
       // towers (per user request); the lighter infantry/vehicle weapons
@@ -319,7 +325,9 @@ export function stepSimulation(state, dt) {
   for (const p of state.projectiles) {
     const hit = stepProjectile(p, dt);
     if (hit) {
-      if ("maxHp" in p.target && "range" in p.target) {
+      if (p.target.kind === "wall") {
+        p.target.hp = Math.max(0, p.target.hp - p.damage);
+      } else if ("maxHp" in p.target && "range" in p.target) {
         damageTower(p.target, p.damage);
       } else {
         damageEnemy(p.target, p.damage);
@@ -332,7 +340,7 @@ export function stepSimulation(state, dt) {
   for (const bm of state.beams) bm.age += dt;
   state.beams = state.beams.filter((bm) => bm.age < bm.duration);
   // Counted here, before the filter removes them, so a tower that died in
-  // combat this tick is tallied -- sellTower() removes towers by its own
+  // combat this tick is tallied -- sellStructure() removes towers by its own
   // reference filter instead, so a voluntary sale never lands here.
   for (const t of state.towers) {
     if (t.hp > 0) continue;
@@ -340,6 +348,8 @@ export function stepSimulation(state, dt) {
     state.explosions.push(assignId(createExplosion(t.x, t.y, "tower")));
   }
   state.towers = state.towers.filter((t) => t.hp > 0);
+  for (const w of state.walls) if (w.hp <= 0) state.explosions.push(assignId(createExplosion(w.x, w.y, "wall")));
+  state.walls = state.walls.filter((w) => w.hp > 0);
 
   const killedEnemies = state.enemies.filter((e) => !e.alive);
   for (const e of killedEnemies) {
@@ -427,26 +437,86 @@ export function upgradeTower(state, towerId, skill) {
   return { ok: true };
 }
 
-export function repairTower(state, towerId) {
+// A tower or one of the player's wall blocks, by id (ids are unique
+// across both -- assignId).
+function findStructure(state, id) {
+  return state.towers.find((t) => t.id === id) || state.walls.find((w) => w.id === id) || null;
+}
+
+// What it costs to bring a damaged tower or wall block back to full
+// health, and what selling one gives back -- shared with ui.js's build
+// menu labels. A block costs at most its own price to patch up.
+export function repairCost(s) {
+  if (s.kind === "wall") return Math.ceil((WALL.cost * (s.maxHp - s.hp)) / s.maxHp);
+  return Math.round((s.maxHp - s.hp) * 0.5);
+}
+
+export function sellRefund(s) {
+  return Math.round((s.kind === "wall" ? WALL.cost : TOWER_TYPES[s.type].cost) * SELL_REFUND_FRACTION);
+}
+
+export function repairStructure(state, id) {
   if (state.gameOver || state.win || state.levelComplete) return { ok: false, reason: "game-over" };
-  const tower = findTower(state, towerId);
-  if (!tower) return { ok: false, reason: "no-such-tower" };
-  const cost = Math.round((tower.maxHp - tower.hp) * 0.5);
+  const s = findStructure(state, id);
+  if (!s) return { ok: false, reason: "no-such-structure" };
+  const cost = repairCost(s);
   if (cost <= 0) return { ok: false, reason: "already-full" };
   if (!spend(state.economy, cost)) return { ok: false, reason: "cant-afford" };
   state.stats.moneySpent += cost;
-  tower.hp = tower.maxHp;
+  s.hp = s.maxHp;
   return { ok: true };
 }
 
-export function sellTower(state, towerId) {
+export function sellStructure(state, id) {
   if (state.gameOver || state.win || state.levelComplete) return { ok: false, reason: "game-over" };
-  const tower = findTower(state, towerId);
-  if (!tower) return { ok: false, reason: "no-such-tower" };
-  earn(state.economy, Math.round(TOWER_TYPES[tower.type].cost * SELL_REFUND_FRACTION));
-  damageTower(tower, tower.hp);
-  state.towers = state.towers.filter((t) => t !== tower);
+  const s = findStructure(state, id);
+  if (!s) return { ok: false, reason: "no-such-structure" };
+  earn(state.economy, sellRefund(s));
+  if (s.kind === "wall") {
+    state.walls = state.walls.filter((w) => w !== s);
+  } else {
+    damageTower(s, s.hp);
+    state.towers = state.towers.filter((t) => t !== s);
+  }
   return { ok: true };
+}
+
+// Where a wall block may go: the grid cell the point falls in, if it's on
+// the map, free (no other block, no tower, and clear of build slots so
+// they stay usable), not on level 3's fortress wall or on water, nothing
+// standing right there, and affordable. Same { ok, x, y } / { ok, reason }
+// shape as canPlaceTower, for main.js's placement ghost.
+export function canPlaceWall(state, x, y) {
+  if (state.gameOver || state.win || state.levelComplete) return { ok: false, reason: "game-over" };
+  const level = levelData(state.level);
+  const cell = wallCell(x, y);
+  const half = WALL.size / 2;
+  if (cell.x < half || cell.y < half || cell.x > level.worldWidth - half || cell.y > level.worldHeight - half) {
+    return { ok: false, reason: "off-map" };
+  }
+  if (state.walls.length >= WALL.max) return { ok: false, reason: "max-count" };
+  if (state.walls.some((w) => w.x === cell.x && w.y === cell.y)) return { ok: false, reason: "occupied" };
+  if (state.towers.some((t) => Math.hypot(t.x - cell.x, t.y - cell.y) < 40)) return { ok: false, reason: "occupied" };
+  if (level.wall && level.wall.segments.some(([a, b]) => segmentNearBlock(a, b, cell, 0))) {
+    return { ok: false, reason: "fortress-wall" };
+  }
+  if ((level.water || []).some((poly) => pointInPolygon(cell, poly))) return { ok: false, reason: "water" };
+  if (level.buildSlots.some((sl) => Math.hypot(sl.x - cell.x, sl.y - cell.y) < 30)) return { ok: false, reason: "build-slot" };
+  if (state.enemies.some((e) => e.alive && Math.hypot(e.x - cell.x, e.y - cell.y) < 26)) {
+    return { ok: false, reason: "enemy-in-the-way" };
+  }
+  if (!canAfford(state.economy, WALL.cost)) return { ok: false, reason: "cant-afford" };
+  return { ok: true, x: cell.x, y: cell.y };
+}
+
+export function placeWall(state, x, y) {
+  const check = canPlaceWall(state, x, y);
+  if (!check.ok) return check;
+  spend(state.economy, WALL.cost);
+  state.stats.moneySpent += WALL.cost;
+  const wall = assignId({ kind: "wall", x: check.x, y: check.y, hp: WALL.hp, maxHp: WALL.hp });
+  state.walls.push(wall);
+  return { ok: true, wallId: wall.id };
 }
 
 export function skipWave(state) {

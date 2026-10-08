@@ -14,6 +14,8 @@
 // Every choice keeps some randomness on purpose -- fully predictable
 // enemies would all pile onto one road and be trivially walled off.
 
+import { distanceToPath } from "./map.js";
+
 // Sampling step along a path when measuring how much of it towers cover.
 const COVERAGE_STEP = 24;
 
@@ -79,11 +81,23 @@ export function softminPick(costs, scale, rand = Math.random) {
   return n - 1;
 }
 
+// Each of the player's wall blocks (walls.js) across a route counts as
+// this much extra threat -- about a basic tower's worth: whatever drives
+// into one is stuck there under fire until it shoots its way through.
+const BARRIER_THREAT = 6000;
+const BARRIER_REACH = 36; // px from a route's line that a block still gets in the way
+
+export function routeBlockage(path, barriers) {
+  let n = 0;
+  for (const w of barriers) if (w.hp > 0 && distanceToPath(path, w.x, w.y) < BARRIER_REACH) n++;
+  return n * BARRIER_THREAT;
+}
+
 // Index of the route to take among `paths`, weighted toward the ones the
-// towers cover least.
-export function chooseRoute(paths, towers, rand = Math.random) {
+// towers cover least and the player's walls (`barriers`) don't block.
+export function chooseRoute(paths, towers, rand = Math.random, barriers = []) {
   if (paths.length === 1) return 0;
-  return softminPick(paths.map((p) => routeThreat(p, towers)), ROUTE_THREAT_SCALE, rand);
+  return softminPick(paths.map((p) => routeThreat(p, towers) + routeBlockage(p, barriers)), ROUTE_THREAT_SCALE, rand);
 }
 
 // How many random routes (map.js's randomPath) a soldier weighs before

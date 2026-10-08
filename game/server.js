@@ -29,8 +29,9 @@ import {
   stepSimulation,
   placeTower,
   upgradeTower,
-  repairTower,
-  sellTower,
+  repairStructure,
+  sellStructure,
+  placeWall,
   skipWave,
   togglePause,
 } from "./js/simulate.js";
@@ -63,8 +64,9 @@ setInterval(() => {
 const ACTION_HANDLERS = {
   place: (body) => placeTower(state, body.towerType, body.x, body.y),
   upgrade: (body) => upgradeTower(state, body.towerId, body.skill),
-  repair: (body) => repairTower(state, body.towerId),
-  sell: (body) => sellTower(state, body.towerId),
+  repair: (body) => repairStructure(state, body.id ?? body.towerId),
+  sell: (body) => sellStructure(state, body.id ?? body.towerId),
+  placeWall: (body) => placeWall(state, body.x, body.y),
   skip: () => skipWave(state),
   pause: () => togglePause(state),
   restart: (body) => {

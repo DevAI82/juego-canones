@@ -1,6 +1,7 @@
 import { TOWER_TYPES } from "./tower.js";
 import { UPGRADE_DEFS, upgradeCost, canUpgrade } from "./upgrades.js";
 import { computeScoreBreakdown } from "./scoring.js";
+import { WALL, repairCost, sellRefund } from "./simulate.js";
 
 const LABELS = { basic: "Básica", double: "Doble", laser: "Láser" };
 const SKILL_LABELS = { damage: "Daño", range: "Alcance", fireRate: "Vel. disparo", armor: "Blindaje", ammo: "Munición" };
@@ -46,6 +47,17 @@ export function initBuildMenu(container, { onSelect, onRepair, onSell }) {
     btn.addEventListener("click", () => onSelect(type));
     towersSection.appendChild(btn);
   }
+  // Concrete wall blocks (walls.js), per user request -- selected and
+  // placed like a tower type.
+  const wallBtn = document.createElement("button");
+  wallBtn.className = "build-btn";
+  wallBtn.dataset.type = "wall";
+  wallBtn.style.backgroundImage = "url(assets/ui_icon_wall.png)";
+  const wallLabel = document.createElement("span");
+  wallLabel.className = "build-btn-label";
+  wallBtn.appendChild(wallLabel);
+  wallBtn.addEventListener("click", () => onSelect("wall"));
+  towersSection.appendChild(wallBtn);
   container.appendChild(towersSection);
 
   // Actions section (Reparar & Vender) placed directly below the laser turret
@@ -82,9 +94,17 @@ export function initBuildMenu(container, { onSelect, onRepair, onSell }) {
   };
 }
 
-export function updateBuildMenu(container, { towers, economy, selectedType, selectedTower }) {
+// selected: the selected tower or wall block (or null), for the
+// repair/sell buttons.
+export function updateBuildMenu(container, { towers, walls = [], economy, selectedType, selected }) {
   for (const btn of container.querySelectorAll(".build-btn")) {
     const type = (btn.dataset && btn.dataset.type) || btn.getAttribute("data-type") || btn.dataset?.type;
+    if (type === "wall") {
+      btn.disabled = walls.length >= WALL.max || !economy || economy.money < WALL.cost;
+      btn.classList.toggle("selected", selectedType === "wall");
+      btn.querySelector(".build-btn-label").textContent = `Muro ($${WALL.cost}) ${walls.length}/${WALL.max}`;
+      continue;
+    }
     const def = TOWER_TYPES[type];
     if (!def) continue;
     const countOnField = (towers || []).filter((t) => t.type === type && t.hp > 0).length;
@@ -101,14 +121,14 @@ export function updateBuildMenu(container, { towers, economy, selectedType, sele
   const refs = container._buildMenuRefs;
   if (!refs) return;
 
-  if (selectedTower) {
-    const repairCost = Math.round((selectedTower.maxHp - selectedTower.hp) * 0.5);
-    const refund = Math.round(TOWER_TYPES[selectedTower.type].cost * 0.6);
+  if (selected) {
+    const repairCostNow = repairCost(selected);
+    const refund = sellRefund(selected);
 
-    if (repairCost > 0) {
-      const canAffordRepair = economy.money >= repairCost;
+    if (repairCostNow > 0) {
+      const canAffordRepair = economy.money >= repairCostNow;
       refs.repairBtn.disabled = !canAffordRepair;
-      refs.repairLabel.textContent = `Reparar ($${repairCost})`;
+      refs.repairLabel.textContent = `Reparar ($${repairCostNow})`;
     } else {
       refs.repairBtn.disabled = true;
       refs.repairLabel.textContent = "100% Vida";

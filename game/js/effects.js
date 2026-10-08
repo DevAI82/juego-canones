@@ -20,7 +20,7 @@ const MAX_DECALS = 1400;
 const HIT_FLASH_TIME = 0.09;
 
 // How big each kind of explosion is, relative to a buggy's.
-const BLAST_SCALE = { soldier: 0.55, motorcycle: 0.8, buggy: 1, tank: 1.35, rocket: 1.45, tower: 1.6 };
+const BLAST_SCALE = { soldier: 0.55, motorcycle: 0.8, buggy: 1, tank: 1.35, rocket: 1.45, tower: 1.6, wall: 0.7 };
 const VEHICLES = new Set(["buggy", "tank", "motorcycle", "rocket"]);
 
 // Wheel/track marks: how far apart each pair is laid (px travelled), how
@@ -154,7 +154,10 @@ function blast(fx, ex) {
   if (VEHICLES.has(ex.kind)) {
     addDecal(fx, { kind: "wreck", type: ex.kind, x: ex.x, y: ex.y, angle: ex.angle || 0, life: WRECK_LIFE, smoke: 0 });
   } else if (ex.kind === "tower") {
-    addDecal(fx, { kind: "rubble", x: ex.x, y: ex.y, size: 30, life: WRECK_LIFE * 1.5, smoke: 0, seed: Math.random() * 1000 });
+    addDecal(fx, { kind: "rubble", x: ex.x, y: ex.y, size: 30, life: WRECK_LIFE * 1.5, smoke: 0, seed: Math.random() * 1000, tone: "#3b3631" });
+  } else if (ex.kind === "wall") {
+    // A shot-down wall block leaves broken concrete.
+    addDecal(fx, { kind: "rubble", x: ex.x, y: ex.y, size: 16, life: WRECK_LIFE, smoke: 0, seed: Math.random() * 1000, tone: "#8d877d" });
   }
 }
 
@@ -342,7 +345,7 @@ export function drawGroundEffects(fx, ctx, wreckSprite) {
     } else if (d.kind === "rubble") {
       ctx.save();
       ctx.globalAlpha = 0.85 * fade;
-      ctx.fillStyle = "#3b3631";
+      ctx.fillStyle = d.tone;
       for (let i = 0; i < 9; i++) {
         const a = d.seed + i * 2.4;
         const r = (d.size * ((i * 37) % 10)) / 14;

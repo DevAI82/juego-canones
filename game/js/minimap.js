@@ -49,7 +49,7 @@ function thumbnail(img, w, h) {
 }
 
 // `view`: { camera: {x, y}, w, h } -- the world rectangle on screen.
-export function drawMinimap(ctx, rect, { mapImage, enemies, towers, base, view }) {
+export function drawMinimap(ctx, rect, { mapImage, enemies, towers, walls = [], base, view }) {
   const { x, y, w, h, k } = rect;
   ctx.save();
   // Panel, with a header strip, in the build menu's teal-edged style.
@@ -83,6 +83,8 @@ export function drawMinimap(ctx, rect, { mapImage, enemies, towers, base, view }
     ctx.closePath();
     ctx.fill();
   }
+  ctx.fillStyle = "#c9c3b8";
+  for (const w of walls) ctx.fillRect(x + w.x * k - 1.5, y + w.y * k - 1.5, 3, 3);
   ctx.fillStyle = "#5fe0f0";
   for (const t of towers) ctx.fillRect(x + t.x * k - 2, y + t.y * k - 2, 4, 4);
   ctx.fillStyle = "#ff4a3d";

@@ -7,8 +7,8 @@ import {
   canPlaceTower,
   placeTower,
   upgradeTower,
-  repairTower,
-  sellTower,
+  repairStructure,
+  sellStructure,
   skipWave,
   togglePause,
 } from "./simulate.js";
@@ -304,7 +304,7 @@ test("canPlaceTower predicts the same result as placeTower without mutating stat
   assert.equal(s.economy.money, 150); // unchanged
 });
 
-test("upgradeTower/repairTower/sellTower operate on the tower by id", () => {
+test("upgradeTower/repairStructure/sellStructure operate on the tower by id", () => {
   const s = createGameState();
   s.economy.money = 10000;
   const slot = SLOTS_1[0];
@@ -316,18 +316,18 @@ test("upgradeTower/repairTower/sellTower operate on the tower by id", () => {
   assert.equal(tower.level.damage, 1);
 
   tower.hp = 1;
-  const rep = repairTower(s, towerId);
+  const rep = repairStructure(s, towerId);
   assert.equal(rep.ok, true);
   assert.equal(tower.hp, tower.maxHp);
 
   const moneyBefore = s.economy.money;
-  const sell = sellTower(s, towerId);
+  const sell = sellStructure(s, towerId);
   assert.equal(sell.ok, true);
   assert.equal(s.towers.length, 0);
   assert.ok(s.economy.money > moneyBefore);
 });
 
-test("stats.towersBuilt/moneySpent track placeTower/upgradeTower/repairTower, but selling doesn't touch either", () => {
+test("stats.towersBuilt/moneySpent track placeTower/upgradeTower/repairStructure, but selling doesn't touch either", () => {
   const s = createGameState();
   s.economy.money = 10000;
   const slot = SLOTS_1[0];
@@ -340,11 +340,11 @@ test("stats.towersBuilt/moneySpent track placeTower/upgradeTower/repairTower, bu
 
   const tower = s.towers.find((t) => t.id === towerId);
   tower.hp = 1;
-  repairTower(s, towerId);
+  repairStructure(s, towerId);
   assert.ok(s.stats.moneySpent > 50 + 75);
 
   const spentBeforeSell = s.stats.moneySpent;
-  sellTower(s, towerId);
+  sellStructure(s, towerId);
   assert.equal(s.stats.moneySpent, spentBeforeSell);
   assert.equal(s.stats.towersBuilt, 1);
   assert.equal(s.stats.towersLost, 0); // a voluntary sale is not a "destroyed" tower
