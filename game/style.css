@@ -534,6 +534,37 @@ body {
   border: 1px solid #6fd8e6;
 }
 #gameend-close-btn:hover { filter: brightness(1.2); }
+#gameend-rematch-btn {
+  display: block;
+  width: 100%;
+  height: 40px;
+  margin-bottom: 10px;
+  cursor: pointer;
+  color: #f2e391;
+  font-weight: bold;
+  letter-spacing: 0.5px;
+  background: linear-gradient(#56603f, #333a24);
+  border: 1px solid #c9a43e;
+  border-radius: 4px;
+  box-shadow: 0 0 10px rgba(255, 205, 80, 0.35);
+}
+#gameend-rematch-btn:hover { filter: brightness(1.2); }
+#gameend-rematch-btn.hidden { display: none; }
+
+/* The lettering of the user's menu drawings (SIL Open Font License,
+   assets/fonts/OFL.txt). */
+@font-face {
+  font-family: "Barlow Condensed";
+  font-weight: 600;
+  font-display: swap;
+  src: url(assets/fonts/barlow-condensed-600.woff2) format("woff2");
+}
+@font-face {
+  font-family: "Barlow Condensed";
+  font-weight: 700;
+  font-display: swap;
+  src: url(assets/fonts/barlow-condensed-700.woff2) format("woff2");
+}
 
 /* Main menu and pause menu (js/menu.js), per user request: one overlay
    with every screen -- the main menu over a darkened map, the pause menu
@@ -549,9 +580,13 @@ body {
   font-family: sans-serif;
   z-index: 20;
 }
+/* The main menu over the user's start screen drawing (Imágenes/MENÚ
+   INICIO.jpg, its drawn buttons painted out: assets/menu_home.jpg),
+   darkened behind every screen but the start one. */
 #menu.main {
-  background: linear-gradient(rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0.82)), url(assets/map_bg_level4.jpg) center / cover;
+  background: linear-gradient(rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0.78)), url(assets/menu_home.jpg) center / cover;
 }
+#menu.main.home { background: url(assets/menu_home.jpg) center / cover; }
 #menu.hidden { display: none; }
 .menu-panel {
   min-width: 420px;
@@ -619,6 +654,7 @@ body {
 }
 .menu-choice:hover:not(:disabled) { filter: brightness(1.25); }
 .menu-choice:disabled { cursor: not-allowed; opacity: 0.45; }
+.menu-choice.hidden { display: none; }
 .menu-choice-name { display: block; font-size: 22px; font-weight: bold; color: #ffe27a; margin-bottom: 6px; }
 .menu-choice-desc { display: block; font-size: 14px; }
 .menu-note { min-height: 18px; margin-bottom: 8px; font-size: 14px; color: #a9e8b0; }
@@ -697,11 +733,103 @@ body {
   background: linear-gradient(#5c6a3f, #3a4326);
 }
 .menu-confirm-buttons .menu-confirm-no { color: #dffcff; background: #163238; border: 1px solid #6fd8e6; }
-/* The game's own controls stay out of the way while a menu is open. */
+/* The start screen, per user request: the game's own buttons on the
+   console of the drawing, where its drawn ones were (painted out of
+   assets/menu_home.jpg), drawn like them -- olive metal in a dark frame,
+   pale lettering, an amber light on the right; the first one lit up in
+   gold with a green light. The console's place: the drawing (2752 x 1536)
+   covers the 1200 x 750 game at 750/1536, centred. */
+#menu.main.home .menu-title { display: none; }
+#menu.main.home .menu-panel {
+  position: absolute;
+  left: 436px;
+  top: 365px;
+  width: 333px;
+  height: 361px;
+  min-width: 0;
+  padding: 12px 16px;
+  box-sizing: border-box;
+  background: linear-gradient(#3b3f33, #2c3026);
+  border: 3px solid #1b1d17;
+  border-radius: 8px;
+  box-shadow: 0 0 0 2px #5a5e50, inset 0 2px 8px rgba(0, 0, 0, 0.75), 0 6px 18px rgba(0, 0, 0, 0.6);
+}
+#menu.main.home .menu-screen[data-screen="home"] {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-evenly;
+  height: 100%;
+}
+#menu.main.home .menu-btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: 100%;
+  height: 46px;
+  margin: 0;
+  padding: 0 28px 0 18px;
+  font-family: "Barlow Condensed", "Arial Narrow", sans-serif;
+  font-weight: 700;
+  font-size: 25px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: #d8d4ad;
+  text-shadow: 0 2px 2px rgba(0, 0, 0, 0.85);
+  background: linear-gradient(#56603f, #3d4529 55%, #333a24);
+  border: 3px solid #1c1f19;
+  border-radius: 6px;
+  box-shadow: 0 0 0 2px #62665a, inset 0 1px 0 rgba(255, 255, 255, 0.2), inset 0 -4px 7px rgba(0, 0, 0, 0.45), 0 3px 6px rgba(0, 0, 0, 0.6);
+}
+#menu.main.home .menu-btn.hidden { display: none; }
+#menu.main.home .menu-btn::after {
+  content: "";
+  position: absolute;
+  right: 9px;
+  top: 20%;
+  bottom: 20%;
+  width: 6px;
+  border-radius: 3px;
+  background: linear-gradient(#ffd977, #e09d1f);
+  box-shadow: 0 0 8px rgba(255, 190, 60, 0.85);
+}
+#menu.main.home .menu-icon { width: 26px; height: 26px; flex: none; filter: drop-shadow(0 2px 1px rgba(0, 0, 0, 0.8)); }
+/* The first button: «Continuar» when there's a game to continue, else
+   «Nueva partida». */
+#menu.main.home .menu-btn[data-do="continue"]:not(.hidden),
+#menu.main.home .menu-btn[data-do="continue"].hidden + .menu-btn {
+  color: #f2e391;
+  border-color: #6b5a1c;
+  box-shadow: 0 0 0 2px #c9a43e, 0 0 14px rgba(255, 205, 80, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.25), inset 0 -4px 7px rgba(0, 0, 0, 0.4);
+}
+#menu.main.home .menu-btn[data-do="continue"]:not(.hidden)::before,
+#menu.main.home .menu-btn[data-do="continue"].hidden + .menu-btn::before {
+  content: "";
+  position: absolute;
+  left: 9px;
+  top: 20%;
+  bottom: 20%;
+  width: 6px;
+  border-radius: 3px;
+  background: linear-gradient(#b6ff7a, #4fc12a);
+  box-shadow: 0 0 8px rgba(120, 255, 90, 0.85);
+}
+#menu.main.home .menu-btn:hover { filter: brightness(1.18); color: #fff3b8; }
+
+/* The game's own controls stay out of the way while a menu is open, and
+   its panels while the statistics or the end of the game are (the build
+   menu, a band across the top on a narrow window, would hide the end
+   screen's title). */
 body.menu-open #top-controls,
 body.menu-open #build-menu,
 body.menu-open #attack-shop,
-body.menu-open #nav-controls { display: none; }
+body.menu-open #nav-controls,
+body.stats-open #build-menu,
+body.stats-open #attack-shop,
+body.stats-open #nav-controls,
+body.gameend-open #build-menu,
+body.gameend-open #attack-shop { display: none; }
 
 /* Short messages ("Partida guardada en el hueco 2"...). */
 #toast {
@@ -776,18 +904,97 @@ body.menu-open #nav-controls { display: none; }
 }
 #stats-overlay.hidden { display: none; }
 
+/* The statistics, per user request on the drawing Imágenes/PANTALLA
+   ESTADÍSTICAS.jpg: the board (assets/stats_board.jpg, 1024 px square,
+   shown at 640 -- every place below is the drawing's px x 0.625) with
+   this game's labels and numbers over its painted-out sample ones, and
+   beside it, in the same olive metal, the ranking. */
 #stats-modal {
-  width: 540px;
-  max-height: 640px;
-  overflow-y: auto;
-  padding: 22px 26px;
-  background: #080e12;
-  border: 1px solid #4fd1c5;
-  border-radius: 8px;
-  box-shadow: 0 0 28px rgba(79, 209, 197, 0.4), inset 0 0 30px rgba(0, 0, 0, 0.8);
-  color: #dffcff;
+  display: flex;
+  gap: 18px;
+  align-items: stretch;
+  color: #e6e3c8;
 }
-
+.stats-board {
+  position: relative;
+  flex: none;
+  width: 640px;
+  height: 640px;
+  background: url(assets/stats_board.jpg) center / cover;
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8);
+  font-family: "Barlow Condensed", "Arial Narrow", sans-serif;
+}
+.stats-board-label {
+  position: absolute;
+  left: 266px;
+  width: 172px;
+  height: 22px;
+  font-weight: 700;
+  font-size: 22px;
+  line-height: 22px;
+  white-space: nowrap;
+  color: #ece9cf;
+  text-shadow: -1px -1px 0 #1e2018, 1px -1px 0 #1e2018, -1px 1px 0 #1e2018, 1px 1px 0 #1e2018, 0 2px 3px rgba(0, 0, 0, 0.7);
+}
+.stats-board-value {
+  position: absolute;
+  left: 263px;
+  width: 170px;
+  height: 27px;
+  padding: 0 10px;
+  box-sizing: border-box;
+  font-weight: 700;
+  font-size: 27px;
+  line-height: 27px;
+  white-space: nowrap;
+  overflow: hidden;
+  color: #8dff72;
+  text-shadow: 0 0 8px rgba(110, 255, 90, 0.75), 0 0 2px #2f8f22;
+}
+.stats-board-label[data-row="0"] { top: 232px; }
+.stats-board-value[data-row="0"] { top: 258px; }
+.stats-board-label[data-row="1"] { top: 294px; }
+.stats-board-value[data-row="1"] { top: 319px; }
+.stats-board-label[data-row="2"] { top: 355px; }
+.stats-board-value[data-row="2"] { top: 380px; }
+.stats-board-label[data-row="3"] { top: 416px; }
+.stats-board-label[data-row="4"] { top: 456px; }
+.stats-board-value[data-row="4"] { top: 482px; }
+/* The fourth number, on the shield, stamped in its steel. */
+.stats-board-shield {
+  position: absolute;
+  left: 204px;
+  top: 424px;
+  width: 41px;
+  height: 30px;
+  text-align: center;
+  font-weight: 700;
+  font-size: 28px;
+  line-height: 30px;
+  color: #2a2f33;
+  text-shadow: 0 1px 0 #dfe4e8, 0 -1px 0 rgba(0, 0, 0, 0.5);
+}
+.stats-side {
+  display: flex;
+  flex-direction: column;
+  width: 340px;
+  max-height: 640px;
+  padding: 16px 18px;
+  box-sizing: border-box;
+  background: linear-gradient(#3b3f33, #2a2e25);
+  border: 3px solid #1b1d17;
+  border-radius: 10px;
+  box-shadow: 0 0 0 2px #5a5e50, inset 0 2px 10px rgba(0, 0, 0, 0.7), 0 10px 30px rgba(0, 0, 0, 0.8);
+  font-family: sans-serif;
+}
+.stats-kills-title {
+  margin-bottom: 6px;
+  font: 700 18px "Barlow Condensed", "Arial Narrow", sans-serif;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #ece9cf;
+}
 .stats-modal-header {
   display: flex;
   justify-content: space-between;
@@ -797,11 +1004,10 @@ body.menu-open #nav-controls { display: none; }
   padding-bottom: 10px;
 }
 #stats-title {
-  font-size: 20px;
-  font-weight: bold;
-  letter-spacing: 1.5px;
-  color: #ffe27a;
-  text-shadow: 0 0 10px rgba(255, 226, 122, 0.6);
+  font: 700 26px "Barlow Condensed", "Arial Narrow", sans-serif;
+  letter-spacing: 3px;
+  color: #f2e391;
+  text-shadow: 0 0 10px rgba(255, 205, 80, 0.55), 0 2px 2px rgba(0, 0, 0, 0.8);
 }
 .stats-close-btn {
   width: 32px;
@@ -821,33 +1027,6 @@ body.menu-open #nav-controls { display: none; }
   background: #233742;
   color: #fff;
   border-color: #81e6d9;
-}
-.stats-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
-  margin-bottom: 14px;
-}
-.stats-item {
-  background: rgba(15, 25, 32, 0.85);
-  border: 1px solid rgba(79, 209, 197, 0.2);
-  border-radius: 6px;
-  padding: 10px 8px;
-  text-align: center;
-}
-.stats-num {
-  display: block;
-  font-size: 20px;
-  font-weight: bold;
-  color: #81e6d9;
-  text-shadow: 0 0 8px rgba(129, 230, 217, 0.5);
-  margin-bottom: 2px;
-}
-.stats-lbl {
-  font-size: 11px;
-  color: #a0aec0;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
 }
 .stats-kills-detail {
   display: flex;
@@ -877,10 +1056,10 @@ body.menu-open #nav-controls { display: none; }
   padding-bottom: 4px;
 }
 #stats-ranking-list {
+  flex: 1;
   margin: 0;
   padding: 0;
   list-style: none;
-  max-height: 220px;
   overflow-y: auto;
 }
 .stats-ranking-row {
@@ -940,3 +1119,5 @@ body.menu-open #nav-controls { display: none; }
 }
 .unit-tab.active { color: #ffe27a; background: #2b5b62; border-color: #ffe27a; }
 .unit-tab.hidden { display: none; }
+.unit-upgrade-cols.hidden { display: none; }
+.unit-upgrade-toggle { color: #ffe27a; border-color: #ffe27a; }

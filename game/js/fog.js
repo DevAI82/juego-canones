@@ -94,31 +94,59 @@ export function knownStructure(fog, s) {
   return isVisible(fog, s.x, s.y) || Boolean(fog.memory[structureKey(s)]);
 }
 
-// For a save: the explored cells as a hex string (4 cells a digit) and the
-// remembered structures.
-export function saveFog(fog) {
-  let explored = "";
-  for (let i = 0; i < fog.explored.length; i += 4) {
+// A grid of 0s and 1s as a hex string, 4 cells a digit -- and back into
+// `cells`, if the string fits it (otherwise `cells` is left as it was).
+function toHex(cells) {
+  let hex = "";
+  for (let i = 0; i < cells.length; i += 4) {
     let v = 0;
-    for (let k = 0; k < 4; k++) if (fog.explored[i + k]) v |= 1 << k;
-    explored += v.toString(16);
+    for (let k = 0; k < 4; k++) if (cells[i + k]) v |= 1 << k;
+    hex += v.toString(16);
   }
-  return { explored, memory: Object.values(fog.memory).map((m) => JSON.parse(JSON.stringify(m))) };
+  return hex;
+}
+
+function fromHex(cells, hex) {
+  if (typeof hex !== "string" || hex.length !== Math.ceil(cells.length / 4) || !/^[0-9a-f]*$/.test(hex)) return;
+  for (let i = 0; i < cells.length; i++) cells[i] = (parseInt(hex[i >> 2], 16) >> (i & 3)) & 1;
+}
+
+// For a save: the explored cells as a hex string and the remembered
+// structures.
+export function saveFog(fog) {
+  return { explored: toHex(fog.explored), memory: Object.values(fog.memory).map((m) => JSON.parse(JSON.stringify(m))) };
 }
 
 // Back from a save, into a fresh fog of the same map. A damaged part is
 // left out rather than breaking the load.
 export function restoreFog(fog, saved) {
   if (!saved || typeof saved !== "object") return;
-  const hex = saved.explored;
-  if (typeof hex === "string" && hex.length === Math.ceil(fog.explored.length / 4) && /^[0-9a-f]*$/.test(hex)) {
-    for (let i = 0; i < fog.explored.length; i++) fog.explored[i] = (parseInt(hex[i >> 2], 16) >> (i & 3)) & 1;
-  }
+  fromHex(fog.explored, saved.explored);
   for (const m of Array.isArray(saved.memory) ? saved.memory : []) {
     if (!m || typeof m !== "object" || (m.kind !== "tower" && m.kind !== "wall")) continue;
     if (!Number.isFinite(m.x) || !Number.isFinite(m.y)) continue;
     fog.memory[structureKey(m)] = m;
   }
+}
+
+// The fog as the home server sends it to the browsers (server.js): JSON
+// can't carry its byte grids as they are, so they travel as hex strings,
+// like a save's; fogFromWire turns them back into a fog the drawing and
+// the attacker's controls read like a local one. A damaged part arrives as
+// unexplored.
+export function fogForWire(fog) {
+  return { cols: fog.cols, rows: fog.rows, explored: toHex(fog.explored), visible: toHex(fog.visible), memory: fog.memory };
+}
+
+export function fogFromWire(wire) {
+  if (!wire || typeof wire !== "object") return null;
+  const cols = Number.isInteger(wire.cols) && wire.cols > 0 ? wire.cols : 1;
+  const rows = Number.isInteger(wire.rows) && wire.rows > 0 ? wire.rows : 1;
+  const fog = { cols, rows, explored: new Uint8Array(cols * rows), visible: new Uint8Array(cols * rows), memory: {} };
+  fromHex(fog.explored, wire.explored);
+  fromHex(fog.visible, wire.visible);
+  if (wire.memory && typeof wire.memory === "object") fog.memory = wire.memory;
+  return fog;
 }
 
 // How the fog looks, one pixel per cell (RGBA, cols x rows, row by row):

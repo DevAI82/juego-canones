@@ -4,6 +4,16 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <title>Tower Defense</title>
+  <!-- Installable on a phone (manifest.webmanifest, sw.js), with the user's
+       drawing as its icon (tools/make_pwa_icons.py). -->
+  <link rel="manifest" href="manifest.webmanifest" />
+  <meta name="theme-color" content="#161714" />
+  <link rel="icon" type="image/png" sizes="192x192" href="assets/icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Tower Defense" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -16,13 +26,33 @@
       <div id="menu" class="hidden">
         <div class="menu-panel">
           <div class="menu-title">TOWER DEFENSE</div>
+          <!-- The start screen's buttons sit on the console of the user's
+               drawing (assets/menu_home.jpg, style.css): an icon and a label. -->
           <div class="menu-screen" data-screen="home">
-            <button class="menu-btn hidden" data-do="continue">Continuar</button>
-            <button class="menu-btn" data-go="mode">Nueva partida</button>
-            <button class="menu-btn" data-go="load">Cargar partida</button>
-            <button class="menu-btn" data-go="multiplayer">Multijugador</button>
-            <button class="menu-btn" data-do="records">Récords</button>
-            <button class="menu-btn" data-go="settings">Ajustes</button>
+            <button class="menu-btn hidden" data-do="continue">
+              <svg class="menu-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M7 4.5v15l12.5-7.5z"/></svg>
+              <span class="menu-label">Continuar</span>
+            </button>
+            <button class="menu-btn" data-go="mode">
+              <svg class="menu-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2.2l2.9 6.3 6.9.7-5.2 4.7 1.5 6.8L12 17.2l-6.1 3.5 1.5-6.8-5.2-4.7 6.9-.7z"/></svg>
+              <span class="menu-label">Nueva partida</span>
+            </button>
+            <button class="menu-btn" data-go="load">
+              <svg class="menu-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" d="M2.5 5.5h7l2 2.5h10v11.5h-19z"/></svg>
+              <span class="menu-label">Cargar partida</span>
+            </button>
+            <button class="menu-btn" data-go="multiplayer">
+              <svg class="menu-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2"><rect x="1.5" y="3" width="9" height="7" rx="1"/><rect x="13.5" y="14" width="9" height="7" rx="1"/><path d="M6 10v5.5h7.5M18 14V8.5h-7.5"/></g></svg>
+              <span class="menu-label">Multijugador</span>
+            </button>
+            <button class="menu-btn" data-do="records">
+              <svg class="menu-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M6 2.5h12v2h3.5v2.5a4.5 4.5 0 0 1-4.2 4.5A6 6 0 0 1 13 15.4V18h3.5v3.5h-9V18H11v-2.6a6 6 0 0 1-4.3-3.9A4.5 4.5 0 0 1 2.5 7V4.5H6zm0 4H4.5V7A2.5 2.5 0 0 0 6.2 9.4zm12 0v2.9A2.5 2.5 0 0 0 19.5 7v-.5z"/></svg>
+              <span class="menu-label">Récords</span>
+            </button>
+            <button class="menu-btn" data-go="settings">
+              <svg class="menu-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="currentColor"><path d="M10.2 1.5h3.6l.6 3a8 8 0 0 1 2.1 1.2l2.9-1 1.8 3.1-2.3 2a8 8 0 0 1 0 2.4l2.3 2-1.8 3.1-2.9-1a8 8 0 0 1-2.1 1.2l-.6 3h-3.6l-.6-3a8 8 0 0 1-2.1-1.2l-2.9 1-1.8-3.1 2.3-2a8 8 0 0 1 0-2.4l-2.3-2 1.8-3.1 2.9 1a8 8 0 0 1 2.1-1.2zM12 8.3a3.7 3.7 0 1 0 0 7.4 3.7 3.7 0 0 0 0-7.4z" fill-rule="evenodd"/></g></svg>
+              <span class="menu-label">Ajustes</span>
+            </button>
           </div>
           <div class="menu-screen hidden" data-screen="pause">
             <button class="menu-btn" data-do="resume">Seguir</button>
@@ -42,6 +72,11 @@
               <button class="menu-choice" data-mode="attack">
                 <span class="menu-choice-name">Atacar</span>
                 <span class="menu-choice-desc">Forma un ejército y rompe la base</span>
+              </button>
+              <!-- At home (server.js) only: one computer defends, another attacks. -->
+              <button class="menu-choice hidden" data-mode="versus">
+                <span class="menu-choice-name">Uno contra otro</span>
+                <span class="menu-choice-desc">Un ordenador defiende y otro ataca</span>
               </button>
             </div>
             <button class="menu-back">Volver</button>
@@ -86,6 +121,53 @@
             </div>
             <button class="menu-back">Volver</button>
           </div>
+          <!-- One against the other (docs/2026-10-09-uno-contra-otro-design.md):
+               the side this player takes, then the defence's money. -->
+          <div class="menu-screen hidden" data-screen="side">
+            <div class="menu-subtitle">¿Qué bando llevas tú?</div>
+            <div class="menu-choices">
+              <button class="menu-choice" data-side="defense">
+                <span class="menu-choice-name">Defender</span>
+                <span class="menu-choice-desc">Torres y muros contra su ejército</span>
+              </button>
+              <button class="menu-choice" data-side="attack">
+                <span class="menu-choice-name">Atacar</span>
+                <span class="menu-choice-desc">Tu ejército contra sus torres</span>
+              </button>
+            </div>
+            <button class="menu-back">Volver</button>
+          </div>
+          <div class="menu-screen hidden" data-screen="money">
+            <div class="menu-subtitle">Dinero de la defensa</div>
+            <div class="menu-choices">
+              <button class="menu-choice" data-money="easy">
+                <span class="menu-choice-name">Poco</span>
+                <span class="menu-choice-desc">$250 al empezar y $60 por ronda</span>
+              </button>
+              <button class="menu-choice" data-money="normal">
+                <span class="menu-choice-name">Normal</span>
+                <span class="menu-choice-desc">$350 al empezar y $90 por ronda</span>
+              </button>
+              <button class="menu-choice" data-money="hard">
+                <span class="menu-choice-name">Mucho</span>
+                <span class="menu-choice-desc">$450 al empezar y $120 por ronda</span>
+              </button>
+            </div>
+            <button class="menu-back">Volver</button>
+          </div>
+          <!-- A tab with no side in a game one against the other: join the
+               free side, or see that both are taken (menu.js's openSeat). -->
+          <div class="menu-screen hidden" data-screen="join">
+            <div class="menu-subtitle">Unirse a la partida</div>
+            <div class="menu-note join-info"></div>
+            <div class="menu-choices join-sides"></div>
+            <button class="menu-back" data-go="home">Menú principal</button>
+          </div>
+          <div class="menu-screen hidden" data-screen="full">
+            <div class="menu-subtitle">Hay una partida uno contra otro en marcha</div>
+            <div class="menu-note">Sus dos jugadores están conectados. Cuando acaben, o si se va alguno, podrás unirte o empezar otra.</div>
+            <button class="menu-btn" data-go="settings">Ajustes</button>
+          </div>
           <div class="menu-screen hidden" data-screen="load">
             <div class="menu-subtitle">Cargar partida</div>
             <div class="menu-note"></div>
@@ -105,10 +187,6 @@
                 <div class="menu-option-name">En casa (red local)</div>
                 <div class="menu-option-desc lan-info"></div>
                 <button class="menu-btn hidden" data-do="continue-lan">Volver a la partida</button>
-              </div>
-              <div class="menu-option soon">
-                <div class="menu-option-name">2 jugadores en este PC</div>
-                <div class="menu-option-desc">Próximamente</div>
               </div>
               <div class="menu-option soon">
                 <div class="menu-option-name">En línea</div>
@@ -154,18 +232,36 @@
           <div id="gameend-save-status"></div>
           <div id="gameend-ranking-title">Ranking</div>
           <ol id="gameend-ranking"></ol>
+          <!-- One against the other: the same map again, each on the other side. -->
+          <button id="gameend-rematch-btn" class="hidden">Revancha (cambiando de bando)</button>
           <button id="gameend-close-btn">Jugar de nuevo</button>
         </div>
       </div>
       <div id="stats-overlay" class="hidden">
         <div id="stats-modal">
-          <div class="stats-modal-header">
-            <div id="stats-title">🏆 RANKING Y ESTADÍSTICAS</div>
-            <button id="stats-close-btn" class="stats-close-btn" title="Cerrar">✕</button>
+          <!-- The user's statistics drawing (assets/stats_board.jpg), with
+               this game's numbers on its five lines (statsBoard.js). -->
+          <div class="stats-board">
+            <div class="stats-board-label" data-row="0"></div>
+            <div class="stats-board-value" data-row="0"></div>
+            <div class="stats-board-label" data-row="1"></div>
+            <div class="stats-board-value" data-row="1"></div>
+            <div class="stats-board-label" data-row="2"></div>
+            <div class="stats-board-value" data-row="2"></div>
+            <div class="stats-board-label" data-row="3"></div>
+            <div class="stats-board-shield" data-row="3"></div>
+            <div class="stats-board-label" data-row="4"></div>
+            <div class="stats-board-value" data-row="4"></div>
           </div>
-          <div id="stats-summary-card"></div>
-          <div class="stats-ranking-header">Top 20 Mejores Puntuaciones</div>
-          <ol id="stats-ranking-list"></ol>
+          <div class="stats-side">
+            <div class="stats-modal-header">
+              <div id="stats-title">RANKING</div>
+              <button id="stats-close-btn" class="stats-close-btn" title="Cerrar">✕</button>
+            </div>
+            <div id="stats-summary-card"></div>
+            <div class="stats-ranking-header">Las 20 mejores puntuaciones</div>
+            <ol id="stats-ranking-list"></ol>
+          </div>
         </div>
       </div>
     </div>

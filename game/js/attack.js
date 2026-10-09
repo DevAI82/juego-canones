@@ -39,8 +39,12 @@ export const DAMAGE_REWARD = 0.25;
 // funded the army that shot them down).
 export const WALL_REWARD_SHARE = 0.2;
 export const ENTRY_REWARD = 20;
-// A right-click this close to the base sends the units into it.
-export const BASE_CLICK_RADIUS = 60;
+// An order given this close to the base sends the units into it.
+export const BASE_CLICK_RADIUS = 100;
+// A unit this close to the base goes in, whatever its order, per user
+// request («llego a la base y no sé cómo conquistarla»): units sent next to
+// the base used to stop there and do nothing.
+export const BASE_REACH = 50;
 // What the defence earns for each unit it destroys: this share of the
 // defence game's bounty for that type (enemy.js). Tuned with bot games
 // (plan C): an army is dozens of kills a round, and with the whole bounty
@@ -125,7 +129,10 @@ function refreshFog(state) {
 // "normal" or "hard"), in preparation: round 1's money paid, no clock
 // running and -- unless aiSetup is false (a loaded game brings its own
 // towers; tests want an empty map) -- the defence's first towers up.
-export function createAttackState(level = 1, difficulty = "normal", { aiSetup = true } = {}) {
+// `defender`: "computer" (defenseAI.js), or "player" -- a person on another
+// computer at home (docs/2026-10-09-uno-contra-otro-design.md), who gets
+// the difficulty's money and builds their own towers.
+export function createAttackState(level = 1, difficulty = "normal", { aiSetup = true, defender = "computer" } = {}) {
   const state = createGameState(level);
   const L = levelData(state.level);
   const diff = DIFFICULTIES[difficulty] ? difficulty : "normal";
@@ -134,6 +141,7 @@ export function createAttackState(level = 1, difficulty = "normal", { aiSetup = 
   state.economy.money = DIFFICULTIES[diff].startMoney;
   state.attack = {
     difficulty: diff,
+    defender: defender === "player" ? "player" : "computer",
     phase: "prep",
     round: 1,
     roundLeft: ROUND_TIME,
@@ -148,10 +156,12 @@ export function createAttackState(level = 1, difficulty = "normal", { aiSetup = 
     stats: { moneySpent: 0, moneyEarned: 0, livesTaken: 0 },
     fog: createFog(L.worldWidth, L.worldHeight),
   };
-  if (aiSetup) aiPrepare(state, diff);
+  if (aiSetup && state.attack.defender === "computer") aiPrepare(state, diff);
   refreshFog(state);
   return state;
 }
+
+const byComputer = (state) => state.attack.defender !== "player";
 
 // Gives a unit an order and the route to carry it out.
 function giveRoute(u, order, route) {
@@ -297,7 +307,7 @@ function structureById(state, id) {
   return state.towers.find((t) => t.id === id && t.hp > 0) || state.walls.find((w) => w.id === id && w.hp > 0) || null;
 }
 
-// Right-click on the ground: the units drive to the road point nearest
+// A click on the ground: the units drive to the road point nearest
 // (x, y), spread out along the road there (roadGraph.js's spreadStops),
 // and stop -- or, a click that close to the base, go into it.
 export function orderMove(state, ids, x, y) {
@@ -312,7 +322,7 @@ export function orderMove(state, ids, x, y) {
   return { ok: true, stops: stops.map((p) => ({ x: p.x, y: p.y })) };
 }
 
-// Right-click on a tower or wall block: each unit drives along the road
+// A click on a tower or wall block: each unit drives along the road
 // until it has it in range, stops there and fires at it until it's down.
 export function orderAttack(state, ids, structureId) {
   if (!playing(state)) return { ok: false, reason: "game-over" };
@@ -365,14 +375,22 @@ function enterBase(state, u) {
 // The army's turn to move. A unit with no order stands still (nothing
 // moves without an order). One sent against a structure brakes to a stop
 // once it has it in range; one that reaches the end of its route stops
-// there -- or, sent into the base, goes in. A wall block across the road
-// holds a unit up (enemy.js), and it fires at it (fireUnits).
+// there -- or, sent into the base, goes in. Any unit that gets within
+// BASE_REACH of the base goes in. A wall block across the road holds a
+// unit up (enemy.js), and it fires at it (fireUnits).
 function moveUnits(state, dt) {
   const L = levelData(state.level);
   const walls = solidSegmentsOf(L);
   const gates = narrowsOf(L);
+  const { base } = mapOf(state);
+  const atBase = (u) => Math.hypot(u.x - base.x, u.y - base.y) <= BASE_REACH;
   for (const u of state.enemies) {
     const order = u.order;
+    if (atBase(u)) {
+      enterBase(state, u);
+      if (state.gameOver) break;
+      continue;
+    }
     if (!order) {
       u.v = 0;
       u.blockedBy = null;
@@ -382,9 +400,12 @@ function moveUnits(state, dt) {
     const inRange = Boolean(target) && Math.hypot(target.x - u.x, target.y - u.y) <= u.fireRange;
     const { reachedEnd, blockedBy } = stepEnemy(u, dt, { others: state.enemies, hold: inRange, walls, gates, barriers: state.walls, turnFirst: true });
     u.blockedBy = blockedBy ?? null;
-    if (!reachedEnd) continue;
-    if (order.kind === "enter") enterBase(state, u);
-    else if (!inRange) stopUnit(u);
+    if ((reachedEnd && order.kind === "enter") || atBase(u)) {
+      enterBase(state, u);
+      if (state.gameOver) break;
+      continue;
+    }
+    if (reachedEnd && !inRange) stopUnit(u);
   }
   // The ones that went into the base leave the field (no bounty for them).
   state.enemies = state.enemies.filter((u) => u.alive);
@@ -419,7 +440,14 @@ export function stepAttack(state, dt) {
   if (!playing(state) || state.paused) return;
   const a = state.attack;
   a.roundJustStarted = false;
-  if (a.phase !== "battle") return;
+  if (a.phase !== "battle") {
+    // No clock runs in preparation, so towers put up then are ready at
+    // once -- like the computer's opening towers (aiPrepare) -- and the
+    // attacker's units see them where they stand.
+    for (const t of state.towers) t.buildTimeRemaining = 0;
+    refreshFog(state);
+    return;
+  }
 
   a.roundLeft -= dt;
   if (a.roundLeft <= 0) {
@@ -432,9 +460,9 @@ export function stepAttack(state, dt) {
     a.roundJustStarted = true;
     a.money += roundIncome(a.round);
     state.economy.money += DIFFICULTIES[a.difficulty].perRound;
-    aiStep(state, a.difficulty);
+    if (byComputer(state)) aiStep(state, a.difficulty);
     a.aiTimer = AI_PERIOD;
-  } else {
+  } else if (byComputer(state)) {
     a.aiTimer -= dt;
     if (a.aiTimer <= 0) {
       a.aiTimer += AI_PERIOD;
@@ -480,6 +508,7 @@ export function createAttackSave(state, now = new Date()) {
     savedAt: now.toISOString(),
     level: state.level,
     difficulty: a.difficulty,
+    defender: a.defender,
     phase: a.phase,
     round: a.round,
     money: a.money,
@@ -515,7 +544,7 @@ function readableAttack(save) {
 // read. A damaged field takes its default instead of breaking the load.
 export function restoreAttackSave(save) {
   if (!readableAttack(save)) return null;
-  const state = createAttackState(save.level, save.difficulty, { aiSetup: false });
+  const state = createAttackState(save.level, save.difficulty, { aiSetup: false, defender: save.defender });
   const a = state.attack;
   a.phase = save.phase === "battle" ? "battle" : "prep";
   // It stands at the start of its round: a save can be made at once, and
@@ -562,6 +591,7 @@ export function attackSaveSummary(save) {
     level: save.level,
     round: clamp(Math.floor(num(save.round, 1)), 1, ROUNDS),
     difficulty: DIFFICULTIES[save.difficulty] ? save.difficulty : "normal",
+    defender: save.defender === "player" ? "player" : "computer",
     lives: clamp(Math.floor(num(defense.lives, 20)), 1, 20),
     money: Math.max(0, Math.floor(num(save.money, 0))),
     savedAt: typeof save.savedAt === "string" ? save.savedAt : null,

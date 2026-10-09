@@ -1,49 +1,77 @@
-// The attack mode's mouse, keyboard and touch, Command & Conquer style
-// (docs/2026-10-09-modo-atacante-design.md §4): left click or drag a box
-// to select (Shift adds or takes out, a double click picks that type on
-// screen, a click on the ground lets go); right click to order -- on the
-// ground go there, on a tower or wall block the player knows of attack it,
-// on the base go in; Ctrl or Alt + 1-9 keep a group and 1-9 pick it (twice:
-// look at it); S stops; Esc lets go. The camera pans at the screen's edges
-// and by dragging with the middle button (the arrow keys, the wheel and the
-// minimap stay main.js's). On a touch screen a tap on a unit picks it, a tap
+// The attack mode's mouse, keyboard and touch, the classic Command &
+// Conquer way (docs/2026-10-09-modo-atacante-design.md §4): everything with
+// the left button, per user request («el botón derecho abre muchas veces un
+// menú de opciones ... mejor que se muevan usando el botón izquierdo»). A
+// left click on a unit picks it, a left drag boxes units in (Shift or Ctrl
+// adds or takes out, a double click picks that type on screen); with units
+// picked, a left click elsewhere is their order -- on the ground go there,
+// on a tower or wall block the player knows of attack it, on the base go
+// in. A left click on an entry's flag makes it the active entry. The right
+// button lets go of the selection with a click and drags the map, like C&C
+// Generals; so does the middle one, and so does the pointer at the screen's
+// edges (main.js tells it where the pointer is, even off the map or out of
+// the window). Ctrl or Alt + 1-9 keep a group and 1-9 pick it (twice: look
+// at it); S stops; Esc lets go. The arrow keys, the wheel and the minimap
+// stay main.js's. On a touch screen a tap on a unit picks it, a tap
 // elsewhere orders the selection there, and a drag pans.
 //
 // With the phone's automatic army (env.autoArmy(), inputMode.js) the army
 // takes no orders from the player: a drag -- finger or mouse -- pans, and
-// taps, right clicks, the entry flags and the group keys do nothing.
+// taps, clicks, the entry flags and the group keys do nothing.
 //
 // main.js creates it once with what it needs (`env`) and hands it its
 // canvas events while an attack is on; it keeps the selection, the groups,
 // the box and the order marks, and draws nothing itself (attackDraw.js).
 import { unitAt, unitsInBox, applyPick, sameTypeInView, createGroups, isDoublePress, attackKey } from "./selection.js";
-import { orderMove, orderAttack, orderStop, setEntry } from "./attack.js";
+import { orderMove, orderAttack, orderEnter, orderStop, setEntry, BASE_CLICK_RADIUS } from "./attack.js";
 import { knownStructure } from "./fog.js";
 import { MARKER_TIME } from "./attackDraw.js";
 
 const BOX_THRESHOLD = 6; // canvas px a press moves before it's a box, not a click
-const TAP_THRESHOLD = 12; // client px a touch moves before it's a pan, not a tap
+const TAP_THRESHOLD = 12; // client px a touch or right press moves before it's a pan
 const DOUBLE_CLICK = 0.35; // s between two clicks on a unit for a double click
-const EDGE = 14; // canvas px from the screen's edge that pan the map
+const EDGE = 18; // canvas px from the screen's edge that pan the map
 const EDGE_SPEED = 700; // canvas px per second, like the arrow keys
 const FLAG_REACH = 22; // canvas px round an entry's flag that pick it
 const STRUCTURE_REACH = 38; // world px round a tower's centre that pick it
+// Canvas px round the base's mark that count as clicking it, however far
+// out the map is zoomed (BASE_CLICK_RADIUS is world px).
+const BASE_SCREEN_REACH = 40;
+
+// The army's orders carried out on the spot (solo play). In a game on the
+// home network main.js gives the controls its own (env.orders), which send
+// them to the server instead; either way an order answers { ok: false }
+// when it's refused (or nothing yet, on its way to the server).
+export function localOrders(getState) {
+  return {
+    move: (ids, x, y) => orderMove(getState(), ids, x, y),
+    attack: (ids, targetId) => orderAttack(getState(), ids, targetId),
+    enter: (ids) => orderEnter(getState(), ids),
+    stop: (ids) => orderStop(getState(), ids),
+    entry: (index) => setEntry(getState(), index),
+  };
+}
 
 export function createAttackControls(env) {
   let selected = new Set();
   const groups = createGroups();
-  let box = null; // { x0, y0, x1, y1 (canvas px), start (world), shift, active }
+  let box = null; // { x0, y0, x1, y1 (canvas px), start (world), shift, flag, active }
   let pan = null; // middle-button drag: the last client point
+  let rightPan = null; // right-button press: { x, y (client), moved }
   let touch = null; // { x, y (client), moved }
   let lastClick = null; // { id, time }
   let lastGroupPress = null;
-  let mouse = null; // canvas px, while the pointer is over the map
+  let edge = null; // where the pointer is for edge panning (canvas px; off the canvas too)
   let hover = null; // world point under the pointer
   const markers = [];
 
   const auto = () => Boolean(env.autoArmy?.());
+  const local = localOrders(env.getState);
+  const orders = () => env.orders || local;
   const units = () => env.getState().enemies;
   const alive = () => new Set(units().filter((u) => u.alive).map((u) => u.id));
+  const adding = (evt) => Boolean(evt.shiftKey || evt.ctrlKey || evt.metaKey);
+  const worldPerCanvas = () => env.view().w / env.canvasSize.w;
 
   // The selection without the units destroyed since.
   function pruned() {
@@ -71,35 +99,55 @@ export function createAttackControls(env) {
     return state.walls.find((w) => w.hp > 0 && knownStructure(fog, w) && Math.abs(w.x - p.x) <= 16 && Math.abs(w.y - p.y) <= 16) || null;
   }
 
-  // A right click (or a tap) at world point `p`: the selection's order, and
-  // a mark where it was given.
+  // Whether world point p is on the base's mark.
+  function onBase(p) {
+    const base = env.base();
+    const reach = Math.max(BASE_CLICK_RADIUS, BASE_SCREEN_REACH * worldPerCanvas());
+    return Math.hypot(p.x - base.x, p.y - base.y) <= reach;
+  }
+
+  // What a click at world point p would do with the units picked now:
+  // "attack" a structure, "enter" the base or "move" there (null with
+  // nothing picked).
+  function orderKind(p) {
+    if (!pruned().size) return null;
+    if (onBase(p)) return "enter";
+    return structureAt(p) ? "attack" : "move";
+  }
+
+  // A click (or a tap) at world point `p`: the selection's order, and a
+  // mark where it was given -- a move's where the player clicked, an
+  // attack's on its target, going in's on the base.
   function orderAt(p) {
     const ids = [...pruned()];
     if (!ids.length) return;
-    const state = env.getState();
-    const target = structureAt(p);
-    const result = target ? orderAttack(state, ids, target.id) : orderMove(state, ids, p.x, p.y);
-    if (!result.ok) {
+    const kind = orderKind(p);
+    const target = kind === "attack" ? structureAt(p) : kind === "enter" ? env.base() : p;
+    const result =
+      kind === "enter" ? orders().enter(ids) : kind === "attack" ? orders().attack(ids, target.id) : orders().move(ids, p.x, p.y);
+    if (result && result.ok === false) {
       env.onRefused();
       return;
     }
-    // A move's mark where the player clicked; an attack's (or the base's) on its target.
-    const at = result.stops ? p : result.target;
-    markers.push({ x: at.x, y: at.y, kind: result.stops ? "move" : "attack", t: env.now() });
+    markers.push({ x: target.x, y: target.y, kind: kind === "move" ? "move" : "attack", t: env.now() });
   }
 
   // The entry whose flag (drawn above it, attackDraw.js) is at world point
   // p, or -1.
   function flagAt(p) {
-    const k = env.view().w / env.canvasSize.w; // world px per canvas px
+    const k = worldPerCanvas();
     return env.entries().findIndex((e) => Math.hypot(e.x + 6 * k - p.x, e.y - 22 * k - p.y) <= FLAG_REACH * k);
   }
 
-  function pickClick(p, shift) {
+  // A left click (no drag) at world point p: on a unit, pick it (twice
+  // quickly: its type on screen); on a flag, that entry; elsewhere, the
+  // selection's order.
+  function click(p, shift, flag) {
     const u = unitAt(units(), p.x, p.y);
     if (!u) {
-      if (!shift) selected = new Set();
       lastClick = null;
+      if (flag >= 0) orders().entry(flag);
+      else orderAt(p);
       return;
     }
     const now = env.now();
@@ -119,6 +167,12 @@ export function createAttackControls(env) {
     box: () => (box && box.active ? box : null),
     markers: () => markers,
     hoverWorld: () => hover,
+    // What a left click under the pointer would do now -- "pick" a unit, or
+    // an order (orderKind) -- for the pointer's look and the base's «ENTRAR».
+    hoverOrder() {
+      if (!hover || auto() || box?.active) return null;
+      return unitAt(units(), hover.x, hover.y) ? "pick" : orderKind(hover);
+    },
     orderAt,
 
     // A new game, or back from the menu: nothing selected or marked.
@@ -127,6 +181,7 @@ export function createAttackControls(env) {
       groups.clear();
       box = null;
       pan = null;
+      rightPan = null;
       touch = null;
       lastClick = null;
       lastGroupPress = null;
@@ -142,7 +197,8 @@ export function createAttackControls(env) {
         return;
       }
       if (evt.button === 2) {
-        if (!auto()) orderAt(p);
+        rightPan = { x: evt.clientX, y: evt.clientY, moved: false };
+        evt.target.setPointerCapture?.(evt.pointerId);
         return;
       }
       if (evt.button !== 0) return;
@@ -150,35 +206,30 @@ export function createAttackControls(env) {
         touch = { x: evt.clientX, y: evt.clientY, moved: false };
         return;
       }
-      const flag = flagAt(p);
-      if (flag >= 0) {
-        setEntry(env.getState(), flag);
-        return;
-      }
       const c = env.canvasAt(evt);
-      box = { x0: c.x, y0: c.y, x1: c.x, y1: c.y, start: p, shift: evt.shiftKey, active: false };
+      box = { x0: c.x, y0: c.y, x1: c.x, y1: c.y, start: p, shift: adding(evt), flag: flagAt(p), active: false };
       evt.target.setPointerCapture?.(evt.pointerId);
     },
 
     pointerMove(evt) {
       const c = env.canvasAt(evt);
-      mouse = evt.pointerType === "touch" ? null : c;
-      hover = env.worldAt(evt);
+      hover = evt.pointerType === "touch" ? null : env.worldAt(evt);
       if (pan) {
         const k = env.clientToCanvas();
         env.panCanvas(-(evt.clientX - pan.x) * k, -(evt.clientY - pan.y) * k);
         pan = { x: evt.clientX, y: evt.clientY };
         return;
       }
-      if (touch) {
-        const dx = evt.clientX - touch.x;
-        const dy = evt.clientY - touch.y;
-        if (!touch.moved && Math.hypot(dx, dy) < TAP_THRESHOLD) return;
-        touch.moved = true;
+      const drag = touch || rightPan;
+      if (drag) {
+        const dx = evt.clientX - drag.x;
+        const dy = evt.clientY - drag.y;
+        if (!drag.moved && Math.hypot(dx, dy) < TAP_THRESHOLD) return;
+        drag.moved = true;
         const k = env.clientToCanvas();
         env.panCanvas(-dx * k, -dy * k);
-        touch.x = evt.clientX;
-        touch.y = evt.clientY;
+        drag.x = evt.clientX;
+        drag.y = evt.clientY;
         return;
       }
       if (box) {
@@ -191,6 +242,12 @@ export function createAttackControls(env) {
     pointerUp(evt) {
       if (pan && evt.button === 1) {
         pan = null;
+        return;
+      }
+      if (rightPan && evt.button === 2) {
+        // A right click, not a drag: let go of the selection.
+        if (!rightPan.moved) selected = new Set();
+        rightPan = null;
         return;
       }
       const p = env.worldAt(evt);
@@ -207,7 +264,7 @@ export function createAttackControls(env) {
       const b = box;
       box = null;
       if (!b.active) {
-        pickClick(p, b.shift);
+        click(b.start, b.shift, b.flag);
         return;
       }
       const picked = unitsInBox(units(), b.start.x, b.start.y, p.x, p.y).map((u) => u.id);
@@ -222,8 +279,15 @@ export function createAttackControls(env) {
     },
 
     pointerLeave() {
-      mouse = null;
       hover = null;
+    },
+
+    // Where the pointer is, in canvas px, for panning at the screen's
+    // edges: anywhere in the window -- off the canvas's edge too, or just
+    // gone out of the window across it -- or null (over a panel, a menu
+    // open, the window left behind).
+    pointerAt(point) {
+      edge = point;
     },
 
     // Ctrl/Alt + 1-9, 1-9, S. True if the key was the attack mode's.
@@ -232,13 +296,12 @@ export function createAttackControls(env) {
       const key = attackKey(evt);
       if (!key) return false;
       evt.preventDefault();
-      const state = env.getState();
       if (key.kind === "assign") {
         groups.assign(key.n, [...pruned()]);
         return true;
       }
       if (key.kind === "stop") {
-        if (pruned().size) orderStop(state, [...selected]);
+        if (pruned().size) orders().stop([...selected]);
         return true;
       }
       const ids = groups.members(key.n, units());
@@ -265,9 +328,9 @@ export function createAttackControls(env) {
 
     // Every frame: the screen's edges pan the map, and old marks go.
     update(dt) {
-      if (mouse && !box?.active && !pan) {
-        const dx = mouse.x < EDGE ? -1 : mouse.x > env.canvasSize.w - EDGE ? 1 : 0;
-        const dy = mouse.y < EDGE ? -1 : mouse.y > env.canvasSize.h - EDGE ? 1 : 0;
+      if (edge && !box?.active && !pan && !rightPan?.moved) {
+        const dx = edge.x < EDGE ? -1 : edge.x > env.canvasSize.w - EDGE ? 1 : 0;
+        const dy = edge.y < EDGE ? -1 : edge.y > env.canvasSize.h - EDGE ? 1 : 0;
         if (dx || dy) env.panCanvas(dx * EDGE_SPEED * dt, dy * EDGE_SPEED * dt);
       }
       const now = env.now();
