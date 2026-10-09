@@ -222,7 +222,7 @@ test("wall blocks across the road hold the units up until they shoot their way t
   assert.equal(s.attack.money, money + damage * DAMAGE_REWARD * WALL_REWARD_SHARE);
 });
 
-test("each round's start pays the attacker 150 + 25 per round gone and the defence its budget", () => {
+test("each round's start pays the attacker 250 + 50 per round gone and the defence its budget", () => {
   const s = empty();
   startAttack(s);
   const spent = s.stats.moneySpent;

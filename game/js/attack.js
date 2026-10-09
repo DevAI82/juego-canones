@@ -42,20 +42,25 @@ export const ENTRY_REWARD = 20;
 // A right-click this close to the base sends the units into it.
 export const BASE_CLICK_RADIUS = 60;
 // What the defence earns for each unit it destroys: this share of the
-// defence game's bounty for that type (enemy.js).
-export const BOUNTY_SHARE = 1;
+// defence game's bounty for that type (enemy.js). Tuned with bot games
+// (plan C): an army is dozens of kills a round, and with the whole bounty
+// the defence's money ran away with the game -- at these prices the bot
+// won 17 % of its games on Easy.
+export const BOUNTY_SHARE = 0.25;
 // How close to the map's edge a unit may get.
 const MAP_MARGIN = 10;
 
 // What the attacker is paid as round `round` starts (round 1's: when the
-// preparation starts).
+// preparation starts). Tuned with bot games, like the prices below (plan
+// C; the design's first values were $150 + $25 a round and $15, $25, $35,
+// $90 and $120 -- the bot lost almost every game even on Easy).
 export function roundIncome(round) {
-  return 150 + 25 * (round - 1);
+  return 250 + 50 * (round - 1);
 }
 
 // The shop, cheapest first.
 export const UNIT_ORDER = ["soldier", "motorcycle", "buggy", "tank", "rocket"];
-export const UNIT_PRICES = { soldier: 15, motorcycle: 25, buggy: 35, tank: 90, rocket: 120 };
+export const UNIT_PRICES = { soldier: 10, motorcycle: 15, buggy: 20, tank: 50, rocket: 70 };
 
 // Five upgrades per unit type, five levels each, level k costing
 // baseCost x k; each level multiplies one stat. Units carry no magazine,

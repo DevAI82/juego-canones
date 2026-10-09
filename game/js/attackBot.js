@@ -9,8 +9,10 @@ import { attackMapOf, roadRoute } from "./roadGraph.js";
 import { routeThreat } from "./ai.js";
 import { createAttackState, stepAttack, startAttack, buyUnits, setEntry, orderEnter, upgradeUnitType, ROUNDS } from "./attack.js";
 
-// How many units the bot gathers before it sends them in.
-export const GROUP_SIZE = 12;
+// How many units the bot gathers before it sends them in (bot games:
+// groups of 12 lost more units and won fewer games -- 81/43/3 % on
+// Easy/Normal/Difficult against 94/61/22 % with 25).
+export const GROUP_SIZE = 25;
 
 // The entry whose road to the base runs past the least firepower.
 function safestEntry(state) {
@@ -51,9 +53,11 @@ const UPGRADE_PLAN = [
 
 // The bot's turn as a round starts: a new group gathers at the entry the
 // towers cover least (one already gathering stays where it is); it buys a
-// tank or two to soak up fire (from round 3), buggies with half of the rest
-// of the money and soldiers with what's left -- and with whatever the army's
-// cap leaves over, upgrades, round the plan above (a player would too).
+// tank for every $300 it has to soak up fire (from round 3), a buggy for
+// every $70 of what's left and soldiers with the rest -- and with whatever
+// the army's cap leaves over, upgrades, round the plan above (a player
+// would too). (Buying buggies with half its money made it much weaker:
+// soldiers are the better buy.)
 export function botRound(state) {
   const a = state.attack;
   if (!waiting(state).length) setEntry(state, safestEntry(state));

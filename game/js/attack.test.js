@@ -37,10 +37,10 @@ const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 test("the design's numbers: 15 rounds of a minute, the round's pay, the shop, the cap, the arrivals", () => {
   assert.equal(ROUNDS, 15);
   assert.equal(ROUND_TIME, 60);
-  assert.equal(roundIncome(1), 150);
-  assert.equal(roundIncome(4), 225);
+  assert.equal(roundIncome(1), 250);
+  assert.equal(roundIncome(4), 400);
   assert.deepEqual(UNIT_ORDER, ["soldier", "motorcycle", "buggy", "tank", "rocket"]);
-  assert.deepEqual(UNIT_PRICES, { soldier: 15, motorcycle: 25, buggy: 35, tank: 90, rocket: 120 });
+  assert.deepEqual(UNIT_PRICES, { soldier: 10, motorcycle: 15, buggy: 20, tank: 50, rocket: 70 });
   assert.equal(UNIT_CAP, 60);
   assert.equal(SPAWN_INTERVAL, 0.5);
   assert.deepEqual(
@@ -60,7 +60,7 @@ test("an attack begins in preparation: round 1, that round's money already paid,
   assert.equal(s.mode, "attack");
   assert.equal(s.attack.phase, "prep");
   assert.equal(s.attack.round, 1);
-  assert.equal(s.attack.money, 150);
+  assert.equal(s.attack.money, roundIncome(1));
   assert.equal(s.enemies.length, 0);
   run(s, 5);
   assert.equal(s.attack.roundLeft, ROUND_TIME);
@@ -89,8 +89,8 @@ test("the defence sets up its first towers before the attack, spending its diffi
 test("buying in preparation: the price is paid and the units stand along the active entry's road, waiting for orders", () => {
   const s = empty(2);
   assert.deepEqual(buyUnits(s, "soldier", 3), { ok: true, bought: 3 });
-  assert.equal(s.attack.money, 150 - 3 * 15);
-  assert.equal(s.attack.stats.moneySpent, 45);
+  assert.equal(s.attack.money, roundIncome(1) - 3 * UNIT_PRICES.soldier);
+  assert.equal(s.attack.stats.moneySpent, 3 * UNIT_PRICES.soldier);
   const { entries, graph } = attackMapOf(LEVELS[2]);
   assert.equal(s.enemies.length, 3);
   for (const u of s.enemies) {
@@ -104,9 +104,9 @@ test("buying in preparation: the price is paid and the units stand along the act
 
 test("buying more than the money allows buys what it can; with too little, nothing", () => {
   const s = empty(2);
-  assert.deepEqual(buyUnits(s, "tank", 5), { ok: true, bought: 1 });
-  assert.equal(s.attack.money, 60);
-  assert.deepEqual(buyUnits(s, "rocket"), { ok: false, reason: "cant-afford" });
+  assert.deepEqual(buyUnits(s, "rocket", 5), { ok: true, bought: 3 });
+  assert.equal(s.attack.money, roundIncome(1) - 3 * UNIT_PRICES.rocket);
+  assert.deepEqual(buyUnits(s, "tank"), { ok: false, reason: "cant-afford" });
   assert.deepEqual(buyUnits(s, "dragon"), { ok: false, reason: "unknown-type" });
 });
 
@@ -154,18 +154,18 @@ test("an upgrade costs $60, then $120..., and strengthens every unit of the type
   const [a] = s.enemies;
   a.hp -= 30;
   assert.deepEqual(upgradeUnitType(s, "tank", "armor"), { ok: true });
-  assert.equal(s.attack.money, 1000 - 2 * 90 - 60);
+  assert.equal(s.attack.money, 1000 - 2 * UNIT_PRICES.tank - 60);
   assert.equal(a.maxHp, Math.round(120 / 0.85));
   assert.equal(a.hp, 90 + Math.round(120 / 0.85) - 120);
   assert.deepEqual(upgradeUnitType(s, "tank", "damage"), { ok: true });
-  assert.equal(s.attack.money, 1000 - 2 * 90 - 60 - 60);
+  assert.equal(s.attack.money, 1000 - 2 * UNIT_PRICES.tank - 60 - 60);
   buyUnits(s, "tank");
   const fresh = s.enemies.at(-1);
   assert.equal(fresh.fireDamage, 5 * 1.25);
   assert.equal(fresh.maxHp, Math.round(120 / 0.85));
   assert.equal(fresh.hp, fresh.maxHp);
   assert.equal(a.fireDamage, 5 * 1.25);
-  assert.equal(s.attack.stats.moneySpent, 3 * 90 + 60 + 60);
+  assert.equal(s.attack.stats.moneySpent, 3 * UNIT_PRICES.tank + 60 + 60);
 });
 
 test("range, rate and speed upgrades; five levels at most", () => {

@@ -16,8 +16,8 @@ test("the units' and upgrades' names", () => {
 
 test("a shop card shows the price and the type's upgrades, greyed out without the money or at the cap", () => {
   const s = empty();
-  assert.deepEqual(shopEntry(s, "tank"), { label: "Tanque $90", stars: 0, disabled: false, title: "Clic: comprar 1 · Mayús + clic: comprar 5" });
-  s.attack.money = 50;
+  assert.deepEqual(shopEntry(s, "tank"), { label: "Tanque $50", stars: 0, disabled: false, title: "Clic: comprar 1 · Mayús + clic: comprar 5" });
+  s.attack.money = 40;
   assert.equal(shopEntry(s, "tank").disabled, true);
   assert.equal(shopEntry(s, "tank").title, "No hay dinero suficiente");
   s.attack.money = 10000;
@@ -48,7 +48,7 @@ test("the upgrade rows: level, next level's price, maxed and affordable", () => 
 test("the HUD: the round and its clock (or the preparation), the base's lives, the money, the army", () => {
   const s = empty(3);
   buyUnits(s, "soldier", 2);
-  assert.deepEqual(attackHudLines(s), ["Nivel 3 · Preparación", "Base: ❤ 20", "$120", "Unidades 2/60"]);
+  assert.deepEqual(attackHudLines(s), ["Nivel 3 · Preparación", "Base: ❤ 20", "$230", "Unidades 2/60"]);
   startAttack(s);
   buyUnits(s, "soldier");
   s.attack.round = 4;
