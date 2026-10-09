@@ -24,11 +24,12 @@ test("whole attack games play out on every map: the army keeps to the roads and 
     assert.ok(["attacker", "defense"].includes(s.attack.winner));
     assert.ok(s.attack.round <= ROUNDS);
     // Within the driving model's reach of the road: a parking place up to
-    // ~40 px to one side (three abreast, attack.js), plus up to 40 px
-    // swerving round other units (enemy.js's MAX_SHIFT), plus crowd shoves
-    // (10 games a map measured 49-85 px). Cutting across a block would be
-    // hundreds of px.
-    assert.ok(worst < 95, `level ${level}: a unit ${Math.round(worst)}px off the road`);
+    // ~40 px to one side (three abreast, attack.js), plus swerving round
+    // other units and crowd shoves (30 games a map measured 43-64 px). A
+    // unit setting off from its parking place the other way used to weave
+    // off the road instead of turning round (70-105 px; enemy.js's
+    // turnFirst); cutting across a block would be hundreds of px.
+    assert.ok(worst < 80, `level ${level}: a unit ${Math.round(worst)}px off the road`);
     assert.ok(s.attack.stats.moneySpent > 0 && s.stats.towersBuilt > 0);
   }
 });

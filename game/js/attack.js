@@ -380,7 +380,7 @@ function moveUnits(state, dt) {
     }
     const target = order.kind === "attack" ? structureById(state, order.targetId) : null;
     const inRange = Boolean(target) && Math.hypot(target.x - u.x, target.y - u.y) <= u.fireRange;
-    const { reachedEnd, blockedBy } = stepEnemy(u, dt, { others: state.enemies, hold: inRange, walls, gates, barriers: state.walls });
+    const { reachedEnd, blockedBy } = stepEnemy(u, dt, { others: state.enemies, hold: inRange, walls, gates, barriers: state.walls, turnFirst: true });
     u.blockedBy = blockedBy ?? null;
     if (!reachedEnd) continue;
     if (order.kind === "enter") enterBase(state, u);

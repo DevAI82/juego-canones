@@ -243,3 +243,29 @@ test("stepEnemyFire returns null when no tower in range", () => {
   const shot = stepEnemyFire(e, [{ x: 9999, y: 0, hp: 10 }], 0.016);
   assert.equal(shot, null);
 });
+
+test("with turnFirst, a vehicle facing away from its way turns round before swerving round the units parked ahead", () => {
+  // A tank parked facing back down the road is sent the other way, with two
+  // soldiers standing side by side just ahead of it on its route: swerving
+  // round them while still facing away flipped it from side to side every
+  // tick, so it never turned round and drove off the road (attack-mode bot
+  // games: tanks 95-105 px off the road).
+  const tank = createEnemy("tank", [{ x: 0, y: 0 }, { x: 200, y: 0 }, { x: 400, y: 0 }]);
+  tank.id = 100;
+  tank.angle = Math.PI;
+  tank.v = 0;
+  const parked = [[30, -14], [30, 14]].map(([x, y], i) => {
+    const s = createEnemy("soldier", [{ x, y }, { x, y }]);
+    s.id = i + 1;
+    s.angle = Math.PI / 2;
+    s.v = 0;
+    return s;
+  });
+  let worst = 0;
+  for (let i = 0; i < 60; i++) {
+    stepEnemy(tank, 0.1, { others: [tank, ...parked], turnFirst: true });
+    worst = Math.max(worst, Math.abs(tank.y), -tank.x);
+  }
+  assert.ok(tank.x > 100, `only got to x=${Math.round(tank.x)} in 6 s`);
+  assert.ok(worst < 45, `${Math.round(worst)} px off its way`);
+});

@@ -320,8 +320,13 @@ function aroundBarriers(e, aim, probe, barriers) {
 // level 4's bridges; barriers --
 // the player's wall blocks, which stop a unit that drives into one: it then
 // reports { blockedBy: that block's id } so simulate.js has it shoot the
-// block down.
-export function stepEnemy(enemy, dt, { others = [], hold = false, walls = null, gates = [], barriers = [] } = {}) {
+// block down; turnFirst -- facing more than a right angle away from its
+// way, the unit turns round before it swerves round anyone (the attack
+// mode's units, which set off from a standstill in any direction: swerving
+// round units parked ahead while still facing away flipped them from side
+// to side every tick, so they never turned round and drove off the road;
+// the defence game, tuned without it, keeps its driving as it was).
+export function stepEnemy(enemy, dt, { others = [], hold = false, walls = null, gates = [], barriers = [], turnFirst = false } = {}) {
   if (!enemy.alive) return { reachedEnd: false };
   if (!enemy.path[enemy.waypointIndex + 1]) return { reachedEnd: true };
 
@@ -348,7 +353,10 @@ export function stepEnemy(enemy, dt, { others = [], hold = false, walls = null, 
   const ux = (b.x - a.x) / segLen;
   const uy = (b.y - a.y) / segLen;
   const offset = ux * (enemy.y - a.y) - uy * (enemy.x - a.x);
-  const { shift, follow } = avoidance(enemy, others, ux, uy, cruise, offset, gates);
+  const avoid = avoidance(enemy, others, ux, uy, cruise, offset, gates);
+  const { follow } = avoid;
+  const facingAway = turnFirst && Math.abs(angleDiff(enemy.angle, Math.atan2(look.y - enemy.y, look.x - enemy.x))) > Math.PI / 2;
+  const shift = facingAway ? 0 : avoid.shift;
   const near = barriers.filter((w) => w.hp > 0 && Math.hypot(w.x - enemy.x, w.y - enemy.y) < BARRIER_SCAN);
   let aim = aimPoint(enemy, look, shift, walls, gates);
   if (near.length) aim = aroundBarriers(enemy, aim, pointAhead(enemy, t, h.look + 50), near);
