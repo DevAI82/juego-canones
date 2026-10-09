@@ -129,7 +129,10 @@ function refreshFog(state) {
 // "normal" or "hard"), in preparation: round 1's money paid, no clock
 // running and -- unless aiSetup is false (a loaded game brings its own
 // towers; tests want an empty map) -- the defence's first towers up.
-export function createAttackState(level = 1, difficulty = "normal", { aiSetup = true } = {}) {
+// `defender`: "computer" (defenseAI.js), or "player" -- a person on another
+// computer at home (docs/2026-10-09-uno-contra-otro-design.md), who gets
+// the difficulty's money and builds their own towers.
+export function createAttackState(level = 1, difficulty = "normal", { aiSetup = true, defender = "computer" } = {}) {
   const state = createGameState(level);
   const L = levelData(state.level);
   const diff = DIFFICULTIES[difficulty] ? difficulty : "normal";
@@ -138,6 +141,7 @@ export function createAttackState(level = 1, difficulty = "normal", { aiSetup = 
   state.economy.money = DIFFICULTIES[diff].startMoney;
   state.attack = {
     difficulty: diff,
+    defender: defender === "player" ? "player" : "computer",
     phase: "prep",
     round: 1,
     roundLeft: ROUND_TIME,
@@ -152,10 +156,12 @@ export function createAttackState(level = 1, difficulty = "normal", { aiSetup = 
     stats: { moneySpent: 0, moneyEarned: 0, livesTaken: 0 },
     fog: createFog(L.worldWidth, L.worldHeight),
   };
-  if (aiSetup) aiPrepare(state, diff);
+  if (aiSetup && state.attack.defender === "computer") aiPrepare(state, diff);
   refreshFog(state);
   return state;
 }
+
+const byComputer = (state) => state.attack.defender !== "player";
 
 // Gives a unit an order and the route to carry it out.
 function giveRoute(u, order, route) {
@@ -434,7 +440,14 @@ export function stepAttack(state, dt) {
   if (!playing(state) || state.paused) return;
   const a = state.attack;
   a.roundJustStarted = false;
-  if (a.phase !== "battle") return;
+  if (a.phase !== "battle") {
+    // No clock runs in preparation, so towers put up then are ready at
+    // once -- like the computer's opening towers (aiPrepare) -- and the
+    // attacker's units see them where they stand.
+    for (const t of state.towers) t.buildTimeRemaining = 0;
+    refreshFog(state);
+    return;
+  }
 
   a.roundLeft -= dt;
   if (a.roundLeft <= 0) {
@@ -447,9 +460,9 @@ export function stepAttack(state, dt) {
     a.roundJustStarted = true;
     a.money += roundIncome(a.round);
     state.economy.money += DIFFICULTIES[a.difficulty].perRound;
-    aiStep(state, a.difficulty);
+    if (byComputer(state)) aiStep(state, a.difficulty);
     a.aiTimer = AI_PERIOD;
-  } else {
+  } else if (byComputer(state)) {
     a.aiTimer -= dt;
     if (a.aiTimer <= 0) {
       a.aiTimer += AI_PERIOD;
@@ -495,6 +508,7 @@ export function createAttackSave(state, now = new Date()) {
     savedAt: now.toISOString(),
     level: state.level,
     difficulty: a.difficulty,
+    defender: a.defender,
     phase: a.phase,
     round: a.round,
     money: a.money,
@@ -530,7 +544,7 @@ function readableAttack(save) {
 // read. A damaged field takes its default instead of breaking the load.
 export function restoreAttackSave(save) {
   if (!readableAttack(save)) return null;
-  const state = createAttackState(save.level, save.difficulty, { aiSetup: false });
+  const state = createAttackState(save.level, save.difficulty, { aiSetup: false, defender: save.defender });
   const a = state.attack;
   a.phase = save.phase === "battle" ? "battle" : "prep";
   // It stands at the start of its round: a save can be made at once, and
@@ -577,6 +591,7 @@ export function attackSaveSummary(save) {
     level: save.level,
     round: clamp(Math.floor(num(save.round, 1)), 1, ROUNDS),
     difficulty: DIFFICULTIES[save.difficulty] ? save.difficulty : "normal",
+    defender: save.defender === "player" ? "player" : "computer",
     lives: clamp(Math.floor(num(defense.lives, 20)), 1, 20),
     money: Math.max(0, Math.floor(num(save.money, 0))),
     savedAt: typeof save.savedAt === "string" ? save.savedAt : null,
