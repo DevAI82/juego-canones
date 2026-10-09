@@ -4,8 +4,24 @@
     {
       "name": "td-game",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["-m", "http.server", "8420", "--directory", "game"],
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8420",
+        "--directory",
+        "game"
+      ],
       "port": 8420
+    },
+    {
+      "name": "td-test",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "tools/serve_nocache.py",
+        "game",
+        "8421"
+      ],
+      "port": 8421
     }
   ]
 }
