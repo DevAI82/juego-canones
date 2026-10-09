@@ -40,8 +40,12 @@ const BASE_PULL_REACH = 600; // px from the base over which that pull fades out
 // would reach the first ENTRY_SAFE_ROAD px of an entry's road -- where
 // bought units arrive and line up -- or they were shot as they arrived,
 // before they could be given an order (bot games: whole armies lost while
-// gathering).
+// gathering). That stretch always ends BASE_APPROACH px of road short of
+// the base, though, so the base's own approaches can be guarded: level 3's
+// southern road is only 533 px long, and a full stretch from it reached
+// inside the fortress (bot games: Normal lost almost every game there).
 export const ENTRY_SAFE_ROAD = 320;
+export const BASE_APPROACH = 400;
 
 // The level's roads as points every SAMPLE_STEP px, each worth 1 per road
 // to the base it lies on -- a stretch several roads share is worth more --
@@ -66,10 +70,11 @@ function planOf(level) {
   };
   for (const route of attackMapOf(level).routes) add(route, 1);
   for (const street of level.streets || []) add(street, 0.5);
-  // Points along the first ENTRY_SAFE_ROAD px of each entry's road.
+  // Points along the first ENTRY_SAFE_ROAD px of each entry's road (but
+  // never its last BASE_APPROACH px).
   const safe = [];
   for (const { route } of attackMapOf(level).entries) {
-    for (let s = 0; s <= Math.min(ENTRY_SAFE_ROAD, routeLength(route)); s += 20) safe.push(pointAlong(route, s));
+    for (let s = 0; s <= Math.min(ENTRY_SAFE_ROAD, routeLength(route) - BASE_APPROACH); s += 20) safe.push(pointAlong(route, s));
   }
   const reach = level.buildSlots.map((slot) => {
     const byType = {};

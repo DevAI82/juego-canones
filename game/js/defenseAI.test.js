@@ -1,11 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { aiStep, aiPrepare, DIFFICULTIES, AI_PERIOD, ENTRY_SAFE_ROAD } from "./defenseAI.js";
+import { aiStep, aiPrepare, DIFFICULTIES, AI_PERIOD, ENTRY_SAFE_ROAD, BASE_APPROACH } from "./defenseAI.js";
 import { TOWER_TYPES } from "./tower.js";
 import { createGameState, placeTower } from "./simulate.js";
 import { createEnemy } from "./enemy.js";
 import { LEVELS } from "./levels.js";
-import { attackMapOf, pointAlong } from "./roadGraph.js";
+import { attackMapOf, pointAlong, routeLength } from "./roadGraph.js";
 
 const best = () => 0; // always takes the best option
 
@@ -137,7 +137,7 @@ test("the defence leaves the army somewhere to come in: no tower reaches the fir
     }
     assert.ok(s.towers.length >= 3);
     for (const { route } of attackMapOf(LEVELS[level]).entries) {
-      for (let d = 0; d <= ENTRY_SAFE_ROAD; d += 20) {
+      for (let d = 0; d <= Math.min(ENTRY_SAFE_ROAD, routeLength(route) - BASE_APPROACH); d += 20) {
         const p = pointAlong(route, d);
         for (const t of s.towers) {
           assert.ok(Math.hypot(t.x - p.x, t.y - p.y) > t.range, `level ${level}: a ${t.type} (range ${Math.round(t.range)}) reaches ${d}px down an entry's road`);
@@ -145,6 +145,23 @@ test("the defence leaves the army somewhere to come in: no tower reaches the fir
       }
     }
   }
+});
+
+test("an entry's safe stretch stops short of the base: level 3's short southern road is guarded inside the fortress", () => {
+  // Entry 4's road is 533 px long, through the fortress's south gate, and
+  // the road from entry 3 joins it there: a full ENTRY_SAFE_ROAD from that
+  // entry reached inside the fortress and left the base's southern approach
+  // with no tower (bot games: Normal lost almost every game that way).
+  const s = defence(3, DIFFICULTIES.normal.startMoney);
+  aiPrepare(s, "normal", { rand: best });
+  for (let i = 0; i < 6; i++) {
+    s.economy.money += 300;
+    aiStep(s, "normal", { rand: best });
+  }
+  const { route } = attackMapOf(LEVELS[3]).entries.find((e) => routeLength(e.route) < 600);
+  const p = pointAlong(route, routeLength(route) - 250);
+  const covering = s.towers.filter((t) => Math.hypot(t.x - p.x, t.y - p.y) <= t.range);
+  assert.ok(covering.length >= 2, `${covering.length} towers cover the road 250 px before the base`);
 });
 
 test("the defence guards the base's approaches first: every attacker has to pass there", () => {
