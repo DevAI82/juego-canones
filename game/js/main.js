@@ -55,6 +55,7 @@ import {
   drawSelectionBox,
 } from "./attackDraw.js";
 import { initShop, updateShop, initUnitUpgrades, updateUnitUpgrades, attackHudLines, attackSummary } from "./attackUI.js";
+import { BUILDING_TYPES, BUILDING_ORDER, PHASE_COUNT, SHEET_COLS, buildingProgress, constructionFrame } from "./buildings.js";
 
 // Browsers refuse to start any audio (synthesized SFX or the background
 // music) before a real user gesture. Fire once, on whichever happens
@@ -228,6 +229,12 @@ const sprites = {
   explosion: loadImage("assets/explosion.png"),
   projectile: loadImage("assets/projectile.png"),
 };
+// The support buildings (buildings.js): each finished, and its four
+// construction phases in one sheet.
+for (const key of BUILDING_ORDER) {
+  sprites[`building_${key}`] = loadImage(BUILDING_TYPES[key].sprite);
+  sprites[`building_${key}_build`] = loadImage(BUILDING_TYPES[key].sheet);
+}
 
 // Build-animation sheets: 8x6 grids of 48 frames each, keyed from the 720p
 // 4-second build videos (tools/extract_all_turrets.py -- COLS/ROWS there
@@ -656,34 +663,37 @@ function drawTowerBuilding(t) {
     drawTurretSprite(t, Math.max(0.2, progress));
   }
 
-  // Tactical RTS / Command & Conquer Progress Bar
-  const barW = 56;
+  drawBuildBar(t.x, t.y - 44, progress);
+}
+
+// The works' progress bar, Command & Conquer style -- a tower's or a
+// building's -- centred on x, its top at barY.
+function drawBuildBar(x, barY, progress, barW = 56) {
   const barH = 6;
-  const barY = t.y - 44;
 
   ctx.save();
   // Outer frame with tactical bevel
   ctx.fillStyle = "rgba(10, 15, 20, 0.9)";
-  ctx.fillRect(t.x - barW / 2 - 2, barY - 2, barW + 4, barH + 4);
+  ctx.fillRect(x - barW / 2 - 2, barY - 2, barW + 4, barH + 4);
   ctx.strokeStyle = "#4fd1c5";
   ctx.lineWidth = 1;
-  ctx.strokeRect(t.x - barW / 2 - 2, barY - 2, barW + 4, barH + 4);
+  ctx.strokeRect(x - barW / 2 - 2, barY - 2, barW + 4, barH + 4);
 
   // Background slot
   ctx.fillStyle = "#1a202c";
-  ctx.fillRect(t.x - barW / 2, barY, barW, barH);
+  ctx.fillRect(x - barW / 2, barY, barW, barH);
 
   // Energetic cyan progress fill
-  const grad = ctx.createLinearGradient(t.x - barW / 2, barY, t.x + barW / 2, barY);
+  const grad = ctx.createLinearGradient(x - barW / 2, barY, x + barW / 2, barY);
   grad.addColorStop(0, "#319795");
   grad.addColorStop(0.5, "#38b2ac");
   grad.addColorStop(1, "#4fd1c5");
   ctx.fillStyle = grad;
-  ctx.fillRect(t.x - barW / 2, barY, barW * progress, barH);
+  ctx.fillRect(x - barW / 2, barY, barW * progress, barH);
 
   // Top gloss highlight
   ctx.fillStyle = "rgba(255, 255, 255, 0.45)";
-  ctx.fillRect(t.x - barW / 2, barY, barW * progress, 2);
+  ctx.fillRect(x - barW / 2, barY, barW * progress, 2);
   ctx.restore();
 }
 
@@ -762,6 +772,74 @@ const TOWER_RESTING_ANGLES = {
   double: -Math.PI / 2,
   laser: -Math.PI / 2,
 };
+
+// A support building (buildings.js) at its place on the map (b.x, b.y: the
+// middle of its ground), with its works going on or finished: the phase
+// of the works (constructionFrame) -- fading into the next, and at the
+// end into the finished building, like a tower's build animation -- and
+// the progress bar; once finished, its health bar when it's been hit.
+const BUILDING_DRAW_WIDTH = 150; // world px: about two build slots across
+// The pictures stand their isometric ground in their lower part: the
+// building's place is drawn this share of the picture's width above its
+// bottom edge.
+const BUILDING_GROUND = 0.3;
+
+function drawBuilding(b) {
+  const finished = sprites[`building_${b.type}`];
+  const sheet = sprites[`building_${b.type}_build`];
+  const w = BUILDING_DRAW_WIDTH;
+  const h = ready(finished) ? (w * finished.naturalHeight) / finished.naturalWidth : w;
+  const left = b.x - w / 2;
+  const top = b.y + w * BUILDING_GROUND - h;
+  const progress = buildingProgress(b);
+  const frame = constructionFrame(progress);
+  const drawPhase = (phase, alpha) => {
+    if (alpha <= 0) return;
+    ctx.globalAlpha = alpha;
+    if (phase < PHASE_COUNT && ready(sheet)) {
+      const cw = sheet.naturalWidth / SHEET_COLS;
+      const ch = sheet.naturalHeight / Math.ceil(PHASE_COUNT / SHEET_COLS);
+      ctx.drawImage(sheet, (phase % SHEET_COLS) * cw, Math.floor(phase / SHEET_COLS) * ch, cw, ch, left, top, w, h);
+    } else if (ready(finished)) {
+      ctx.drawImage(finished, left, top, w, h);
+    } else {
+      // (pictures still loading: the building's ground)
+      ctx.fillStyle = "#6b6a5a";
+      ctx.beginPath();
+      ctx.moveTo(b.x - w / 2, b.y);
+      ctx.lineTo(b.x, b.y - w / 4);
+      ctx.lineTo(b.x + w / 2, b.y);
+      ctx.lineTo(b.x, b.y + w / 4);
+      ctx.closePath();
+      ctx.fill();
+    }
+  };
+  ctx.save();
+  drawPhase(frame.from, 1);
+  if (frame.to !== frame.from) drawPhase(frame.to, frame.mix);
+  ctx.restore();
+  const barY = b.y - w * 0.42;
+  if (progress < 1) drawBuildBar(b.x, barY, progress, 80);
+  else if (b.hp < b.maxHp) drawTowerBar(b.x, barY, 5, 80, b.hp / b.maxHp, "#3c3", "#400");
+  if (b.id != null && b.id === selectedId) {
+    ctx.save();
+    ctx.strokeStyle = "#5fe0f0";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(b.x - w / 2, b.y);
+    ctx.lineTo(b.x, b.y - w / 4);
+    ctx.lineTo(b.x + w / 2, b.y);
+    ctx.lineTo(b.x, b.y + w / 4);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+// Furthest first, so a nearer building stands in front of one behind it.
+function drawBuildings(buildings) {
+  for (const b of [...buildings].sort((p, q) => p.y - q.y)) drawBuilding(b);
+}
 
 // The player's concrete wall blocks (walls.js): beveled slabs drawn as one
 // continuous wall where blocks touch (no edge between neighbours), cracking
@@ -2319,6 +2397,8 @@ function loop(now) {
     drawAttackWorld(view, now);
   } else {
     drawWalls(view.walls || []);
+    // The support buildings (buildings.js) -- none in any mode yet.
+    drawBuildings(state.buildings || []);
     for (const t of view.towers) drawTower(t);
     for (const e of view.enemies) drawEnemy(e);
     drawForeground(state.level);
