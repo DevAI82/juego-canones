@@ -129,13 +129,15 @@ Solo en modo ataque, y solo para el atacante: la defensa del ordenador ve todo e
 
 ## 4. Controles (al estilo Command & Conquer)
 
+**Cambio pedido por el usuario (2026-10-09):** «el botón derecho abre muchas veces un menú de opciones y no responde bien el ejército, creo que mejor será que se mueven usando el botón izquierdo». Las órdenes pasan al botón izquierdo, como en el Command & Conquer original. El derecho suelta la selección con un clic y mueve el mapa arrastrando, como en el Generals. El menú del navegador ya no aparece con el botón derecho en ningún sitio del juego.
+
 ### 4.1 Seleccionar
 
-- **Clic izquierdo** en una unidad propia: la selecciona (y suelta las demás).
-- **Arrastrar con el botón izquierdo:** recuadro; selecciona todas las unidades propias de dentro.
-- **Mayús + clic** o **Mayús + recuadro:** añade o quita de la selección.
+- **Clic izquierdo** en una unidad propia: la selecciona (y suelta las demás), aunque ya hubiera otras seleccionadas.
+- **Arrastrar con el botón izquierdo:** recuadro; selecciona todas las unidades propias de dentro. También empezando sobre la bandera de una entrada, que es donde esperan las unidades compradas: antes eso cambiaba la entrada activa en vez de hacer el recuadro (fallo visto por el usuario: «no puedo seleccionar unidades con el recuadro»).
+- **Mayús (o Ctrl) + clic** o **Mayús (o Ctrl) + recuadro:** añade o quita de la selección.
 - **Doble clic** en una unidad: selecciona todas las de su tipo que se ven en pantalla.
-- Clic izquierdo en el suelo (sin arrastrar): suelta la selección.
+- **Clic derecho** (sin arrastrar) o **Esc:** suelta la selección.
 
 ### 4.2 Grupos
 
@@ -143,11 +145,14 @@ Solo en modo ataque, y solo para el atacante: la defensa del ordenador ve todo e
 - **1…9:** selecciona ese grupo (las unidades destruidas desaparecen de él).
 - **Pulsar el número dos veces seguidas** (en medio segundo): la cámara se centra en el grupo.
 
-### 4.3 Órdenes (clic derecho)
+### 4.3 Órdenes (clic izquierdo con unidades seleccionadas)
 
 - **En el suelo:** las seleccionadas van al punto de calle más cercano al clic, por el camino más corto de la red de calles, y allí se paran. Se reparten a lo largo de la calle, una detrás de otra y alternando lados, en vez de amontonarse. Aparece una marca verde.
-- **Sobre una torre o un muro:** cada unidad avanza por la calle hasta tenerlo a tiro, se para y lo ataca hasta destruirlo; después se queda quieta. Aparece una marca roja.
-- **Sobre la base** (o muy cerca): van a ella y entran.
+- **Sobre una torre o un muro:** cada unidad avanza por la calle hasta tenerlo a tiro, se para y lo ataca hasta destruirlo; después se queda quieta. Aparece una marca roja. El cursor se vuelve una cruz.
+- **Sobre la base** (a menos de 100 px, o sobre su marca en la pantalla por lejos que esté el zoom): van a ella y entran. Al pasar el ratón con unidades seleccionadas, la marca de la base se pone verde y dice «ENTRAR».
+- **Llegar a la base es entrar** (petición del usuario: «llego a la base y no sé cómo conquistarla, no hace nada»): cualquier unidad que llegue a menos de 50 px de la base entra, tenga la orden que tenga.
+- **Sin unidades seleccionadas,** un clic en el suelo no hace nada; en una bandera, elige la entrada activa.
+- **Ayuda en pantalla:** con unidades seleccionadas, arriba se lee «Clic: ir · en una torre: atacarla · en la BASE: entrar · clic derecho: soltar»; sin ninguna, cómo elegirlas y cómo mover el mapa.
 - **Tecla S:** paran donde estén.
 - Una orden nueva sustituye a la anterior.
 - **Nada se mueve sin orden.** Sin órdenes, o mientras se mueven, disparan solas a las torres que tengan a tiro, sin cambiar de camino. Un muro que corta la calle las detiene y le disparan hasta destruirlo, como ahora.
@@ -155,7 +160,9 @@ Solo en modo ataque, y solo para el atacante: la defensa del ordenador ve todo e
 ### 4.4 Otras teclas y cámara
 
 - **Esc:** si hay unidades seleccionadas, primero las suelta; si no, abre el menú de pausa.
-- **Cámara:** flechas del teclado, ratón en el borde de la pantalla, arrastrar con el botón central, minimapa y rueda para el zoom. WASD no mueve la cámara en este modo, porque la S es «parar».
+- **Cámara:** flechas del teclado, ratón en el borde de la pantalla, arrastrar con el botón derecho o con el central, minimapa y rueda para el zoom. WASD no mueve la cámara en este modo, porque la S es «parar».
+- **Ratón en el borde** (petición del usuario: «desplazarme por el mapa con el cursor del ratón»): funciona en toda la ventana, también junto a los paneles; si el ratón sale de la ventana por un borde, el mapa sigue moviéndose hacia ese lado hasta que vuelve. Se para sobre un panel o un botón y al cambiar a otra ventana.
+- **Minimapa:** clic izquierdo o arrastrar mueve la cámara; clic derecho manda allí la selección.
 
 ### 4.5 Móvil: ejército automático (petición del usuario, 2026-10-09)
 
@@ -171,7 +178,7 @@ Solo en modo ataque, y solo para el atacante: la defensa del ordenador ve todo e
 
 - **Tienda de unidades** (donde está el menú de construir en modo defensa): cinco tarjetas con precio y nivel de mejora. **Clic** compra 1 unidad; **Mayús + clic** compra 5 (o las que permita el dinero y el tope). En gris si no hay dinero o se ha llegado al tope.
 - **Entradas:** una bandera en cada entrada del mapa y en el minimapa. Clic en una bandera la hace la **entrada activa** (resaltada); ahí aparecen las compras.
-- **Panel de mejoras:** al seleccionar unidades aparece el panel de mejoras de su tipo (daño, alcance, blindaje, cadencia, velocidad), con el mismo aspecto que el de las torres; si la selección mezcla tipos, una pestaña por tipo.
+- **Panel de mejoras:** al seleccionar unidades aparece el panel de mejoras de su tipo (daño, alcance, blindaje, cadencia, velocidad), con el mismo aspecto que el de las torres; si la selección mezcla tipos, una pestaña por tipo. Sale **plegado**: solo las pestañas y «▲ Mejoras», que lo despliega («▼ Ocultar» lo vuelve a plegar). Desplegado tapaba la parte de abajo del mapa justo al dar órdenes (en el nivel 4, la base).
 - **Unidades seleccionadas:** anillo verde, barra de vida siempre visible y número de grupo, si tienen.
 - **Torres de la defensa:** al pasar el ratón por encima se dibuja su alcance.
 - **Marcador:** ronda (*n*/15), tiempo que queda de la ronda, dinero, vidas de la base y unidades en el mapa (*n*/60).

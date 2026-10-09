@@ -133,7 +133,10 @@ export function updateShop(container, state) {
 
 // The upgrade panel of the selected units' types, built once: a tab per
 // type, and the five upgrades of the active one laid out like the towers'.
-export function initUnitUpgrades(container, { onUpgrade, onTab }) {
+// The upgrades fold away under a button (onToggle): the panel comes up
+// with every selection, and open it hid the bottom of the map just where
+// orders were being given (level 4's base, per user request).
+export function initUnitUpgrades(container, { onUpgrade, onTab, onToggle }) {
   container.innerHTML = "";
   const tabs = document.createElement("div");
   tabs.className = "unit-tabs";
@@ -146,6 +149,10 @@ export function initUnitUpgrades(container, { onUpgrade, onTab }) {
     tabs.appendChild(tab);
     tabRefs[type] = tab;
   }
+  const toggle = document.createElement("button");
+  toggle.className = "unit-tab unit-upgrade-toggle";
+  toggle.addEventListener("click", () => onToggle());
+  tabs.appendChild(toggle);
   const cols = document.createElement("div");
   cols.className = "unit-upgrade-cols";
   const colRefs = {};
@@ -183,15 +190,18 @@ export function initUnitUpgrades(container, { onUpgrade, onTab }) {
     colRefs[skill] = { levelEl, costEl, btn, pipEls };
   }
   container.append(tabs, cols);
-  container._unitUpgradeRefs = { tabRefs, colRefs };
+  container._unitUpgradeRefs = { tabRefs, colRefs, cols, toggle };
 }
 
 // Every frame. `types`: the unit types in the selection (none: the panel
-// hides); `active`: the one whose upgrades show.
-export function updateUnitUpgrades(container, state, types, active) {
+// hides); `active`: the one whose upgrades show; `open`: shown, or folded
+// away to its tabs.
+export function updateUnitUpgrades(container, state, types, active, open = true) {
   container.classList.toggle("hidden", !types.length || !active);
   if (!types.length || !active) return;
-  const { tabRefs, colRefs } = container._unitUpgradeRefs;
+  const { tabRefs, colRefs, cols, toggle } = container._unitUpgradeRefs;
+  cols.classList.toggle("hidden", !open);
+  toggle.textContent = open ? "▼ Ocultar" : "▲ Mejoras";
   for (const type of UNIT_ORDER) {
     tabRefs[type].classList.toggle("hidden", !types.includes(type));
     tabRefs[type].classList.toggle("active", type === active);

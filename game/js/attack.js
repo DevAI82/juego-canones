@@ -301,7 +301,7 @@ function structureById(state, id) {
   return state.towers.find((t) => t.id === id && t.hp > 0) || state.walls.find((w) => w.id === id && w.hp > 0) || null;
 }
 
-// Right-click on the ground: the units drive to the road point nearest
+// A click on the ground: the units drive to the road point nearest
 // (x, y), spread out along the road there (roadGraph.js's spreadStops),
 // and stop -- or, a click that close to the base, go into it.
 export function orderMove(state, ids, x, y) {
@@ -316,7 +316,7 @@ export function orderMove(state, ids, x, y) {
   return { ok: true, stops: stops.map((p) => ({ x: p.x, y: p.y })) };
 }
 
-// Right-click on a tower or wall block: each unit drives along the road
+// A click on a tower or wall block: each unit drives along the road
 // until it has it in range, stops there and fires at it until it's down.
 export function orderAttack(state, ids, structureId) {
   if (!playing(state)) return { ok: false, reason: "game-over" };

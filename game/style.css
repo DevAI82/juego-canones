@@ -940,3 +940,5 @@ body.menu-open #nav-controls { display: none; }
 }
 .unit-tab.active { color: #ffe27a; background: #2b5b62; border-color: #ffe27a; }
 .unit-tab.hidden { display: none; }
+.unit-upgrade-cols.hidden { display: none; }
+.unit-upgrade-toggle { color: #ffe27a; border-color: #ffe27a; }

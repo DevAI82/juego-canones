@@ -115,14 +115,16 @@ export function drawEntryFlags(ctx, entries, active, s) {
   });
 }
 
-// The base, always marked -- even under the fog: it's the target.
-export function drawBaseMarker(ctx, base, time, s) {
+// The base, always marked -- even under the fog: it's the target. Under
+// the pointer with units picked (`entering`), green with «ENTRAR»: a click
+// there sends them in.
+export function drawBaseMarker(ctx, base, time, s, entering = false) {
   const pulse = 0.5 + 0.5 * Math.sin(time * 3);
-  const r = (22 + 4 * pulse) * s;
+  const r = ((entering ? 28 : 22) + 4 * pulse) * s;
   ctx.save();
   ctx.translate(base.x, base.y);
-  ctx.strokeStyle = `rgba(255, 70, 60, ${0.6 + 0.4 * pulse})`;
-  ctx.lineWidth = 3 * s;
+  ctx.strokeStyle = entering ? `rgba(93, 255, 122, ${0.7 + 0.3 * pulse})` : `rgba(255, 70, 60, ${0.6 + 0.4 * pulse})`;
+  ctx.lineWidth = (entering ? 4 : 3) * s;
   ctx.beginPath();
   ctx.arc(0, 0, r, 0, Math.PI * 2);
   ctx.stroke();
@@ -137,9 +139,10 @@ export function drawBaseMarker(ctx, base, time, s) {
   ctx.textAlign = "center";
   ctx.lineWidth = 3 * s;
   ctx.strokeStyle = "rgba(0, 0, 0, 0.85)";
-  ctx.fillStyle = "#ff8a80";
-  ctx.strokeText("BASE", 0, -r - 10 * s);
-  ctx.fillText("BASE", 0, -r - 10 * s);
+  ctx.fillStyle = entering ? "#5dff7a" : "#ff8a80";
+  const label = entering ? "ENTRAR" : "BASE";
+  ctx.strokeText(label, 0, -r - 10 * s);
+  ctx.fillText(label, 0, -r - 10 * s);
   ctx.restore();
 }
 

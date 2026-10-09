@@ -1112,14 +1112,26 @@ function drawAttackHud() {
   ctx.fillText(head, 20, 30);
   ctx.fillText(rest.join("   ·   "), 20, 55);
   ctx.textAlign = "center";
-  if (state.attack.phase === "prep" && !state.gameOver) {
+  // With the mouse, what the clicks do (per user request: «no sé cómo
+  // conquistarla»): with units picked, their orders; with none, how to
+  // pick them.
+  const mouseArmy = !autoArmyOn() && !state.gameOver;
+  if (mouseArmy && attackControls.selectedIds().size) {
+    ctx.font = "bold 16px sans-serif";
+    ctx.fillStyle = "#9dffb0";
+    ctx.fillText("Clic: ir · en una torre: atacarla · en la BASE: entrar · clic derecho: soltar", CANVAS_WIDTH / 2, 30);
+  } else if (state.attack.phase === "prep" && !state.gameOver) {
     ctx.font = "bold 18px sans-serif";
     ctx.fillStyle = "#ffe27a";
     ctx.fillText(
-      autoArmyOn() ? "Compra tu ejército y pulsa «¡Al ataque!»: irá solo" : "Compra tu ejército, dale órdenes y pulsa «¡Al ataque!»",
+      autoArmyOn() ? "Compra tu ejército y pulsa «¡Al ataque!»: irá solo" : "Compra tu ejército, elígelo con clic o recuadro y pulsa «¡Al ataque!»",
       CANVAS_WIDTH / 2,
       30,
     );
+  } else if (mouseArmy) {
+    ctx.font = "16px sans-serif";
+    ctx.fillStyle = "rgba(255, 255, 255, 0.75)";
+    ctx.fillText("Elige unidades con clic o recuadro · arrastra con el botón derecho para mover el mapa", CANVAS_WIDTH / 2, 30);
   }
   // The automatic army's reinforcements wait at the entry for the next round.
   const waiting = autoArmyOn() && state.attack.phase === "battle" && !state.gameOver ? state.enemies.filter((u) => u.alive && !u.order).length : 0;
@@ -1174,12 +1186,17 @@ initShop(attackShopEl, {
 });
 const unitUpgradeEl = document.getElementById("unit-upgrade-panel");
 let unitUpgradeType = null; // the type whose upgrades show (a tab per type in the selection)
+let unitUpgradesOpen = false; // folded away to its tabs until the player opens it
 initUnitUpgrades(unitUpgradeEl, {
   onUpgrade: (skill) => {
     if (attacking() && unitUpgradeType) upgradeUnitType(state, unitUpgradeType, skill);
   },
   onTab: (type) => {
     unitUpgradeType = type;
+    unitUpgradesOpen = true;
+  },
+  onToggle: () => {
+    unitUpgradesOpen = !unitUpgradesOpen;
   },
 });
 
@@ -1641,10 +1658,22 @@ const attackControls = createAttackControls({
   },
   centerOn: centerCameraOn,
   entries: () => attackMapOf(levelData(state.level)).entries,
+  base: () => attackMapOf(levelData(state.level)).base,
   now: () => performance.now() / 1000,
   onRefused: () => playSound("error"),
   autoArmy: () => autoArmyOn(),
 });
+
+// The pointer's look over an attack's map: a hand over a unit a click
+// would pick, a crosshair where a click would attack or go into the base.
+let mapCursor = "";
+function updateMapCursor() {
+  const look = attacking() && started && !state.gameOver && !menu.isOpen() ? attackControls.hoverOrder() : null;
+  const cursor = look === "pick" ? "pointer" : look === "attack" || look === "enter" ? "crosshair" : "";
+  if (cursor === mapCursor) return;
+  mapCursor = cursor;
+  canvas.style.cursor = cursor;
+}
 
 // The phone's automatic army (autoArmy.js), per user request: on a touch
 // screen -- or with Ajustes › Controles set to «Móvil» -- the player only
@@ -1713,7 +1742,27 @@ canvas.addEventListener("mousedown", (evt) => {
   if (evt.button === 1) evt.preventDefault();
 });
 canvas.addEventListener("pointerleave", () => attackControls.pointerLeave());
-canvas.addEventListener("contextmenu", (evt) => evt.preventDefault());
+// The right button is the game's (it lets go of an attack's units, and
+// drags the map): never the browser's menu, wherever on the page it's
+// pressed -- per user request, it kept popping up over the map. A name
+// being typed keeps it, for pasting.
+window.addEventListener("contextmenu", (evt) => {
+  if (!isTypingTarget(evt.target)) evt.preventDefault();
+});
+
+// Where the mouse is, for an attack's panning at the screen's edges (per
+// user request: «desplazarme por el mapa ... con el cursor del ratón»): over
+// the map, or gone out of the window across one of its edges -- the map
+// keeps sliding that way until the pointer comes back -- but not over a
+// panel or a button, nor once the window's left behind.
+window.addEventListener("pointermove", (evt) => {
+  if (evt.pointerType !== "mouse") return;
+  attackControls.pointerAt(evt.target === canvas ? canvasPoint(evt) : null);
+});
+document.addEventListener("mouseout", (evt) => {
+  if (!evt.relatedTarget) attackControls.pointerAt(canvasPoint(evt));
+});
+window.addEventListener("blur", () => attackControls.pointerAt(null));
 
 canvas.addEventListener("pointerdown", (evt) => {
   if (pinchDown(evt)) return;
@@ -2021,7 +2070,8 @@ function drawAttackWorld(view, now) {
   drawAirEffects(fx, ctx);
   fogLayer.draw(ctx, fog);
   const map = attackMapOf(levelData(state.level));
-  drawBaseMarker(ctx, map.base, now / 1000, 1 / zoom);
+  const order = attackControls.hoverOrder();
+  drawBaseMarker(ctx, map.base, now / 1000, 1 / zoom, order === "enter");
   drawEntryFlags(ctx, map.entries, state.attack.entry, 1 / zoom);
   drawOrderMarkers(ctx, attackControls.markers(), now / 1000);
   const hover = attackControls.hoverWorld();
@@ -2059,7 +2109,7 @@ function updateAttackPanels() {
   const picked = attackControls.selected();
   const types = UNIT_ORDER.filter((type) => picked.some((u) => u.type === type));
   if (!types.includes(unitUpgradeType)) unitUpgradeType = types[0] || null;
-  updateUnitUpgrades(unitUpgradeEl, state, types, unitUpgradeType);
+  updateUnitUpgrades(unitUpgradeEl, state, types, unitUpgradeType, unitUpgradesOpen);
   const preparing = state.attack.phase === "prep" && !state.gameOver;
   skipWaveBtn.classList.toggle("hidden", !preparing);
   if (preparing) {
@@ -2236,6 +2286,7 @@ function loop(now) {
   }
   updateCameraFromKeys(dt);
   if (attacking() && started && !menu.isOpen()) attackControls.update(dt);
+  updateMapCursor();
 
   ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
   // Everything below, up to ctx.restore(), draws in WORLD space -- the
