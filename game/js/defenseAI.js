@@ -34,6 +34,13 @@ const UPGRADE_SKILLS = ["damage", "fireRate", "range", "armor"];
 const WALL_AHEAD = [160, 200, 240, 280]; // px ahead of the leading unit where it tries walls
 const MAX_WALLS = 12;
 
+// The army must have somewhere to come in: no tower may be built where it
+// would reach the first ENTRY_SAFE_ROAD px of an entry's road -- where
+// bought units arrive and line up -- or they were shot as they arrived,
+// before they could be given an order (bot games: whole armies lost while
+// gathering).
+export const ENTRY_SAFE_ROAD = 320;
+
 // The level's roads as points every SAMPLE_STEP px, each worth 1 per road
 // to the base it lies on -- a stretch several roads share is worth more --
 // and the extra streets half; and, for each build slot, which points each
@@ -51,9 +58,19 @@ function planOf(level) {
   };
   for (const route of attackMapOf(level).routes) add(route, 1);
   for (const street of level.streets || []) add(street, 0.5);
+  // Points along the first ENTRY_SAFE_ROAD px of each entry's road.
+  const safe = [];
+  for (const { route } of attackMapOf(level).entries) {
+    for (let s = 0; s <= Math.min(ENTRY_SAFE_ROAD, routeLength(route)); s += 20) safe.push(pointAlong(route, s));
+  }
   const reach = level.buildSlots.map((slot) => {
     const byType = {};
     for (const [type, def] of Object.entries(TOWER_TYPES)) {
+      // A tower of this type here would reach the entries' safe road: not allowed.
+      if (safe.some((p) => Math.hypot(p.x - slot.x, p.y - slot.y) <= def.range)) {
+        byType[type] = null;
+        continue;
+      }
       byType[type] = [];
       samples.forEach((p, k) => {
         if (Math.hypot(p.x - slot.x, p.y - slot.y) <= def.range) byType[type].push(k);
@@ -106,6 +123,7 @@ function buildOptions(state, plan, w) {
     const perDollar = (def.damage * def.projectilesPerShot) / def.fireRate / def.cost;
     levelData(state.level).buildSlots.forEach((slot, i) => {
       if (state.towers.some((t) => t.hp > 0 && Math.hypot(t.x - slot.x, t.y - slot.y) < 20)) return;
+      if (!plan.reach[i][type]) return; // it would reach an entry's road (ENTRY_SAFE_ROAD)
       let worth = 0;
       for (const k of plan.reach[i][type]) worth += w[k] / (1 + cover[k]);
       if (worth >= MIN_WORTH) options.push({ type, slot, value: worth * perDollar });

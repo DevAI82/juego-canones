@@ -1,10 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { aiStep, aiPrepare, DIFFICULTIES, AI_PERIOD } from "./defenseAI.js";
+import { aiStep, aiPrepare, DIFFICULTIES, AI_PERIOD, ENTRY_SAFE_ROAD } from "./defenseAI.js";
+import { TOWER_TYPES } from "./tower.js";
 import { createGameState } from "./simulate.js";
 import { createEnemy } from "./enemy.js";
 import { LEVELS } from "./levels.js";
-import { attackMapOf } from "./roadGraph.js";
+import { attackMapOf, pointAlong } from "./roadGraph.js";
 
 const best = () => 0; // always takes the best option
 
@@ -54,22 +55,23 @@ test("each decision repairs badly damaged towers first", () => {
 });
 
 test("it builds where the attacker's army is", () => {
-  // Level 2's two roads meet before the base: an army on one of them draws
-  // the new tower to that side.
+  // Two armies far apart on level 3 -- one on the north road, one on the
+  // south-east one, both well past the entries' safe stretch: the new tower
+  // goes up near whichever is there.
   const chosen = (spot) => {
-    const s = defence(2, 90);
+    const s = defence(3, 90);
     army(s, spot.x, spot.y, 12);
     aiStep(s, "hard", { rand: best });
     assert.equal(s.towers.length, 1);
     return s.towers[0];
   };
-  const left = { x: 609, y: 221 };
-  const right = { x: 1020, y: 257 };
+  const north = { x: 437, y: 883 };
+  const southEast = { x: 1329, y: 1559 };
   const d = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
-  const forLeft = chosen(left);
-  const forRight = chosen(right);
-  assert.ok(d(forLeft, left) < d(forLeft, right), `tower at (${forLeft.x},${forLeft.y})`);
-  assert.ok(d(forRight, right) < d(forRight, left), `tower at (${forRight.x},${forRight.y})`);
+  const forNorth = chosen(north);
+  const forSouthEast = chosen(southEast);
+  assert.ok(d(forNorth, north) < d(forNorth, southEast), `tower at (${forNorth.x},${forNorth.y})`);
+  assert.ok(d(forSouthEast, southEast) < d(forSouthEast, north), `tower at (${forSouthEast.x},${forSouthEast.y})`);
 });
 
 test("on Difficult it walls the road ahead of the army's leading unit; on Easy it never builds walls", () => {
@@ -102,5 +104,25 @@ test("over a game's worth of decisions every action it takes is one the game acc
     }
     assert.ok(log.length > 10);
     assert.deepEqual(log.filter((r) => !r.ok), []);
+  }
+});
+
+test("the defence leaves the army somewhere to come in: no tower reaches the first stretch of an entry's road", () => {
+  for (const level of [1, 2, 3, 4]) {
+    const s = defence(level, 5000);
+    aiPrepare(s, "hard", { rand: best });
+    for (let i = 0; i < 5; i++) {
+      s.economy.money += 1000;
+      aiStep(s, "hard", { rand: best });
+    }
+    assert.ok(s.towers.length >= 3);
+    for (const { route } of attackMapOf(LEVELS[level]).entries) {
+      for (let d = 0; d <= ENTRY_SAFE_ROAD; d += 20) {
+        const p = pointAlong(route, d);
+        for (const t of s.towers) {
+          assert.ok(Math.hypot(t.x - p.x, t.y - p.y) > TOWER_TYPES[t.type].range, `level ${level}: a ${t.type} reaches ${d}px down an entry's road`);
+        }
+      }
+    }
   }
 });
