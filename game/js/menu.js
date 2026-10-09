@@ -10,7 +10,9 @@
 //   canSaveNow()        -- between waves (otherwise a save waits)
 //   hasGame()           -- a solo game is going on behind the menu
 //   getSettings()       -- { music, effects }
-//   onContinue(), onNewGame(level), onLoad(slot), onSave(slot),
+//   attacking()         -- the game behind the menu is an attack
+//   onContinue(), onNewGame(level, options), onLoad(slot), onSave(slot),
+//     (options: { mode: "attack", difficulty } for an attack)
 //   onRecords(), onQuitToMain(), onResume(), onSettingsChange(settings)
 
 const SLOT_NAMES = { auto: "Autoguardado", 1: "Hueco 1", 2: "Hueco 2", 3: "Hueco 3" };
@@ -45,6 +47,10 @@ export function createMenu(root, handlers) {
   let history = [];
   let autosaveExists = false;
   let answerConfirm = null;
+  // «¿Cómo quieres jugar?» -> map -> (attacking:) difficulty: what's been
+  // picked on the way.
+  let chosenMode = "defense";
+  let chosenLevel = null;
 
   function open(ctx, screen) {
     context = ctx;
@@ -72,6 +78,8 @@ export function createMenu(root, handlers) {
     else if (name === "load" || name === "save") renderSlots(name);
     else if (name === "settings") renderSettings();
     else if (name === "multiplayer") renderMultiplayer();
+    else if (name === "mode") renderMode();
+    else if (name === "levels") renderLevels();
   }
 
   // "Volver", or Esc: answers a question still open with "No", else goes
@@ -123,7 +131,11 @@ export function createMenu(root, handlers) {
     const note = screen.querySelector(".menu-note");
     listEl.textContent = "";
     if (!handlers.canStore()) note.textContent = "Este navegador no permite guardar partidas.";
-    else if (mode === "save" && !handlers.canSaveNow()) note.textContent = "Estás en mitad de una oleada: se guardará al terminarla.";
+    else if (mode === "save" && !handlers.canSaveNow()) {
+      note.textContent = handlers.attacking()
+        ? "Estás en mitad de una ronda: se guardará al empezar la siguiente."
+        : "Estás en mitad de una oleada: se guardará al terminarla.";
+    }
     else note.textContent = "";
     const list = await handlers.listSaves();
     if (current !== mode) return; // the player moved on while the list loaded
@@ -169,13 +181,27 @@ export function createMenu(root, handlers) {
     root.querySelector('[data-do="continue-lan"]').classList.toggle("hidden", !handlers.networked);
   }
 
-  async function chooseLevel(level) {
+  // The attack mode is solo only for now (design §7).
+  function renderMode() {
+    const attack = root.querySelector('[data-mode="attack"]');
+    attack.disabled = Boolean(handlers.networked);
+    attack.querySelector(".menu-choice-desc").textContent = handlers.networked
+      ? "Solo en partida individual, por ahora"
+      : "Forma un ejército y rompe la base";
+  }
+
+  function renderLevels() {
+    root.querySelector('[data-screen="levels"] .menu-subtitle').textContent =
+      chosenMode === "attack" ? "Elige el mapa que atacarás" : "Elige nivel";
+  }
+
+  async function chooseLevel(level, options) {
     if (handlers.networked) {
       if (!(await confirm("Esto empezará una partida nueva para todos los jugadores. ¿Seguir?"))) return;
     } else if (handlers.hasGame() || autosaveExists) {
       if (!(await confirm("La partida nueva sustituirá a la de «Continuar». ¿Empezar?"))) return;
     }
-    handlers.onNewGame(level);
+    handlers.onNewGame(level, options);
   }
 
   async function chooseLoad(slot) {
@@ -197,7 +223,8 @@ export function createMenu(root, handlers) {
 
   async function quitToMain() {
     if (!handlers.networked) {
-      if (!(await confirm("Lo jugado se conserva hasta la última oleada terminada. ¿Salir al menú principal?"))) return;
+      const kept = handlers.attacking() ? "hasta el comienzo de la última ronda" : "hasta la última oleada terminada";
+      if (!(await confirm(`Lo jugado se conserva ${kept}. ¿Salir al menú principal?`))) return;
     }
     handlers.onQuitToMain();
   }
@@ -219,8 +246,20 @@ export function createMenu(root, handlers) {
     if (go) return show(go.dataset.go);
     const act = target.closest("[data-do]");
     if (act) return doAction(act.dataset.do);
+    const modeBtn = target.closest("[data-mode]");
+    if (modeBtn) {
+      chosenMode = modeBtn.dataset.mode;
+      return show("levels");
+    }
     const levelBtn = target.closest(".start-level-btn");
-    if (levelBtn) return chooseLevel(Number(levelBtn.dataset.level));
+    if (levelBtn) {
+      const level = Number(levelBtn.dataset.level);
+      if (chosenMode !== "attack") return chooseLevel(level);
+      chosenLevel = level;
+      return show("difficulty");
+    }
+    const difficultyBtn = target.closest("[data-difficulty]");
+    if (difficultyBtn) return chooseLevel(chosenLevel, { mode: "attack", difficulty: difficultyBtn.dataset.difficulty });
     if (target.closest(".menu-back")) back();
   });
 

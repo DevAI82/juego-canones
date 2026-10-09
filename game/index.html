@@ -12,6 +12,7 @@
       <canvas id="game-canvas" width="1200" height="750"></canvas>
       <button id="skip-wave-btn" class="hidden">▶</button>
       <div id="upgrade-panel" class="hidden"></div>
+      <div id="unit-upgrade-panel" class="hidden"></div>
       <div id="menu" class="hidden">
         <div class="menu-panel">
           <div class="menu-title">TOWER DEFENSE</div>
@@ -34,13 +35,13 @@
           <div class="menu-screen hidden" data-screen="mode">
             <div class="menu-subtitle">¿Cómo quieres jugar?</div>
             <div class="menu-choices">
-              <button class="menu-choice" data-go="levels">
+              <button class="menu-choice" data-mode="defense">
                 <span class="menu-choice-name">Defender</span>
                 <span class="menu-choice-desc">Construye torres y protege la base</span>
               </button>
-              <button class="menu-choice" disabled>
+              <button class="menu-choice" data-mode="attack">
                 <span class="menu-choice-name">Atacar</span>
-                <span class="menu-choice-desc">Próximamente</span>
+                <span class="menu-choice-desc">Forma un ejército y rompe la base</span>
               </button>
             </div>
             <button class="menu-back">Volver</button>
@@ -63,6 +64,24 @@
               <button class="start-level-btn" data-level="4">
                 <span class="start-level-name">Nivel 4</span>
                 <span class="start-level-subtitle">Ciudad en ruinas (mapa grande)</span>
+              </button>
+            </div>
+            <button class="menu-back">Volver</button>
+          </div>
+          <div class="menu-screen hidden" data-screen="difficulty">
+            <div class="menu-subtitle">Dificultad de la defensa</div>
+            <div class="menu-choices">
+              <button class="menu-choice" data-difficulty="easy">
+                <span class="menu-choice-name">Fácil</span>
+                <span class="menu-choice-desc">Poco dinero para torres</span>
+              </button>
+              <button class="menu-choice" data-difficulty="normal">
+                <span class="menu-choice-name">Normal</span>
+                <span class="menu-choice-desc">Una defensa equilibrada</span>
+              </button>
+              <button class="menu-choice" data-difficulty="hard">
+                <span class="menu-choice-name">Difícil</span>
+                <span class="menu-choice-desc">Más dinero, elige mejor y levanta muros</span>
               </button>
             </div>
             <button class="menu-back">Volver</button>
@@ -146,6 +165,7 @@
   </div>
   <!-- Outside #game-viewport so position:fixed is relative to window viewport -->
   <div id="build-menu"></div>
+  <div id="attack-shop" class="hidden"></div>
   <div id="top-controls">
     <button id="stats-btn" title="Ranking y Estadísticas">🏆</button>
     <button id="mute-btn" title="Silenciar sonido">🔊</button>
