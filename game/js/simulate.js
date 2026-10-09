@@ -20,6 +20,7 @@ import { createProjectile, stepProjectile } from "./projectile.js";
 import { applyUpgrade, upgradeCost, canUpgrade, UPGRADE_DEFS } from "./upgrades.js";
 import { chooseRoute, SOLDIER_ROUTE_CANDIDATES, holdsForSiege } from "./ai.js";
 import { WALL, wallCell, segmentNearBlock } from "./walls.js";
+import { assignId } from "./ids.js";
 
 export { WALL };
 
@@ -56,12 +57,6 @@ function nearestSlot(slots, x, y) {
     }
   }
   return best && bestDist <= SLOT_SNAP_RADIUS ? best : null;
-}
-
-let nextId = 1;
-function assignId(obj) {
-  obj.id = nextId++;
-  return obj;
 }
 
 // Returns { path, pathIndex } for a spawn-queue item. Soldiers weigh a few
@@ -119,7 +114,7 @@ function nudge(e, dx, dy, walls) {
   e.y = to.y;
 }
 
-function separateEnemies(enemies, dt, walls) {
+export function separateEnemies(enemies, dt, walls) {
   const maxPush = SEPARATION_SPEED * dt;
   for (let i = 0; i < enemies.length; i++) {
     const a = enemies[i];
@@ -297,6 +292,18 @@ export function stepSimulation(state, dt) {
   // the river or the sea -- but if anyone does, they're put back ashore.
   if (water) for (const e of state.enemies) pushOutOfPolygons(e, water, worldWidth, worldHeight);
 
+  fireTowers(state, dt);
+  fireUnits(state, dt);
+  stepShots(state, dt);
+  clearDestroyed(state);
+
+  nextWaveIfDone(state);
+}
+
+// The rest of a tick, in pieces the attack mode (attack.js) runs too.
+
+// The towers' turn: each one aims at a unit in its range and fires.
+export function fireTowers(state, dt) {
   for (const t of state.towers) {
     const shot = stepTower(t, state.enemies, dt);
     if (shot) {
@@ -319,9 +326,14 @@ export function stepSimulation(state, dt) {
       }
     }
   }
+}
 
+// The units' turn: each one fires at the best target in its range among
+// targetsFor(unit) -- every tower, unless the attack mode narrows it to the
+// one a unit was sent against -- or first at a wall block holding it up.
+export function fireUnits(state, dt, targetsFor = () => state.towers) {
   for (const e of state.enemies) {
-    const shot = stepEnemyFire(e, state.towers, dt, state.walls);
+    const shot = stepEnemyFire(e, targetsFor(e), dt, state.walls);
     if (shot) {
       // Tank/rocket fire the same tank-shell sprite as the player's cannon
       // towers (per user request); the lighter infantry/vehicle weapons
@@ -334,24 +346,37 @@ export function stepSimulation(state, dt) {
       state.projectiles.push(assignId(createProjectile(shot.x, shot.y, shot.target, shot.damage, 300, style, sound)));
     }
   }
+}
 
+// Shots in flight move on and land; explosions and laser beams fade.
+// onStructureHit(structure, damage), if given, hears of every hit on a
+// tower or wall block and how much health it actually took off (the
+// attack mode pays the attacker a share of it).
+export function stepShots(state, dt, onStructureHit = null) {
   for (const p of state.projectiles) {
-    const hit = stepProjectile(p, dt);
-    if (hit) {
-      if (p.target.kind === "wall") {
-        p.target.hp = Math.max(0, p.target.hp - p.damage);
-      } else if ("maxHp" in p.target && "range" in p.target) {
-        damageTower(p.target, p.damage);
-      } else {
-        damageEnemy(p.target, p.damage);
-      }
+    if (!stepProjectile(p, dt)) continue;
+    const before = p.target.hp;
+    if (p.target.kind === "wall") {
+      p.target.hp = Math.max(0, p.target.hp - p.damage);
+    } else if ("maxHp" in p.target && "range" in p.target) {
+      damageTower(p.target, p.damage);
+    } else {
+      damageEnemy(p.target, p.damage);
+      continue;
     }
+    if (onStructureHit) onStructureHit(p.target, before - p.target.hp);
   }
   state.projectiles = state.projectiles.filter((p) => p.alive);
   for (const ex of state.explosions) ex.age += dt;
   state.explosions = state.explosions.filter((ex) => ex.age < ex.duration);
   for (const bm of state.beams) bm.age += dt;
   state.beams = state.beams.filter((bm) => bm.age < bm.duration);
+}
+
+// What was destroyed this tick leaves the field: towers (counted as lost)
+// and wall blocks go up in explosions, and each unit killed pays its
+// bounty to the defence.
+export function clearDestroyed(state) {
   // Counted here, before the filter removes them, so a tower that died in
   // combat this tick is tallied -- sellStructure() removes towers by its own
   // reference filter instead, so a voluntary sale never lands here.
@@ -371,8 +396,6 @@ export function stepSimulation(state, dt) {
     state.explosions.push(assignId(createExplosion(e.x, e.y, e.type, e.angle)));
   }
   state.enemies = state.enemies.filter((e) => e.alive);
-
-  nextWaveIfDone(state);
 }
 
 function makeDebris() {
