@@ -6,11 +6,13 @@
 // units (enemy.js) -- same stats, sprites and driving -- moved by the
 // player's orders instead of along a fixed road.
 import { assignId } from "./ids.js";
-import { levelData } from "./levels.js";
-import { createEnemy, ENEMY_TYPES, FOOTPRINT } from "./enemy.js";
-import { createGameState } from "./simulate.js";
-import { attackMapOf, pointAlong, routeLength, routePrefix } from "./roadGraph.js";
-import { DIFFICULTIES, AI_PERIOD, aiPrepare } from "./defenseAI.js";
+import { levelData, narrowsOf, solidSegmentsOf } from "./levels.js";
+import { createEnemy, stepEnemy, ENEMY_TYPES, FOOTPRINT } from "./enemy.js";
+import { loseLife } from "./economy.js";
+import { pushOutOfPolygons } from "./map.js";
+import { createGameState, separateEnemies, fireTowers, fireUnits, stepShots, clearDestroyed } from "./simulate.js";
+import { attackMapOf, roadRoute, spreadStops, pointAlong, routeLength, routePrefix } from "./roadGraph.js";
+import { DIFFICULTIES, AI_PERIOD, aiPrepare, aiStep } from "./defenseAI.js";
 import { createFog, updateFog, SIGHT, ENTRY_SIGHT } from "./fog.js";
 
 export const ROUNDS = 15;
@@ -18,6 +20,12 @@ export const ROUND_TIME = 60;
 export const UNIT_CAP = 60;
 // Seconds between the units bought during a round coming in.
 export const SPAWN_INTERVAL = 0.5;
+// The attacker's pay besides each round's: a share of the damage done to
+// towers and wall blocks, and a bonus for each unit that gets into the base.
+export const DAMAGE_REWARD = 0.25;
+export const ENTRY_REWARD = 20;
+// A right-click this close to the base sends the units into it.
+export const BASE_CLICK_RADIUS = 60;
 
 // What the attacker is paid as round `round` starts (round 1's: when the
 // preparation starts).
@@ -251,13 +259,164 @@ export function startAttack(state) {
   return { ok: true };
 }
 
-// One tick of an attack: nothing happens in preparation; during the rounds
-// the clock runs and the units bought come in.
+function unitsOf(state, ids) {
+  const wanted = new Set(ids);
+  return state.enemies.filter((u) => u.alive && wanted.has(u.id));
+}
+
+// A tower or wall block of the defence still standing, by id.
+function structureById(state, id) {
+  return state.towers.find((t) => t.id === id && t.hp > 0) || state.walls.find((w) => w.id === id && w.hp > 0) || null;
+}
+
+// Right-click on the ground: the units drive to the road point nearest
+// (x, y), spread out along the road there (roadGraph.js's spreadStops),
+// and stop -- or, a click that close to the base, go into it.
+export function orderMove(state, ids, x, y) {
+  if (!playing(state)) return { ok: false, reason: "game-over" };
+  const units = unitsOf(state, ids);
+  if (!units.length) return { ok: false, reason: "no-units" };
+  const { graph, base } = mapOf(state);
+  if (Math.hypot(x - base.x, y - base.y) <= BASE_CLICK_RADIUS) return orderEnter(state, ids);
+  const sizes = units.map((u) => ({ x: u.x, y: u.y, len: FOOTPRINT[u.type][0], wid: FOOTPRINT[u.type][1] }));
+  const stops = spreadStops(graph, { x, y }, sizes);
+  units.forEach((u, i) => giveRoute(u, { kind: "move" }, stops[i].route));
+  return { ok: true, stops: stops.map((p) => ({ x: p.x, y: p.y })) };
+}
+
+// Right-click on a tower or wall block: each unit drives along the road
+// until it has it in range, stops there and fires at it until it's down.
+export function orderAttack(state, ids, structureId) {
+  if (!playing(state)) return { ok: false, reason: "game-over" };
+  const units = unitsOf(state, ids);
+  if (!units.length) return { ok: false, reason: "no-units" };
+  const target = structureById(state, structureId);
+  if (!target) return { ok: false, reason: "no-such-structure" };
+  const { graph } = mapOf(state);
+  for (const u of units) giveRoute(u, { kind: "attack", targetId: target.id }, roadRoute(graph, u, target));
+  return { ok: true, target: { x: target.x, y: target.y } };
+}
+
+// Into the base: each unit that gets there takes the lives it's worth.
+export function orderEnter(state, ids) {
+  if (!playing(state)) return { ok: false, reason: "game-over" };
+  const units = unitsOf(state, ids);
+  if (!units.length) return { ok: false, reason: "no-units" };
+  const { graph, base } = mapOf(state);
+  for (const u of units) giveRoute(u, { kind: "enter" }, roadRoute(graph, u, base));
+  return { ok: true, target: { x: base.x, y: base.y } };
+}
+
+// The S key: stop where they are.
+export function orderStop(state, ids) {
+  if (!playing(state)) return { ok: false, reason: "game-over" };
+  const units = unitsOf(state, ids);
+  if (!units.length) return { ok: false, reason: "no-units" };
+  for (const u of units) stopUnit(u);
+  return { ok: true };
+}
+
+function endGame(state, winner) {
+  if (state.gameOver) return;
+  state.gameOver = true;
+  state.attack.winner = winner;
+}
+
+// A unit gets into the base: it's gone, the base loses its lives, the
+// attacker is paid -- and with the base at 0 lives, the attacker has won.
+function enterBase(state, u) {
+  u.alive = false;
+  const before = state.economy.lives;
+  const fell = loseLife(state.economy, u.damage);
+  state.attack.stats.livesTaken += before - state.economy.lives;
+  state.attack.money += ENTRY_REWARD;
+  state.attack.stats.moneyEarned += ENTRY_REWARD;
+  if (fell) endGame(state, "attacker");
+}
+
+// The army's turn to move. A unit with no order stands still (nothing
+// moves without an order). One sent against a structure brakes to a stop
+// once it has it in range; one that reaches the end of its route stops
+// there -- or, sent into the base, goes in. A wall block across the road
+// holds a unit up (enemy.js), and it fires at it (fireUnits).
+function moveUnits(state, dt) {
+  const L = levelData(state.level);
+  const walls = solidSegmentsOf(L);
+  const gates = narrowsOf(L);
+  for (const u of state.enemies) {
+    const order = u.order;
+    if (!order) {
+      u.v = 0;
+      u.blockedBy = null;
+      continue;
+    }
+    const target = order.kind === "attack" ? structureById(state, order.targetId) : null;
+    const inRange = Boolean(target) && Math.hypot(target.x - u.x, target.y - u.y) <= u.fireRange;
+    const { reachedEnd, blockedBy } = stepEnemy(u, dt, { others: state.enemies, hold: inRange, walls, gates, barriers: state.walls });
+    u.blockedBy = blockedBy ?? null;
+    if (!reachedEnd) continue;
+    if (order.kind === "enter") enterBase(state, u);
+    else if (!inRange) stopUnit(u);
+  }
+  // The ones that went into the base leave the field (no bounty for them).
+  state.enemies = state.enemies.filter((u) => u.alive);
+  separateEnemies(state.enemies, dt, walls);
+  if (L.water) for (const u of state.enemies) pushOutOfPolygons(u, L.water, L.worldWidth, L.worldHeight);
+}
+
+// What a unit fires at: the structure it was sent against, once it's in
+// range; otherwise -- no order, on its way, or not there yet -- the best
+// tower in range (enemy.js's stepEnemyFire).
+function targetsOf(state, u) {
+  if (u.order?.kind !== "attack") return state.towers;
+  const target = structureById(state, u.order.targetId);
+  return target && Math.hypot(target.x - u.x, target.y - u.y) <= u.fireRange ? [target] : state.towers;
+}
+
+// One tick of an attack. In preparation nothing happens. During the
+// rounds the clock runs; each round's start pays both sides and the
+// defence spends (as it also does every AI_PERIOD s); the units bought come
+// in; the army carries out its orders; towers and units fire, the attacker
+// earning a share of the damage done to the defence; and the game ends
+// when the base falls (the attacker wins) or round 15 runs out (the base
+// wins).
 export function stepAttack(state, dt) {
   if (!playing(state) || state.paused) return;
   const a = state.attack;
   a.roundJustStarted = false;
   if (a.phase !== "battle") return;
+
   a.roundLeft -= dt;
+  if (a.roundLeft <= 0) {
+    if (a.round >= ROUNDS) {
+      endGame(state, "defense");
+      return;
+    }
+    a.round++;
+    a.roundLeft += ROUND_TIME;
+    a.roundJustStarted = true;
+    a.money += roundIncome(a.round);
+    state.economy.money += DIFFICULTIES[a.difficulty].perRound;
+    aiStep(state, a.difficulty);
+    a.aiTimer = AI_PERIOD;
+  } else {
+    a.aiTimer -= dt;
+    if (a.aiTimer <= 0) {
+      a.aiTimer += AI_PERIOD;
+      aiStep(state, a.difficulty);
+    }
+  }
+
   spawnFromQueue(state, dt);
+  moveUnits(state, dt);
+  if (state.gameOver) return;
+  fireTowers(state, dt);
+  fireUnits(state, dt, (u) => targetsOf(state, u));
+  stepShots(state, dt, (structure, damage) => {
+    a.money += damage * DAMAGE_REWARD;
+    a.stats.moneyEarned += damage * DAMAGE_REWARD;
+  });
+  clearDestroyed(state);
+  for (const u of state.enemies) if (u.order?.kind === "attack" && !structureById(state, u.order.targetId)) stopUnit(u);
+  refreshFog(state);
 }
