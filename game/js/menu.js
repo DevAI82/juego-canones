@@ -76,6 +76,8 @@ export function createMenu(root, handlers) {
   function show(name, remember = true) {
     if (remember && current) history.push(current);
     current = name;
+    // The main menu's start screen is the user's drawing, buttons and all.
+    root.classList.toggle("home", context === "main" && name === "home");
     for (const el of screens) el.classList.toggle("hidden", el.dataset.screen !== name);
     if (name === "home") renderHome();
     else if (name === "load" || name === "save") renderSlots(name);
@@ -116,12 +118,13 @@ export function createMenu(root, handlers) {
 
   async function renderHome() {
     const cont = root.querySelector('[data-do="continue"]');
+    const label = cont.querySelector(".menu-label");
     if (handlers.networked) {
-      cont.textContent = "Volver a la partida";
+      label.textContent = "Volver a la partida";
       cont.classList.remove("hidden");
       return;
     }
-    cont.textContent = "Continuar";
+    label.textContent = "Continuar";
     cont.classList.add("hidden");
     const list = await handlers.listSaves();
     autosaveExists = list.some((e) => e.slot === "auto" && e.status === "ok");
