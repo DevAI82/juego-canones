@@ -127,12 +127,12 @@ test("over a game's worth of decisions every action it takes is one the game acc
   }
 });
 
-test("the defence leaves the army somewhere to come in: no tower reaches the first stretch of an entry's road", () => {
+test("the defence leaves the army somewhere to come in: no tower reaches the first stretch of an entry's road, even with its range upgraded", () => {
   for (const level of [1, 2, 3, 4]) {
     const s = defence(level, 5000);
     aiPrepare(s, "hard", { rand: best });
-    for (let i = 0; i < 5; i++) {
-      s.economy.money += 1000;
+    for (let i = 0; i < 12; i++) {
+      s.economy.money += 1500;
       aiStep(s, "hard", { rand: best });
     }
     assert.ok(s.towers.length >= 3);
@@ -140,7 +140,7 @@ test("the defence leaves the army somewhere to come in: no tower reaches the fir
       for (let d = 0; d <= ENTRY_SAFE_ROAD; d += 20) {
         const p = pointAlong(route, d);
         for (const t of s.towers) {
-          assert.ok(Math.hypot(t.x - p.x, t.y - p.y) > TOWER_TYPES[t.type].range, `level ${level}: a ${t.type} reaches ${d}px down an entry's road`);
+          assert.ok(Math.hypot(t.x - p.x, t.y - p.y) > t.range, `level ${level}: a ${t.type} (range ${Math.round(t.range)}) reaches ${d}px down an entry's road`);
         }
       }
     }

@@ -97,7 +97,7 @@ test("buying in preparation: the price is paid and the units stand along the act
     assert.equal(u.type, "soldier");
     assert.equal(u.order, null);
     assert.ok(dist(u, entries[0]) < 150);
-    assert.ok(nearestRoadPoint(graph, u.x, u.y).dist < 20);
+    assert.ok(nearestRoadPoint(graph, u.x, u.y).dist < 40); // on the road or its verges
   }
   for (let i = 0; i < 3; i++) for (let j = i + 1; j < 3; j++) assert.ok(dist(s.enemies[i], s.enemies[j]) > 15);
 });
@@ -125,7 +125,7 @@ test("a crowded entry: sixty units bought at once in preparation each get their 
   s.attack.money = 10000;
   assert.equal(buyUnits(s, "soldier", 60).bought, 60);
   const { graph } = attackMapOf(LEVELS[2]);
-  for (const u of s.enemies) assert.ok(nearestRoadPoint(graph, u.x, u.y).dist < 20);
+  for (const u of s.enemies) assert.ok(nearestRoadPoint(graph, u.x, u.y).dist < 40);
   for (let i = 0; i < 60; i++) {
     for (let j = i + 1; j < 60; j++) assert.ok(dist(s.enemies[i], s.enemies[j]) > 15, `units ${i} and ${j} on top of each other`);
   }
@@ -201,4 +201,12 @@ test("the map's entries are always in sight, the rest starts unexplored, and uni
   buyUnits(s, "motorcycle");
   const [u] = s.enemies;
   assert.ok(isVisible(s.attack.fog, u.x + 200, u.y));
+});
+
+test("a big purchase parks close to the entry: three abreast along its road", () => {
+  const s = empty(2);
+  s.attack.money = 10000;
+  assert.equal(buyUnits(s, "soldier", 25).bought, 25);
+  const [entry] = attackMapOf(LEVELS[2]).entries;
+  for (const u of s.enemies) assert.ok(dist(u, entry) < 300, `a soldier parked ${Math.round(dist(u, entry))}px from the entry`);
 });

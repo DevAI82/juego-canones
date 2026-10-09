@@ -165,8 +165,10 @@ function stopUnit(u) {
 }
 
 // Bought units line up along the active entry's road, from PARK_START px
-// in, each side of the road in turn, clear of the units already there (or
-// on their way there).
+// in, three abreast (the road's middle and its two sides), clear of the
+// units already there (or on their way there) -- a group kept compact
+// stays inside the stretch the defence may not reach (defenseAI.js's
+// ENTRY_SAFE_ROAD), where two abreast it ran on past it.
 const PARK_START = 40;
 const PARK_GAP = 6;
 
@@ -181,8 +183,8 @@ function parkingSpot(state, route, type) {
   const total = routeLength(route);
   for (let s = PARK_START; s <= total; s += 4) {
     const at = pointAlong(route, s);
-    for (const side of [1, -1]) {
-      const off = side * (wid / 2 + 2);
+    for (const side of [0, 1, -1]) {
+      const off = side * (wid + 4);
       const p = { x: at.x - at.uy * off, y: at.y + at.ux * off };
       const clash = others.some((o) => {
         const dx = o.x - p.x;

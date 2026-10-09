@@ -8,7 +8,7 @@
 import { levelData } from "./levels.js";
 import { canPlaceTower, placeTower, upgradeTower, repairStructure, repairCost, canPlaceWall, placeWall, WALL } from "./simulate.js";
 import { TOWER_TYPES } from "./tower.js";
-import { upgradeCost, canUpgrade } from "./upgrades.js";
+import { upgradeCost, canUpgrade, UPGRADE_DEFS } from "./upgrades.js";
 import { towerDps } from "./ai.js";
 import { attackMapOf, pointAlong, routeLength } from "./roadGraph.js";
 
@@ -86,7 +86,7 @@ function planOf(level) {
     }
     return byType;
   });
-  const plan = { samples, reach };
+  const plan = { samples, reach, safe };
   plans.set(level, plan);
   return plan;
 }
@@ -160,6 +160,11 @@ function upgradeOptions(state, plan, w) {
     if (exposure <= 0) continue;
     for (const skill of UPGRADE_SKILLS) {
       if (!canUpgrade(t, skill)) continue;
+      // A longer reach mustn't take it over an entry's safe road either.
+      if (skill === "range") {
+        const range = TOWER_TYPES[t.type].range * UPGRADE_DEFS.range.mult ** (t.level.range + 1);
+        if (plan.safe.some((p) => Math.hypot(p.x - t.x, p.y - t.y) <= range)) continue;
+      }
       const cost = upgradeCost(skill, t.level[skill]);
       if (cost <= state.economy.money) options.push({ tower: t, skill, value: exposure / cost });
     }
