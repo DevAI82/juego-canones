@@ -4,6 +4,16 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <title>Tower Defense</title>
+  <!-- Installable on a phone (manifest.webmanifest, sw.js), with the user's
+       drawing as its icon (tools/make_pwa_icons.py). -->
+  <link rel="manifest" href="manifest.webmanifest" />
+  <meta name="theme-color" content="#161714" />
+  <link rel="icon" type="image/png" sizes="192x192" href="assets/icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Tower Defense" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>

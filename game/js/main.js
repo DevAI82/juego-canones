@@ -2313,6 +2313,12 @@ function drawnView(now) {
 // (python -m http.server, or any other host with no such route) -- solo
 // play keeps simulating locally exactly as it always has; only serving
 // via server.js turns on networked mode.
+// Installable on a phone (sw.js): only where the game is hosted over https
+// -- never on the home server, which ships its updates through no-store.
+if ("serviceWorker" in navigator && location.protocol === "https:") {
+  navigator.serviceWorker.register("sw.js").catch(() => {});
+}
+
 async function boot() {
   try {
     const res = await fetch("/api/state");

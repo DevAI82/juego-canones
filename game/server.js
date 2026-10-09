@@ -42,6 +42,9 @@ const CONTENT_TYPES = {
   ".jpg": "image/jpeg",
   ".json": "application/json; charset=utf-8",
   ".mp3": "audio/mpeg",
+  ".webp": "image/webp",
+  ".woff2": "font/woff2",
+  ".webmanifest": "application/manifest+json",
 };
 
 async function readBody(req) {

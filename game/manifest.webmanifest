@@ -1,0 +1,17 @@
+{
+  "name": "Tower Defense",
+  "short_name": "Tower Defense",
+  "description": "Defiende la base o ataca la del enemigo: torres, ejércitos y mapas de guerra.",
+  "lang": "es",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#161714",
+  "theme_color": "#161714",
+  "icons": [
+    { "src": "assets/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "assets/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "assets/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

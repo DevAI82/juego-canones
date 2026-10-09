@@ -48,6 +48,10 @@ test("the server still serves the game and its saves list, and turns down nonsen
     assert.equal(page.status, 200);
     assert.match(await page.text(), /<canvas/);
     assert.equal((await fetch(`${base}/js/host.js`)).headers.get("cache-control"), "no-store");
+    // the buildings' pictures, the menus' lettering and the phone app's manifest
+    assert.equal((await fetch(`${base}/assets/building_lab.webp`)).headers.get("content-type"), "image/webp");
+    assert.equal((await fetch(`${base}/assets/fonts/barlow-condensed-700.woff2`)).headers.get("content-type"), "font/woff2");
+    assert.equal((await fetch(`${base}/manifest.webmanifest`)).headers.get("content-type"), "application/manifest+json");
     const saves = await (await fetch(`${base}/api/saves`)).json();
     assert.deepEqual(saves.map((e) => e.slot), ["auto", 1, 2, 3]);
     assert.equal((await act("A", { type: "fly" })).reason, "unknown-action");
