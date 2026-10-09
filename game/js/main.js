@@ -32,6 +32,7 @@ import { lerpAngle, isTypingTarget } from "./util.js";
 import { createEffects, clearEffects, stepEffects, hitFlash, drawGroundEffects, drawAirEffects } from "./effects.js";
 import { minimapRect, minimapToWorld, drawMinimap } from "./minimap.js";
 import { playSound, toggleMuted, startMusic, pauseMusic, resumeMusic, setMusicOn, setEffectsOn } from "./audio.js";
+import { clampCameraPosition } from "./camera.js";
 import { createSaveScheduler } from "./autosave.js";
 import { readSave, writeSave, listSaves, canStore } from "./saves.js";
 import { loadSettings, saveSettings } from "./settings.js";
@@ -303,32 +304,22 @@ function clampZoom(level) {
   zoom = Math.max(minZoomFor(level), Math.min(MAX_ZOOM, zoom));
 }
 
-// In an attack the map can be pushed out from under the shop's column on
-// the right and from under the HUD and «¡Al ataque!» on top (canvas px),
-// so nothing at the map's edges -- an entry, level 1's base -- has to stay
-// hidden under them.
+// In an attack the map can be pushed out (canvas px) from under the shop's
+// column on the right, from under the HUD and «¡Al ataque!» on top, and
+// from under the unit upgrade panel at the bottom -- which comes up with
+// every selection, just when orders are given (level 2's base lay under
+// it) -- so nothing at the map's edges, an entry or a base, has to stay
+// hidden.
+const UNIT_PANEL_ROOM = 245; // #unit-upgrade-panel: 225 px tall, 20 px off the bottom (style.css)
 function cameraPadding() {
-  const shopInColumn = attacking() && document.getElementById("attack-shop").classList.contains("column-mode");
-  return shopInColumn ? { right: SHOP_COLUMN_WIDTH + 24, top: 128 } : { right: 0, top: 0 };
+  if (!attacking()) return { right: 0, top: 0, bottom: 0 };
+  const shopInColumn = document.getElementById("attack-shop").classList.contains("column-mode");
+  return shopInColumn ? { right: SHOP_COLUMN_WIDTH + 24, top: 128, bottom: UNIT_PANEL_ROOM } : { right: 0, top: 0, bottom: UNIT_PANEL_ROOM };
 }
 
 function clampCamera(level) {
   const { w, h } = worldSize(level);
-  const viewW = CANVAS_WIDTH / zoom;
-  const viewH = CANVAS_HEIGHT / zoom;
-  const pad = cameraPadding();
-  const padX = pad.right / zoom;
-  const padY = pad.top / zoom;
-  if (viewW >= w + padX) {
-    camera.x = (w - viewW + padX) / 2; // Center horizontally (in the room left free) when fully zoomed out
-  } else {
-    camera.x = Math.max(0, Math.min(w - viewW + padX, camera.x));
-  }
-  if (viewH >= h + padY) {
-    camera.y = (h - viewH - padY) / 2; // Center vertically (in the room left free) when fully zoomed out
-  } else {
-    camera.y = Math.max(-padY, Math.min(h - viewH, camera.y));
-  }
+  Object.assign(camera, clampCameraPosition(camera, { w, h }, { width: CANVAS_WIDTH, height: CANVAS_HEIGHT }, zoom, cameraPadding()));
 }
 
 // Recenters the camera when switching levels or restarting.
