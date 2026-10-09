@@ -38,11 +38,14 @@ Menú principal → **Nueva partida** → **Atacar** (deja de estar en gris) →
 
 ### 3.4 Dinero del atacante
 
-| Concepto | Cantidad (valores iniciales) |
+| Concepto | Cantidad (ajustada con partidas automáticas) |
 |---|---|
-| Al empezar la ronda *n* | $150 + $25 × (*n* − 1) |
-| Daño hecho a torres y muros | 25 % del daño, en dólares (destruir una torre básica ≈ $20) |
+| Al empezar la ronda *n* | $250 + $50 × (*n* − 1) |
+| Daño hecho a torres | 25 % del daño, en dólares (destruir una torre básica ≈ $20) |
+| Daño hecho a muros | una quinta parte de eso: 5 % del daño |
 | Cada unidad que entra en la base | $20 |
+
+Valores iniciales del diseño: $150 + $25 por ronda y el 25 % también por los muros. Con ellos el bot de la sección 9 perdía casi todas las partidas incluso en Fácil; y un bloque de muro de $15 pagaba $37,50 al destruirlo, así que la defensa que levantaba muros financiaba al ejército que los derribaba.
 
 ### 3.5 Unidades
 
@@ -50,16 +53,16 @@ Las cinco actuales, con sus características de hoy como base:
 
 | Unidad | Precio | Vida | Velocidad | Daño por disparo | Alcance | Vidas que quita a la base |
 |---|---|---|---|---|---|---|
-| Soldado | $15 | 40 | 50 | 2 | 90 | 1 |
-| Moto | $25 | 18 | 78 | 2 | 95 | 1 |
-| Buggy | $35 | 30 | 62 | 2 | 110 | 1 |
-| Tanque | $90 | 120 | 32 | 5 | 130 | 2 |
-| Lanzacohetes | $120 | 75 | 34 | 10 | 220 | 2 |
+| Soldado | $10 | 40 | 50 | 2 | 90 | 1 |
+| Moto | $15 | 18 | 78 | 2 | 95 | 1 |
+| Buggy | $20 | 30 | 62 | 2 | 110 | 1 |
+| Tanque | $50 | 120 | 32 | 5 | 130 | 2 |
+| Lanzacohetes | $70 | 75 | 34 | 10 | 220 | 2 |
 
 - **Tope: 60 unidades en el mapa a la vez**, contando las compradas que aún esperan para aparecer.
 - Al comprar, aparecen una tras otra (medio segundo entre cada una) en la entrada activa y se quedan quietas esperando órdenes.
 - En modo ataque no hay subidas automáticas por oleada (las del tanque y el lanzacohetes en modo defensa): todo lo que mejora una unidad es lo que compra el jugador.
-- Los precios son valores iniciales; se ajustan con partidas automáticas (sección 9).
+- Los precios están **ajustados con partidas automáticas** (sección 9); los iniciales eran $15, $25, $35, $90 y $120.
 
 ### 3.6 Mejoras por tipo de unidad
 
@@ -84,13 +87,17 @@ Las unidades no tienen cargador como las torres: por eso la mejora de munición 
 
 ### 3.8 La defensa del ordenador
 
-- **Dinero:** una cantidad inicial, un presupuesto al empezar cada ronda y la recompensa de cada unidad del atacante que destruye (la misma que gana el defensor humano hoy).
+- **Dinero:** una cantidad inicial, un presupuesto al empezar cada ronda y, por cada unidad del atacante que destruye, **la cuarta parte** de la recompensa que gana el defensor humano (ajustado con partidas automáticas: un ejército son decenas de bajas por ronda y, con la recompensa entera, el bot ganaba solo el 17 % de las partidas en Fácil).
 - **Qué hace:**
   - En la preparación coloca sus primeras torres, empezando por los puntos que cubren a la vez más caminos hacia la base.
   - Al empezar cada ronda y de vez en cuando durante ella, gasta su dinero: nuevas torres donde más cubren los caminos (con preferencia por los que está usando el ejército atacante), mejoras y reparaciones.
-  - En **Difícil**, además, levanta muros en las calles por las que avanza el atacante.
+  - En **Difícil**, además, levanta muros en las calles por las que avanza el atacante, solo donde una torre terminada puede disparar a quien se detenga ante ellos.
+- **Lo que no hace** (reglas añadidas con las partidas automáticas):
+  - No construye torres que alcancen los primeros 320 px de carretera de cada entrada, donde aparecen y esperan las unidades compradas; ese tramo termina siempre al menos 400 px de carretera antes de la base, para que pueda defender sus accesos (la entrada sur del nivel 3 está a 533 px).
+  - No mejora el alcance de una torre si con él llegaría a ese tramo.
+  - No empieza una torre al alcance de una unidad atacante (la derribaría mientras se construye).
 - **Usa las mismas acciones que un jugador defensor** (colocar torre, mejorar, reparar, muro): no hace nada que un humano no pudiera hacer.
-- **La dificultad** cambia su dinero (inicial y por ronda) y lo bien que elige. Valores iniciales:
+- **La dificultad** cambia su dinero (inicial y por ronda) y lo bien que elige. Valores **ajustados con partidas automáticas** (quedan como los iniciales):
 
 | Dificultad | Dinero inicial | Por ronda | Muros |
 |---|---|---|---|
@@ -195,14 +202,14 @@ En esta parte el modo ataque solo funciona en partida individual. Si el juego se
   - Red de calles: cruces detectados, camino más corto por calles, punto más cercano, puntos de parada repartidos.
   - Compras: cobran el precio, respetan el tope de 60 y el dinero; las unidades aparecen en la entrada y se quedan quietas.
   - Órdenes: una unidad mandada a un punto llega y se para sin quitar vidas; mandada a la base, entra y quita sus vidas y da $20; mandada contra una torre, se para a tiro y la ataca; «parar» la detiene.
-  - Dinero: 25 % del daño a torres y muros; cobro creciente al empezar cada ronda.
+  - Dinero: 25 % del daño a torres y la quinta parte de eso a los muros; cobro creciente al empezar cada ronda.
   - Mejoras: cambian las unidades nuevas y las desplegadas.
   - Fin: la base a 0 vidas da la victoria al atacante; acabar la ronda 15 se la da a la base.
   - Defensa del ordenador: gasta su dinero en torres en puntos válidos que cubren caminos, repara y mejora; en Difícil pone muros; nunca hace acciones inválidas.
   - Selección y grupos: recuadro, Mayús, doble clic por tipo, grupos y su limpieza.
   - Niebla: lo que ven las unidades se explora y queda a la vista mientras siguen cerca; al irse pasa a gris; las torres se recuerdan como estaban; una torre construida en zona gris no aparece hasta volver; las entradas siempre a la vista.
   - Guardado: ida y vuelta en modo ataque; los guardados de defensa siguen cargando.
-- **Partidas completas automáticas:** un bot atacante sencillo (compra unidades, las agrupa y las manda por la carretera menos defendida) contra la defensa del ordenador, en los 4 mapas y las 3 dificultades. Objetivos de equilibrio para ese bot: en **Fácil** gana la mayoría de partidas; en **Normal**, alrededor de la mitad; en **Difícil**, pocas. Precios, ingresos y presupuestos de la defensa se ajustan hasta conseguirlo.
+- **Partidas completas automáticas:** un bot atacante sencillo (compra unidades, las agrupa y las manda por la carretera menos defendida) contra la defensa del ordenador, en los 4 mapas y las 3 dificultades. Objetivos de equilibrio para ese bot: en **Fácil** gana la mayoría de partidas; en **Normal**, alrededor de la mitad; en **Difícil**, pocas. Precios, ingresos y presupuestos de la defensa se ajustan hasta conseguirlo. **Resultado del ajuste** (40 partidas por mapa y dificultad, el bot reúne grupos de 25 unidades): Fácil 94 % de victorias (por mapa 90/100/100/85 %), Normal 61 % (48/83/83/30 %), Difícil 22 % (43/0/35/10 %).
 - **Navegador:** recorrido completo (menú → mapa → dificultad → preparación → rondas → victoria o derrota), con selección, grupos, órdenes, tienda, mejoras, cámara, guardar y cargar.
 
 ## 10. Fuera de alcance
