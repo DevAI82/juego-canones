@@ -117,12 +117,18 @@ function coverage(state, samples) {
   });
 }
 
+// How much further than its own reach from an attacking unit a new tower
+// must go up: closer, it would be shot down while being built (bot games:
+// Difficult, chasing the army, lost most of what it built in battle).
+const BUILD_CLEARANCE = 20;
+
 // New towers it could build, best first: for each type it can afford and
-// still add, each free slot's worth -- the road in the type's range, each
-// point counting less the better it's covered already -- times the type's
-// firepower per dollar.
+// still add, each free slot out of the army's reach, its worth -- the road
+// in the type's range, each point counting less the better it's covered
+// already -- times the type's firepower per dollar.
 function buildOptions(state, plan, w) {
   const cover = coverage(state, plan.samples);
+  const army = state.enemies.filter((u) => u.alive);
   const counts = {};
   for (const t of state.towers) if (t.hp > 0) counts[t.type] = (counts[t.type] || 0) + 1;
   const options = [];
@@ -131,6 +137,7 @@ function buildOptions(state, plan, w) {
     const perDollar = (def.damage * def.projectilesPerShot) / def.fireRate / def.cost;
     levelData(state.level).buildSlots.forEach((slot, i) => {
       if (state.towers.some((t) => t.hp > 0 && Math.hypot(t.x - slot.x, t.y - slot.y) < 20)) return;
+      if (army.some((u) => Math.hypot(u.x - slot.x, u.y - slot.y) <= u.fireRange + BUILD_CLEARANCE)) return;
       if (!plan.reach[i][type]) return; // it would reach an entry's road (ENTRY_SAFE_ROAD)
       let worth = 0;
       for (const k of plan.reach[i][type]) worth += w[k] / (1 + cover[k]);

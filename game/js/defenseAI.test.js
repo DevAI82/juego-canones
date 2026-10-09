@@ -155,3 +155,16 @@ test("the defence guards the base's approaches first: every attacker has to pass
   const { base } = attackMapOf(LEVELS[3]);
   for (const t of s.towers) assert.ok(Math.hypot(t.x - base.x, t.y - base.y) < 600, `a ${t.type} at (${t.x},${t.y})`);
 });
+
+test("the defence doesn't build where the army would shoot the tower down while it's being built", () => {
+  // Twelve soldiers stand in level 1's trench: the slot right by them is the
+  // best for covering the road -- but a tower started there would be shot
+  // down before it could fire (bot games: Difficult lost most of what it
+  // built in battle that way).
+  const s = defence(1, 90);
+  for (let i = 0; i < 12; i++) s.enemies.push(createEnemy("soldier", [{ x: 588 + (i % 4) * 12, y: 565 + Math.floor(i / 4) * 12 }]));
+  aiStep(s, "hard", { rand: best });
+  assert.equal(s.towers.length, 1);
+  const [t] = s.towers;
+  for (const u of s.enemies) assert.ok(Math.hypot(t.x - u.x, t.y - u.y) > u.fireRange + 20, `tower at (${t.x},${t.y}) in a soldier's reach`);
+});
