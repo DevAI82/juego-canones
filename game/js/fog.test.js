@@ -10,6 +10,8 @@ import {
   isExplored,
   structureKey,
   knownStructure,
+  fogForWire,
+  fogFromWire,
   saveFog,
   restoreFog,
   fogPixels,
@@ -113,4 +115,34 @@ test("the fog's look, a pixel per cell: black where never seen, a veil where see
   const grey = greyPixels(fog);
   assert.deepEqual([grey[3], grey[7], grey[11]], [0, 255, 0]);
   assert.deepEqual([grey[4], grey[5], grey[6]], [128, 128, 128]);
+});
+
+// The home server sends the fog to the browsers (docs/2026-10-09-uno-
+// contra-otro-design.md §12): its byte grids don't survive JSON as they are.
+test("the fog survives the trip to a browser: what's in sight, what's explored and what's remembered", () => {
+  const fog = createFog(1200, 750);
+  const tower = { kind: "tower", type: "basic", x: 400, y: 300, hp: 50, maxHp: 80, level: { damage: 1, range: 0, fireRate: 0, armor: 0, ammo: 0 }, angle: 1 };
+  updateFog(fog, [{ x: 100, y: 100, r: 150 }], []);
+  updateFog(fog, [{ x: 400, y: 300, r: 200 }], [tower]);
+  const back = fogFromWire(JSON.parse(JSON.stringify(fogForWire(fog))));
+  assert.equal(back.cols, fog.cols);
+  assert.equal(back.rows, fog.rows);
+  assert.deepEqual([...back.visible], [...fog.visible]);
+  assert.deepEqual([...back.explored], [...fog.explored]);
+  assert.ok(back.visible instanceof Uint8Array && back.explored instanceof Uint8Array);
+  assert.deepEqual(back.memory, fog.memory);
+  for (const [x, y] of [[100, 100], [400, 300], [1100, 700]]) {
+    assert.equal(isVisible(back, x, y), isVisible(fog, x, y));
+    assert.equal(isExplored(back, x, y), isExplored(fog, x, y));
+  }
+  assert.equal(knownStructure(back, tower), true);
+});
+
+test("a fog that arrives damaged is all unexplored, not an error", () => {
+  const back = fogFromWire({ cols: 3, rows: 2, explored: "zz", visible: 5, memory: null });
+  assert.equal(back.cols, 3);
+  assert.equal(back.explored.length, 6);
+  assert.ok(back.explored.every((v) => v === 0));
+  assert.deepEqual(back.memory, {});
+  assert.equal(fogFromWire(null), null);
 });
