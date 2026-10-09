@@ -49,7 +49,7 @@ function thumbnail(img, w, h) {
 }
 
 // `view`: { camera: {x, y}, w, h } -- the world rectangle on screen.
-export function drawMinimap(ctx, rect, { mapImage, enemies, towers, walls = [], base, view }) {
+export function drawMinimap(ctx, rect, { mapImage, enemies, towers, walls = [], base, view, units = [], fog = null, entries = [], activeEntry = -1 }) {
   const { x, y, w, h, k } = rect;
   ctx.save();
   // Panel, with a header strip, in the build menu's teal-edged style.
@@ -70,6 +70,12 @@ export function drawMinimap(ctx, rect, { mapImage, enemies, towers, walls = [], 
   // Dim the map a little so the markers stand out.
   ctx.fillStyle = "rgba(0, 0, 0, 0.25)";
   ctx.fillRect(x, y, w, h);
+  // An attack's fog (attackDraw.js's fog layer, a pixel per cell),
+  // stretched over the map like on the battlefield.
+  if (fog) {
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(fog, x, y, w, h);
+  }
 
   if (base) {
     const bx = x + base.x * k;
@@ -92,6 +98,26 @@ export function drawMinimap(ctx, rect, { mapImage, enemies, towers, walls = [], 
     const r = e.type === "soldier" ? 1.3 : 2;
     ctx.fillRect(x + e.x * k - r, y + e.y * k - r, r * 2, r * 2);
   }
+
+  // The attacker's own army in green, and the entries' flags (the active
+  // one yellow).
+  ctx.fillStyle = "#5dff7a";
+  for (const u of units) {
+    const r = u.type === "soldier" ? 1.3 : 2;
+    ctx.fillRect(x + u.x * k - r, y + u.y * k - r, r * 2, r * 2);
+  }
+  entries.forEach((e, i) => {
+    const fx = x + e.x * k;
+    const fy = y + e.y * k;
+    ctx.fillStyle = i === activeEntry ? "#ffd84a" : "#6fd8e6";
+    ctx.beginPath();
+    ctx.moveTo(fx, fy - 9);
+    ctx.lineTo(fx + 7, fy - 6);
+    ctx.lineTo(fx, fy - 3);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillRect(fx - 0.75, fy - 9, 1.5, 9);
+  });
 
   // What's on screen right now, clipped to the minimap.
   const vx = Math.max(x, x + view.camera.x * k);
