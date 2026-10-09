@@ -39,8 +39,12 @@ export const DAMAGE_REWARD = 0.25;
 // funded the army that shot them down).
 export const WALL_REWARD_SHARE = 0.2;
 export const ENTRY_REWARD = 20;
-// A right-click this close to the base sends the units into it.
-export const BASE_CLICK_RADIUS = 60;
+// An order given this close to the base sends the units into it.
+export const BASE_CLICK_RADIUS = 100;
+// A unit this close to the base goes in, whatever its order, per user
+// request («llego a la base y no sé cómo conquistarla»): units sent next to
+// the base used to stop there and do nothing.
+export const BASE_REACH = 50;
 // What the defence earns for each unit it destroys: this share of the
 // defence game's bounty for that type (enemy.js). Tuned with bot games
 // (plan C): an army is dozens of kills a round, and with the whole bounty
@@ -365,14 +369,22 @@ function enterBase(state, u) {
 // The army's turn to move. A unit with no order stands still (nothing
 // moves without an order). One sent against a structure brakes to a stop
 // once it has it in range; one that reaches the end of its route stops
-// there -- or, sent into the base, goes in. A wall block across the road
-// holds a unit up (enemy.js), and it fires at it (fireUnits).
+// there -- or, sent into the base, goes in. Any unit that gets within
+// BASE_REACH of the base goes in. A wall block across the road holds a
+// unit up (enemy.js), and it fires at it (fireUnits).
 function moveUnits(state, dt) {
   const L = levelData(state.level);
   const walls = solidSegmentsOf(L);
   const gates = narrowsOf(L);
+  const { base } = mapOf(state);
+  const atBase = (u) => Math.hypot(u.x - base.x, u.y - base.y) <= BASE_REACH;
   for (const u of state.enemies) {
     const order = u.order;
+    if (atBase(u)) {
+      enterBase(state, u);
+      if (state.gameOver) break;
+      continue;
+    }
     if (!order) {
       u.v = 0;
       u.blockedBy = null;
@@ -382,9 +394,12 @@ function moveUnits(state, dt) {
     const inRange = Boolean(target) && Math.hypot(target.x - u.x, target.y - u.y) <= u.fireRange;
     const { reachedEnd, blockedBy } = stepEnemy(u, dt, { others: state.enemies, hold: inRange, walls, gates, barriers: state.walls, turnFirst: true });
     u.blockedBy = blockedBy ?? null;
-    if (!reachedEnd) continue;
-    if (order.kind === "enter") enterBase(state, u);
-    else if (!inRange) stopUnit(u);
+    if ((reachedEnd && order.kind === "enter") || atBase(u)) {
+      enterBase(state, u);
+      if (state.gameOver) break;
+      continue;
+    }
+    if (reachedEnd && !inRange) stopUnit(u);
   }
   // The ones that went into the base leave the field (no bounty for them).
   state.enemies = state.enemies.filter((u) => u.alive);
