@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { clampCameraPosition } from "./camera.js";
+import { clampCameraPosition, zoomAt, pinchZoom } from "./camera.js";
 
 const view = { width: 1200, height: 750 };
 const at = (p, x, y) => assert.ok(Math.abs(p.x - x) < 1e-9 && Math.abs(p.y - y) < 1e-9, `camera at (${p.x}, ${p.y}), not (${x}, ${y})`);
@@ -36,4 +36,21 @@ test("the map can be pushed up from under the unit upgrade panel at the bottom, 
   assert.ok(Math.abs(p.y - (750 - 750 / zoom + 245 / zoom)) < 1e-9, `camera y ${p.y}`); // its bottom edge clear of the panel
   const q = clampCameraPosition({ x: 0, y: -5000 }, world, view, zoom, pad);
   assert.ok(Math.abs(q.y - -128 / zoom) < 1e-9, `camera y ${q.y}`); // and back down to the HUD
+});
+
+test("zooming toward a point keeps the world point under it in place", () => {
+  const cam = { x: 100, y: 50 };
+  const next = zoomAt(cam, 1, 2, 600, 300);
+  assert.deepEqual(next, { x: 400, y: 200 });
+  // the same world point (700, 350) is still under canvas (600, 300)
+  assert.equal(next.x + 600 / 2, 700);
+  assert.equal(next.y + 300 / 2, 350);
+});
+
+test("two fingers moving apart zoom in around the point between them", () => {
+  const p = pinchZoom(1, 100, { x: 400, y: 300 }, { x: 600, y: 300 });
+  assert.equal(p.zoom, 2);
+  assert.equal(p.cx, 500);
+  assert.equal(p.cy, 300);
+  assert.equal(pinchZoom(1.5, 0, { x: 1, y: 1 }, { x: 1, y: 1 }).zoom, 1.5);
 });

@@ -16,3 +16,20 @@ export function clampCameraPosition(camera, world, view, zoom, pad = {}) {
     y: fit(camera.y, -top, world.h - viewH + bottom),
   };
 }
+
+// Zooming toward canvas point (cx, cy) -- the wheel's cursor, a pinch's
+// midpoint -- keeps the world point under it in place: the camera that does
+// that at `newZoom`.
+export function zoomAt(camera, oldZoom, newZoom, cx, cy) {
+  const wx = camera.x + cx / oldZoom;
+  const wy = camera.y + cy / oldZoom;
+  return { x: wx - cx / newZoom, y: wy - cy / newZoom };
+}
+
+// Two fingers' pinch: the zoom they ask for (the starting zoom scaled by how
+// far apart they are now against when they touched down) and the canvas
+// point between them.
+export function pinchZoom(startZoom, startDist, a, b) {
+  const dist = Math.hypot(a.x - b.x, a.y - b.y);
+  return { zoom: startDist > 0 ? (startZoom * dist) / startDist : startZoom, cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2 };
+}

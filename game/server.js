@@ -1,10 +1,14 @@
-// LAN co-op multiplayer host. Run with: node server.js
+// LAN multiplayer host. Run with: node server.js
 //
 // Serves the game's static files (same as `python -m http.server` did for
-// solo play) AND runs the authoritative game simulation, ticking it on a
-// timer and exposing it over two tiny JSON endpoints:
-//   GET  /api/state   -> the full current game state
-//   POST /api/action  -> apply one player action ({type, ...params})
+// solo play) AND runs the authoritative game, ticking it on a timer and
+// exposing it over two tiny JSON endpoints:
+//   GET  /api/state?player=<id>  -> the game, as that browser tab needs it
+//   POST /api/action             -> one player action ({player, type, ...})
+// The game itself -- «Defender juntos» (everyone defends one map) or «Uno
+// contra otro» (one tab defends, another attacks), who plays which side,
+// what each may do -- is js/host.js's; this file only puts it on the
+// network (docs/2026-10-09-uno-contra-otro-design.md).
 //
 // Every browser that opens this server's URL (the host's own machine, a
 // second PC, a phone -- see the LAN URL this script prints on startup)
@@ -16,41 +20,19 @@
 // npm install" approach) -- state sync uses HTTP polling (main.js polls
 // every 120ms) rather than WebSockets, which would need either an external
 // package or hand-rolling the WebSocket wire protocol. On a home LAN the
-// added latency is imperceptible for a tower defense game's pace.
+// added latency is imperceptible for this game's pace.
 import http from "node:http";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
-import { fileURLToPath } from "node:url";
+import { pathToFileURL, fileURLToPath } from "node:url";
 
-import {
-  createGameState,
-  startNextLevel,
-  stepSimulation,
-  placeTower,
-  upgradeTower,
-  repairStructure,
-  sellStructure,
-  placeWall,
-  skipWave,
-  togglePause,
-  canSaveNow,
-  createSave,
-  restoreSave,
-} from "./js/simulate.js";
-import { createSaveScheduler } from "./js/autosave.js";
+import { createHost } from "./js/host.js";
+import { restoreGameSave } from "./js/modes.js";
 import { readSaveFile, writeSaveSlot, listSaveFile } from "./server-saves.js";
 
-// PORT env var: lets a throwaway test instance run without touching the
-// real LAN game on 8420.
-const PORT = Number(process.env.PORT) || 8420;
 const TICK_MS = 50; // 20 ticks/sec -- plenty smooth for this game's pace
 const GAME_DIR = path.dirname(fileURLToPath(import.meta.url));
-
-// This host's runtime files: the shared ranking and the saved games.
-// DATA_DIR lets a test instance keep its own, away from the family's.
-const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(GAME_DIR, "data");
-const SAVES_PATH = path.join(DATA_DIR, "saves.json");
 
 const CONTENT_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -60,80 +42,9 @@ const CONTENT_TYPES = {
   ".jpg": "image/jpeg",
   ".json": "application/json; charset=utf-8",
   ".mp3": "audio/mpeg",
-};
-
-// Saves are written as the game goes (autosave.js): the autosave between
-// waves, and a save asked for mid-wave once the wave is over. Writing is
-// asynchronous here, so a failure is only logged.
-const saves = createSaveScheduler((slot, save) => {
-  writeSaveSlot(SAVES_PATH, slot, save).catch((err) => console.error(`Couldn't save (slot ${slot}):`, err.message));
-  return true;
-});
-
-// Per user request, the game picks up where it was: restarting the server
-// (to update the game, say) resumes the last autosave -- paused, for
-// whoever reconnects -- instead of starting over.
-const resumed = restoreSave((await readSaveFile(SAVES_PATH)).auto);
-let state = resumed || createGameState();
-saves.reset(state, { saved: Boolean(resumed) });
-if (resumed) console.log(`Resumed the saved game: level ${state.level}, wave ${state.waveIndex + 1} (paused).`);
-let lastTick = Date.now();
-setInterval(() => {
-  const now = Date.now();
-  const dt = Math.min((now - lastTick) / 1000, 0.1);
-  lastTick = now;
-  saves.tick(state);
-  stepSimulation(state, dt);
-}, TICK_MS);
-
-const ACTION_HANDLERS = {
-  place: (body) => placeTower(state, body.towerType, body.x, body.y),
-  upgrade: (body) => upgradeTower(state, body.towerId, body.skill),
-  repair: (body) => repairStructure(state, body.id ?? body.towerId),
-  sell: (body) => sellStructure(state, body.id ?? body.towerId),
-  placeWall: (body) => placeWall(state, body.x, body.y),
-  skip: () => skipWave(state),
-  pause: () => togglePause(state),
-  // Saved games (data/saves.json). A save asked for mid-wave is made when
-  // the wave ends; loading changes the game for everyone connected, like
-  // restart does.
-  save: async (body) => {
-    const slot = Number(body.slot);
-    if (![1, 2, 3].includes(slot)) return { ok: false, reason: "bad-slot" };
-    if (state.gameOver || state.win || state.levelComplete) return { ok: false, reason: "game-over" };
-    if (!canSaveNow(state)) {
-      saves.request(slot, state);
-      return { ok: true, queued: true };
-    }
-    try {
-      await writeSaveSlot(SAVES_PATH, slot, createSave(state));
-      return { ok: true, queued: false };
-    } catch {
-      return { ok: false, reason: "write-failed" };
-    }
-  },
-  load: async (body) => {
-    const slot = body.slot === "auto" ? "auto" : Number(body.slot);
-    const restored = restoreSave((await readSaveFile(SAVES_PATH))[slot]);
-    if (!restored) return { ok: false, reason: "unreadable" };
-    state = restored;
-    saves.reset(state); // «Continuar» now means this game
-    return { ok: true };
-  },
-  restart: (body) => {
-    // Backs the level-select start menu -- every connected player's next
-    // poll sees the fresh campaign on whichever map was chosen, not just
-    // whoever clicked.
-    state = createGameState(body.level || 1);
-    saves.reset(state);
-    return { ok: true };
-  },
-  nextLevel: () => {
-    const fresh = startNextLevel(state);
-    if (!fresh) return { ok: false, reason: "cannot-advance" };
-    state = fresh;
-    return { ok: true, level: fresh.level };
-  },
+  ".webp": "image/webp",
+  ".woff2": "font/woff2",
+  ".webmanifest": "application/manifest+json",
 };
 
 async function readBody(req) {
@@ -143,29 +54,28 @@ async function readBody(req) {
 }
 
 // Shared, persistent high-score table -- the whole point of running this
-// on the server rather than in each browser's localStorage is that all 3
-// co-op players save into the SAME ranking. Kept as a plain JSON file
+// on the server rather than in each browser's localStorage is that all
+// the co-op players save into the SAME ranking. Kept as a plain JSON file
 // (not a real database) to match the rest of this project's
 // dependency-free approach; survives server restarts, which localStorage
 // alone wouldn't need to but a shared multi-device ranking does.
-const LEADERBOARD_PATH = path.join(DATA_DIR, "leaderboard.json");
 const LEADERBOARD_MAX_ENTRIES = 20;
 
-async function loadLeaderboard() {
+async function loadLeaderboard(file) {
   try {
-    return JSON.parse(await readFile(LEADERBOARD_PATH, "utf-8"));
+    return JSON.parse(await readFile(file, "utf-8"));
   } catch {
     return [];
   }
 }
 
-async function addLeaderboardEntry(name, score) {
-  const entries = await loadLeaderboard();
+async function addLeaderboardEntry(file, name, score) {
+  const entries = await loadLeaderboard(file);
   entries.push({ name, score, date: new Date().toISOString() });
   entries.sort((a, b) => b.score - a.score);
   const trimmed = entries.slice(0, LEADERBOARD_MAX_ENTRIES);
-  await mkdir(path.dirname(LEADERBOARD_PATH), { recursive: true });
-  await writeFile(LEADERBOARD_PATH, JSON.stringify(trimmed, null, 2));
+  await mkdir(path.dirname(file), { recursive: true });
+  await writeFile(file, JSON.stringify(trimmed, null, 2));
   return trimmed;
 }
 
@@ -202,70 +112,109 @@ async function serveStatic(req, res) {
   }
 }
 
-// What browsers need from the state rather than everything in it: every
-// enemy's whole route, and a full copy of whatever each tower and shell is
-// aiming at (that enemy's route included, once per shell in flight), went
-// out on every poll, several times a second, to every player. Browsers
-// draw from positions; a shell only needs to know where its target is.
-function forBrowsers(key, value) {
-  if (key === "path") return undefined;
-  if (key === "target" && value) return { id: value.id, x: value.x, y: value.y };
-  return value;
+function sendJson(res, body) {
+  res.writeHead(200, { "Content-Type": "application/json" });
+  res.end(typeof body === "string" ? body : JSON.stringify(body));
 }
 
-const server = http.createServer(async (req, res) => {
-  const urlPath = new URL(req.url, "http://x").pathname;
+// The server: the game (host.js) ticking on a timer, the saves and the
+// ranking in `dataDir`, everything on `port`. Per user request, the game
+// picks up where it was: restarting the server (to update the game, say)
+// resumes the last autosave -- paused, for whoever reconnects -- instead
+// of starting over. Resolves once it's listening, with a way to stop it
+// (the tests run their own server on a spare port, away from the
+// family's on 8420).
+export async function startServer({ port = 8420, dataDir = path.join(GAME_DIR, "data"), log = console.log } = {}) {
+  const savesPath = path.join(dataDir, "saves.json");
+  const leaderboardPath = path.join(dataDir, "leaderboard.json");
+  const store = {
+    read: () => readSaveFile(savesPath),
+    write: (slot, save) => writeSaveSlot(savesPath, slot, save),
+  };
+  const initial = restoreGameSave((await readSaveFile(savesPath)).auto);
+  const host = createHost({ store, initial, log: (msg) => console.error(msg) });
+  if (initial) log(`Resumed the saved game: level ${initial.level} (paused).`);
 
-  if (urlPath === "/api/state" && req.method === "GET") {
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(state, forBrowsers));
-    return;
-  }
+  let lastTick = Date.now();
+  const ticker = setInterval(() => {
+    const now = Date.now();
+    const dt = Math.min((now - lastTick) / 1000, 0.1);
+    lastTick = now;
+    host.tick(dt);
+  }, TICK_MS);
 
-  if (urlPath === "/api/action" && req.method === "POST") {
-    let result;
-    try {
-      const body = await readBody(req);
-      const handler = ACTION_HANDLERS[body.type];
-      result = handler ? await handler(body) : { ok: false, reason: "unknown-action" };
-    } catch (err) {
-      result = { ok: false, reason: "bad-request" };
+  const server = http.createServer(async (req, res) => {
+    const url = new URL(req.url, "http://x");
+    const urlPath = url.pathname;
+
+    if (urlPath === "/api/state" && req.method === "GET") {
+      // Asking for news also tells the game this tab is still there.
+      const player = url.searchParams.get("player");
+      const auto = url.searchParams.get("auto");
+      sendJson(res, host.viewJson(player, { auto: auto == null ? undefined : auto === "1" }));
+      return;
     }
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(result));
-    return;
-  }
 
-  if (urlPath === "/api/saves" && req.method === "GET") {
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(await listSaveFile(SAVES_PATH)));
-    return;
-  }
-
-  if (urlPath === "/api/leaderboard" && req.method === "GET") {
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(await loadLeaderboard()));
-    return;
-  }
-
-  if (urlPath === "/api/leaderboard" && req.method === "POST") {
-    let result;
-    try {
-      const body = await readBody(req);
-      const name = String(body.name ?? "JUGADOR").trim().slice(0, 16) || "JUGADOR";
-      const score = Math.max(0, Math.round(Number(body.score) || 0));
-      const entries = await addLeaderboardEntry(name, score);
-      result = { ok: true, entries };
-    } catch (err) {
-      result = { ok: false, reason: "bad-request" };
+    if (urlPath === "/api/action" && req.method === "POST") {
+      let result;
+      try {
+        const body = await readBody(req);
+        result = await host.act(typeof body.player === "string" ? body.player : null, body);
+      } catch {
+        result = { ok: false, reason: "bad-request" };
+      }
+      sendJson(res, result);
+      return;
     }
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(result));
-    return;
-  }
 
-  await serveStatic(req, res);
-});
+    // Where the other computer finds the game (the banner while waiting
+    // for the second player): this one's addresses on the home network.
+    if (urlPath === "/api/address" && req.method === "GET") {
+      const { port: actual } = server.address();
+      sendJson(res, { urls: lanAddresses().map((addr) => `http://${addr}:${actual}`) });
+      return;
+    }
+
+    if (urlPath === "/api/saves" && req.method === "GET") {
+      sendJson(res, await listSaveFile(savesPath));
+      return;
+    }
+
+    if (urlPath === "/api/leaderboard" && req.method === "GET") {
+      sendJson(res, await loadLeaderboard(leaderboardPath));
+      return;
+    }
+
+    if (urlPath === "/api/leaderboard" && req.method === "POST") {
+      let result;
+      try {
+        const body = await readBody(req);
+        const name = String(body.name ?? "JUGADOR").trim().slice(0, 16) || "JUGADOR";
+        const score = Math.max(0, Math.round(Number(body.score) || 0));
+        const entries = await addLeaderboardEntry(leaderboardPath, name, score);
+        result = { ok: true, entries };
+      } catch {
+        result = { ok: false, reason: "bad-request" };
+      }
+      sendJson(res, result);
+      return;
+    }
+
+    await serveStatic(req, res);
+  });
+
+  await new Promise((resolve) => server.listen(port, resolve));
+  return {
+    port: server.address().port,
+    host,
+    close: () =>
+      new Promise((resolve) => {
+        clearInterval(ticker);
+        server.close(() => resolve());
+        server.closeAllConnections?.();
+      }),
+  };
+}
 
 function lanAddresses() {
   const out = [];
@@ -277,11 +226,17 @@ function lanAddresses() {
   return out;
 }
 
-server.listen(PORT, () => {
+// `node server.js`: the family's server. PORT and DATA_DIR let a
+// throwaway test instance run without touching the real one on 8420.
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  const port = Number(process.env.PORT) || 8420;
+  const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : undefined;
+  await startServer({ port, dataDir });
   console.log(`Tower Defense multiplayer host running.`);
-  console.log(`  On this computer: http://localhost:${PORT}`);
+  console.log(`  On this computer: http://localhost:${port}`);
   for (const addr of lanAddresses()) {
-    console.log(`  On the same WiFi (other PC/phone): http://${addr}:${PORT}`);
+    console.log(`  On the same WiFi (other PC/phone): http://${addr}:${port}`);
   }
-  console.log(`Open one of the LAN addresses above on your son's device -- everyone who opens this server's URL plays on the same shared board.`);
-});
+  console.log(`Open one of the LAN addresses above on the other devices: «Defender juntos» plays one shared map,`);
+  console.log(`«Uno contra otro» has one computer defend and the other attack.`);
+}

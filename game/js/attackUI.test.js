@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { shopEntry, upgradeRows, attackHudLines, attackSummary, UNIT_NAMES, SKILL_NAMES } from "./attackUI.js";
+import { shopEntry, upgradeRows, attackHudLines, defenderHudLines, attackSummary, UNIT_NAMES, SKILL_NAMES } from "./attackUI.js";
 import { createAttackState, buyUnits, upgradeUnitType, startAttack } from "./attack.js";
 
 function empty(level = 2) {
@@ -81,4 +81,31 @@ test("the end screen says who won and how it went", () => {
   s.attack.winner = "defense";
   assert.equal(attackSummary(s).title, "LA BASE HA RESISTIDO");
   assert.equal(attackSummary(s).subtitle, "Has perdido");
+});
+
+// One against the other (docs/2026-10-09-uno-contra-otro-design.md).
+test("the defender's HUD: the round and its clock, the base's lives, the defence's money, the enemy army", () => {
+  const s = createAttackState(3, "hard", { defender: "player" });
+  buyUnits(s, "soldier", 2);
+  assert.deepEqual(defenderHudLines(s), ["Nivel 3 · Preparación", "Base: ❤ 20", "$450", "Ejército enemigo 2/60"]);
+  startAttack(s);
+  s.attack.round = 4;
+  s.attack.roundLeft = 42.2;
+  s.economy.money = 87.6;
+  assert.deepEqual(defenderHudLines(s), ["Nivel 3 · Ronda 4/15 · 0:43", "Base: ❤ 20", "$87", "Ejército enemigo 2/60"]);
+});
+
+test("the end screen of a game one against the other: each player reads their own result", () => {
+  const s = createAttackState(2, "easy", { defender: "player" });
+  s.attack.winner = "defense";
+  const attacker = attackSummary(s, "attack");
+  const defender = attackSummary(s, "defense");
+  assert.equal(attacker.title, "LA BASE HA RESISTIDO");
+  assert.equal(attacker.subtitle, "Has perdido");
+  assert.equal(defender.title, "LA BASE HA RESISTIDO");
+  assert.equal(defender.subtitle, "Has ganado");
+  assert.deepEqual(defender.rows.at(-1), ["Dinero de la defensa", "Poco"]);
+  s.attack.winner = "attacker";
+  assert.equal(attackSummary(s, "defense").subtitle, "Has perdido");
+  assert.equal(attackSummary(s, "attack").subtitle, "Has ganado");
 });

@@ -15,6 +15,7 @@ import {
   DAMAGE_REWARD,
   ENTRY_REWARD,
   BASE_CLICK_RADIUS,
+  BASE_REACH,
   BOUNTY_SHARE,
   WALL_REWARD_SHARE,
 } from "./attack.js";
@@ -57,7 +58,8 @@ function tower(s, type, x, y) {
 test("the attacker's pay: a quarter of the damage done, $20 a unit into the base; a click this close to the base goes in", () => {
   assert.equal(DAMAGE_REWARD, 0.25);
   assert.equal(ENTRY_REWARD, 20);
-  assert.equal(BASE_CLICK_RADIUS, 60);
+  assert.equal(BASE_CLICK_RADIUS, 100);
+  assert.equal(BASE_REACH, 50);
 });
 
 test("a unit sent somewhere waits for «¡Al ataque!», then drives there along the roads and stops, leaving the base alone", () => {
@@ -114,12 +116,50 @@ test("a unit sent into the base goes in: the base loses its lives and the attack
   assert.equal(s.economy.money, 0); // so no bounty for the defence
 });
 
-test("a right-click on or near the base is an order to go in", () => {
+test("a click on or near the base is an order to go in", () => {
   const s = empty();
   buyUnits(s, "soldier");
   const { base } = attackMapOf(LEVELS[2]);
   orderMove(s, ids(s), base.x + 30, base.y);
   assert.equal(s.enemies[0].order.kind, "enter");
+  orderMove(s, ids(s), base.x, base.y + BASE_CLICK_RADIUS - 5);
+  assert.equal(s.enemies[0].order.kind, "enter");
+});
+
+// Per user request («llego a la base y no sé cómo conquistarla»): units
+// sent next to the base stood there and nothing happened.
+test("a unit that gets to the base goes in, whatever it was doing", () => {
+  const s = empty();
+  buyUnits(s, "soldier", 2);
+  startAttack(s);
+  const { base } = attackMapOf(LEVELS[2]);
+  const [idle, passing] = s.enemies;
+  idle.x = base.x + BASE_REACH - 10;
+  idle.y = base.y;
+  orderStop(s, [idle.id]);
+  passing.x = base.x - BASE_REACH - 30;
+  passing.y = base.y;
+  // driving straight past the base, on its way somewhere else
+  passing.order = { kind: "move" };
+  passing.path = [{ x: passing.x, y: passing.y }, { x: base.x + 300, y: base.y }];
+  passing.waypointIndex = 0;
+  run(s, 0.05);
+  assert.equal(idle.alive, false);
+  assert.equal(s.economy.lives, 19);
+  assert.ok(runUntil(s, () => !passing.alive, 10));
+  assert.equal(s.economy.lives, 18);
+  assert.equal(s.attack.stats.livesTaken, 2);
+});
+
+test("units sent somewhere well away from the base don't go in", () => {
+  const s = empty();
+  buyUnits(s, "soldier", 3);
+  orderMove(s, ids(s), 457, 191);
+  assert.equal(s.enemies[0].order.kind, "move");
+  startAttack(s);
+  assert.ok(runUntil(s, () => s.enemies.every((u) => u.order === null), 40));
+  assert.equal(s.enemies.length, 3);
+  assert.equal(s.economy.lives, 20);
 });
 
 test("units sent against a tower stop once it's in range, fire until it falls, then wait", () => {

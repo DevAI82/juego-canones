@@ -14,8 +14,9 @@ import { createAttackState, stepAttack, startAttack, buyUnits, setEntry, orderEn
 // Easy/Normal/Difficult against 94/61/22 % with 25).
 export const GROUP_SIZE = 25;
 
-// The entry whose road to the base runs past the least firepower.
-function safestEntry(state) {
+// The entry whose road to the base runs past the least firepower (also
+// the phone's automatic army's, autoArmy.js).
+export function safestEntry(state) {
   const { graph, entries, base } = attackMapOf(levelData(state.level));
   let best = 0;
   let bestThreat = Infinity;

@@ -159,6 +159,7 @@ test("the save list tells a defence game from an attack", () => {
     level: 3,
     round: 3,
     difficulty: "hard",
+    defender: "computer",
     lives: 17,
     money: Math.floor(attack.money),
     savedAt: "2026-10-09T18:30:00.000Z",
@@ -169,6 +170,9 @@ test("the save list tells a defence game from an attack", () => {
   assert.equal(slotListing(1, attack).summary.mode, "attack");
   assert.match(describeSave(attackSaveSummary(attack)), /^Ataque · Nivel 3 · Ronda 3 · Difícil · ❤ 17 · \$\d+ · \d\d\/\d\d \d\d:\d\d$/);
   assert.match(describeSave(gameSaveSummary(defence)), /^Defensa · Nivel 1 · Oleada 1 · ❤ 20 · \$150 · /);
+  // one against the other at home (docs/2026-10-09-uno-contra-otro-design.md §10)
+  const versus = { ...attack, defender: "player" };
+  assert.match(describeSave(gameSaveSummary(versus)), /^Uno contra otro · Nivel 3 · Ronda 3 · ❤ 17 · \d\d\/\d\d \d\d:\d\d$/);
 });
 
 test("the game loop and saving go the defence way or the attack way, by the game's mode", () => {

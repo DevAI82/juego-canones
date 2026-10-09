@@ -11,6 +11,7 @@ import { TOWER_TYPES } from "./tower.js";
 import { upgradeCost, canUpgrade, UPGRADE_DEFS } from "./upgrades.js";
 import { towerDps } from "./ai.js";
 import { attackMapOf, pointAlong, routeLength } from "./roadGraph.js";
+import { entrySafePoints, ENTRY_SAFE_ROAD, BASE_APPROACH } from "./entryRoads.js";
 
 // Its money, and how well it chooses: it picks at random among its
 // `choice` best options (1: always the best) and weighs the road where the
@@ -36,16 +37,10 @@ const MAX_WALLS = 12;
 const BASE_PULL = 2;
 const BASE_PULL_REACH = 600; // px from the base over which that pull fades out
 
-// The army must have somewhere to come in: no tower may be built where it
-// would reach the first ENTRY_SAFE_ROAD px of an entry's road -- where
-// bought units arrive and line up -- or they were shot as they arrived,
-// before they could be given an order (bot games: whole armies lost while
-// gathering). That stretch always ends BASE_APPROACH px of road short of
-// the base, though, so the base's own approaches can be guarded: level 3's
-// southern road is only 533 px long, and a full stretch from it reached
-// inside the fortress (bot games: Normal lost almost every game there).
-export const ENTRY_SAFE_ROAD = 320;
-export const BASE_APPROACH = 400;
+// The entries' safe stretch (entryRoads.js): simulate.js refuses any tower
+// or range upgrade that would reach it, and the plan below leaves those
+// options out from the start.
+export { ENTRY_SAFE_ROAD, BASE_APPROACH };
 
 // The level's roads as points every SAMPLE_STEP px, each worth 1 per road
 // to the base it lies on -- a stretch several roads share is worth more --
@@ -70,12 +65,7 @@ function planOf(level) {
   };
   for (const route of attackMapOf(level).routes) add(route, 1);
   for (const street of level.streets || []) add(street, 0.5);
-  // Points along the first ENTRY_SAFE_ROAD px of each entry's road (but
-  // never its last BASE_APPROACH px).
-  const safe = [];
-  for (const { route } of attackMapOf(level).entries) {
-    for (let s = 0; s <= Math.min(ENTRY_SAFE_ROAD, routeLength(route) - BASE_APPROACH); s += 20) safe.push(pointAlong(route, s));
-  }
+  const safe = entrySafePoints(level);
   const reach = level.buildSlots.map((slot) => {
     const byType = {};
     for (const [type, def] of Object.entries(TOWER_TYPES)) {

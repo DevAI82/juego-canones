@@ -21,6 +21,7 @@ import { applyUpgrade, upgradeCost, canUpgrade, UPGRADE_DEFS } from "./upgrades.
 import { chooseRoute, SOLDIER_ROUTE_CANDIDATES, holdsForSiege } from "./ai.js";
 import { WALL, wallCell, segmentNearBlock } from "./walls.js";
 import { assignId } from "./ids.js";
+import { reachesEntryRoad } from "./entryRoads.js";
 
 export { WALL };
 
@@ -440,6 +441,11 @@ export function canPlaceTower(state, towerType, x, y) {
   if (!slot) return { ok: false, reason: "no-slot" };
   const occupied = state.towers.some((t) => t.hp > 0 && Math.hypot(t.x - slot.x, t.y - slot.y) < SLOT_OCCUPIED_RADIUS);
   if (occupied) return { ok: false, reason: "slot-occupied" };
+  // In an attack, the army's entries keep a stretch of road no tower
+  // reaches (entryRoads.js) -- whoever is defending.
+  if (state.mode === "attack" && reachesEntryRoad(levelData(state.level), slot.x, slot.y, def.range)) {
+    return { ok: false, reason: "entry-road" };
+  }
 
   if (!canAfford(state.economy, def.cost)) return { ok: false, reason: "cant-afford" };
   return { ok: true, x: slot.x, y: slot.y };
@@ -466,6 +472,11 @@ export function upgradeTower(state, towerId, skill) {
   const tower = findTower(state, towerId);
   if (!tower) return { ok: false, reason: "no-such-tower" };
   if (!canUpgrade(tower, skill)) return { ok: false, reason: "maxed" };
+  if (skill === "range" && state.mode === "attack") {
+    // Nor may a longer reach take a tower over an entry's safe stretch.
+    const range = TOWER_TYPES[tower.type].range * UPGRADE_DEFS.range.mult ** (tower.level.range + 1);
+    if (reachesEntryRoad(levelData(state.level), tower.x, tower.y, range)) return { ok: false, reason: "entry-road" };
+  }
   const cost = upgradeCost(skill, tower.level[skill]);
   if (!spend(state.economy, cost)) return { ok: false, reason: "cant-afford" };
   state.stats.moneySpent += cost;
