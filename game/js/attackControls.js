@@ -78,7 +78,8 @@ export function createAttackControls(env) {
       env.onRefused();
       return;
     }
-    const at = result.stops ? result.stops[0] : result.target;
+    // A move's mark where the player clicked; an attack's (or the base's) on its target.
+    const at = result.stops ? p : result.target;
     markers.push({ x: at.x, y: at.y, kind: result.stops ? "move" : "attack", t: env.now() });
   }
 

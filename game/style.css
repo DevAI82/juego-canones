@@ -114,7 +114,8 @@ body {
 /* Positioned entirely in JS (main.js's resizeGame()/positionBuildMenu()):
    #build-menu lives outside #game-container, parked in the black letterbox
    margin on wide windows, with vertical layout and Repair/Sell action buttons. */
-#build-menu {
+#build-menu,
+#attack-shop {
   position: fixed;
   display: flex;
   gap: 8px;
@@ -126,7 +127,8 @@ body {
   border-radius: 8px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
 }
-#build-menu.sidebar-mode {
+#build-menu.sidebar-mode,
+#attack-shop.sidebar-mode {
   flex-direction: column;
   gap: 6px;
 }
@@ -135,7 +137,8 @@ body {
   gap: 8px;
   flex: 1;
 }
-#build-menu.sidebar-mode .build-towers-section {
+#build-menu.sidebar-mode .build-towers-section,
+#attack-shop.sidebar-mode .build-towers-section {
   flex-direction: column;
   gap: 8px;
   flex: none;
@@ -231,7 +234,8 @@ body {
   border-color: #81e6d9;
   box-shadow: 0 0 14px rgba(129, 230, 217, 0.5), inset 0 0 16px rgba(0, 0, 0, 0.6);
 }
-#build-menu.sidebar-mode .build-btn { flex: none; width: 100%; height: 104px; margin-bottom: 2px; }
+#build-menu.sidebar-mode .build-btn,
+#attack-shop.sidebar-mode .build-btn { flex: none; width: 100%; height: 104px; margin-bottom: 2px; }
 .build-btn-label {
   color: #e6fffa;
   font-family: sans-serif;
@@ -252,7 +256,8 @@ body {
    background is a crop of that mockup's own hologram-icon art
    (game/js/ui.js sets it inline per skill); the surrounding chrome (glow,
    pip bar, buttons) is built in CSS so it can reflect live game state. */
-#upgrade-panel {
+#upgrade-panel,
+#unit-upgrade-panel {
   position: absolute;
   bottom: 20px;
   left: 50%;
@@ -693,6 +698,7 @@ body {
 /* The game's own controls stay out of the way while a menu is open. */
 body.menu-open #top-controls,
 body.menu-open #build-menu,
+body.menu-open #attack-shop,
 body.menu-open #nav-controls { display: none; }
 
 /* Short messages ("Partida guardada en el hueco 2"...). */
@@ -899,3 +905,36 @@ body.menu-open #nav-controls { display: none; }
   font-weight: bold;
   color: #ffe27a;
 }
+
+/* The attack mode's shop (attackUI.js) in the build menu's place, and the
+   unit upgrade panel in the towers' upgrade panel's place, with a tab per
+   unit type of the selection above its five cards. */
+#build-menu.hidden,
+#attack-shop.hidden,
+#unit-upgrade-panel.hidden { display: none; }
+.shop-title {
+  color: #ffe27a;
+  font: bold 14px sans-serif;
+  letter-spacing: 1px;
+  text-align: center;
+  text-shadow: 0 1px 3px #000;
+}
+#attack-shop.column-mode { flex-direction: column; gap: 4px; padding: 6px; }
+#attack-shop.column-mode .build-towers-section { flex-direction: column; gap: 6px; flex: none; }
+#attack-shop.column-mode .build-btn { flex: none; width: 100%; height: 72px; }
+#attack-shop.column-mode .build-btn-label { font-size: 10px; padding: 2px 3px; }
+#attack-shop.sidebar-mode .build-btn { height: 92px; }
+#unit-upgrade-panel { flex-direction: column; align-items: center; gap: 6px; }
+.unit-upgrade-cols { display: flex; align-items: flex-end; gap: 10px; }
+.unit-tabs { display: flex; gap: 6px; }
+.unit-tab {
+  padding: 4px 14px;
+  font: bold 13px sans-serif;
+  color: #dffcff;
+  background: #163238;
+  border: 1px solid #6fd8e6;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.unit-tab.active { color: #ffe27a; background: #2b5b62; border-color: #ffe27a; }
+.unit-tab.hidden { display: none; }

@@ -1,13 +1,21 @@
 import { CANVAS_WIDTH, CANVAS_HEIGHT, drawMap } from "./map.js";
 import { WAVES } from "./waves.js";
 import { TOWER_TYPES, BUILD_DURATION, MUZZLE_OFFSET } from "./tower.js";
-import { topValue } from "./upgrades.js";
+import { topValue, UPGRADE_DEFS } from "./upgrades.js";
 import { WALL } from "./walls.js";
-import { initBuildMenu, updateBuildMenu, initUpgradePanel, updateUpgradePanel, renderGameEndScreen, renderRanking, renderStatsModal } from "./ui.js";
+import {
+  initBuildMenu,
+  updateBuildMenu,
+  initUpgradePanel,
+  updateUpgradePanel,
+  renderGameEndScreen,
+  renderAttackEndScreen,
+  renderRanking,
+  renderStatsModal,
+} from "./ui.js";
 import {
   createGameState,
   startNextLevel,
-  stepSimulation,
   canPlaceTower,
   placeTower,
   upgradeTower,
@@ -17,8 +25,6 @@ import {
   canPlaceWall,
   skipWave,
   togglePause,
-  canSaveNow,
-  restoreSave,
 } from "./simulate.js";
 import { MAX_LEVEL, levelData } from "./levels.js";
 import { pickTowerTarget } from "./ai.js";
@@ -30,6 +36,22 @@ import { createSaveScheduler } from "./autosave.js";
 import { readSave, writeSave, listSaves, canStore } from "./saves.js";
 import { loadSettings, saveSettings } from "./settings.js";
 import { createMenu } from "./menu.js";
+import { stepGame, canSaveGame, restoreGameSave } from "./modes.js";
+import { createAttackState, startAttack, buyUnits, upgradeUnitType, UNIT_ORDER } from "./attack.js";
+import { attackMapOf } from "./roadGraph.js";
+import { isVisible } from "./fog.js";
+import { createAttackControls } from "./attackControls.js";
+import {
+  createFogLayer,
+  drawSelectionRing,
+  drawGroupNumber,
+  drawEntryFlags,
+  drawBaseMarker,
+  drawOrderMarkers,
+  drawRange,
+  drawSelectionBox,
+} from "./attackDraw.js";
+import { initShop, updateShop, initUnitUpgrades, updateUnitUpgrades, attackHudLines, attackSummary } from "./attackUI.js";
 
 // Browsers refuse to start any audio (synthesized SFX or the background
 // music) before a real user gesture. Fire once, on whichever happens
@@ -62,7 +84,39 @@ const BUILD_MENU_SIDEBAR_WIDTH = 160;
 const BUILD_MENU_SIDEBAR_GAP = 16;
 
 function positionBuildMenu(scale) {
-  const buildMenuEl = document.getElementById("build-menu");
+  positionSidePanel(document.getElementById("build-menu"), scale);
+  positionShop(scale);
+}
+
+// The attack mode's shop (#attack-shop): in the left margin like the build
+// menu when the window leaves room for it, otherwise a narrow column down
+// the map's right-hand edge -- not a band across the map like the build
+// menu's, which would hide the units coming in at the map's northern
+// entries.
+const SHOP_COLUMN_WIDTH = 112;
+
+function positionShop(scale) {
+  const shopEl = document.getElementById("attack-shop");
+  const scaledW = CANVAS_WIDTH * scale;
+  const scaledH = CANVAS_HEIGHT * scale;
+  const gameLeft = (window.innerWidth - scaledW) / 2;
+  const gameTop = (window.innerHeight - scaledH) / 2;
+  if (gameLeft >= BUILD_MENU_SIDEBAR_WIDTH + BUILD_MENU_SIDEBAR_GAP * 2) {
+    shopEl.classList.remove("column-mode");
+    positionSidePanel(shopEl, scale);
+    return;
+  }
+  shopEl.classList.remove("sidebar-mode");
+  shopEl.classList.add("column-mode");
+  shopEl.style.transform = `scale(${scale})`;
+  shopEl.style.transformOrigin = "top left";
+  shopEl.style.left = `${Math.round(gameLeft + scaledW - (SHOP_COLUMN_WIDTH + 12) * scale)}px`;
+  shopEl.style.top = `${Math.round(gameTop + 64 * scale)}px`;
+  shopEl.style.width = `${SHOP_COLUMN_WIDTH}px`;
+  shopEl.style.height = "";
+}
+
+function positionSidePanel(buildMenuEl, scale) {
   const scaledW = CANVAS_WIDTH * scale;
   const scaledH = CANVAS_HEIGHT * scale;
   const gameLeft = (window.innerWidth - scaledW) / 2;
@@ -201,6 +255,10 @@ function ready(img) {
 // mutates it directly, only sends actions and waits for the next poll.
 let state = createGameState();
 let networked = false; // set once, before the loop starts (see boot() below)
+// An attack (attack.js, docs/2026-10-09-modo-atacante-design.md) rather
+// than a defence game: every piece of the screen below has an attack
+// version, picked by this.
+const attacking = () => state.mode === "attack";
 
 let selectedBuildType = null;
 // The selected tower or wall block is tracked by id, not object reference: in networked
@@ -237,26 +295,39 @@ function worldSize(level) {
 // overview with no scrolling needed. For Levels 1/2, minZoom is 1.0.
 function minZoomFor(level) {
   const { w, h } = worldSize(level);
-  return Math.min(CANVAS_WIDTH / w, CANVAS_HEIGHT / h);
+  const pad = cameraPadding(); // (in an attack: the room the shop and HUD leave free)
+  return Math.min((CANVAS_WIDTH - pad.right) / w, (CANVAS_HEIGHT - pad.top) / h);
 }
 
 function clampZoom(level) {
   zoom = Math.max(minZoomFor(level), Math.min(MAX_ZOOM, zoom));
 }
 
+// In an attack the map can be pushed out from under the shop's column on
+// the right and from under the HUD and «¡Al ataque!» on top (canvas px),
+// so nothing at the map's edges -- an entry, level 1's base -- has to stay
+// hidden under them.
+function cameraPadding() {
+  const shopInColumn = attacking() && document.getElementById("attack-shop").classList.contains("column-mode");
+  return shopInColumn ? { right: SHOP_COLUMN_WIDTH + 24, top: 128 } : { right: 0, top: 0 };
+}
+
 function clampCamera(level) {
   const { w, h } = worldSize(level);
   const viewW = CANVAS_WIDTH / zoom;
   const viewH = CANVAS_HEIGHT / zoom;
-  if (viewW >= w) {
-    camera.x = (w - viewW) / 2; // Center horizontally when fully zoomed out
+  const pad = cameraPadding();
+  const padX = pad.right / zoom;
+  const padY = pad.top / zoom;
+  if (viewW >= w + padX) {
+    camera.x = (w - viewW + padX) / 2; // Center horizontally (in the room left free) when fully zoomed out
   } else {
-    camera.x = Math.max(0, Math.min(w - viewW, camera.x));
+    camera.x = Math.max(0, Math.min(w - viewW + padX, camera.x));
   }
-  if (viewH >= h) {
-    camera.y = (h - viewH) / 2; // Center vertically when fully zoomed out
+  if (viewH >= h + padY) {
+    camera.y = (h - viewH - padY) / 2; // Center vertically (in the room left free) when fully zoomed out
   } else {
-    camera.y = Math.max(0, Math.min(h - viewH, camera.y));
+    camera.y = Math.max(-padY, Math.min(h - viewH, camera.y));
   }
 }
 
@@ -268,7 +339,8 @@ function recenterCamera(level) {
   zoom = minZoomFor(level);
   clampZoom(level);
   const d = levelData(level);
-  const anchor = d.soldierExit || { x: w / 2, y: h / 2 };
+  // An attack opens on where the army comes in; a defence game on its base.
+  const anchor = attacking() ? attackMapOf(d).entries[state.attack.entry] : d.soldierExit || { x: w / 2, y: h / 2 };
   camera.x = anchor.x - (CANVAS_WIDTH / zoom) / 2;
   camera.y = anchor.y - (CANVAS_HEIGHT / zoom) / 2;
   clampCamera(level);
@@ -495,9 +567,10 @@ function drawEnemy(e) {
   ctx.save();
   ctx.fillStyle = "rgba(0, 0, 0, 0.75)";
   ctx.fillRect(e.x - barW / 2 - 1, barY - 1, barW + 2, barH + 2);
-  ctx.fillStyle = "#3a0d0d";
+  // In an attack these are the player's own units: green bars.
+  ctx.fillStyle = attacking() ? "#0d3a12" : "#3a0d0d";
   ctx.fillRect(e.x - barW / 2, barY, barW, barH);
-  ctx.fillStyle = "#e5392f";
+  ctx.fillStyle = attacking() ? "#47d35a" : "#e5392f";
   ctx.fillRect(e.x - barW / 2, barY, barW * pct, barH);
   ctx.restore();
 }
@@ -995,6 +1068,7 @@ function drawProjectile(p) {
 }
 
 function drawHud() {
+  if (attacking()) return drawAttackHud();
   ctx.save();
   ctx.fillStyle = "#fff";
   ctx.font = "20px sans-serif";
@@ -1031,6 +1105,34 @@ function drawHud() {
   ctx.restore();
 }
 
+// An attack's HUD (attackUI.js's lines): the round and its clock, the
+// base's lives, the money and the army -- and, while preparing, what to do.
+function drawAttackHud() {
+  ctx.save();
+  ctx.fillStyle = "#fff";
+  ctx.font = "20px sans-serif";
+  ctx.shadowColor = "rgba(0, 0, 0, 0.8)";
+  ctx.shadowBlur = 4;
+  // Two rows, like the defence game's HUD height, so «¡Al ataque!» fits
+  // under them: the round and its clock, then the rest side by side.
+  const [head, ...rest] = attackHudLines(state);
+  ctx.fillText(head, 20, 30);
+  ctx.fillText(rest.join("   ·   "), 20, 55);
+  ctx.textAlign = "center";
+  if (state.attack.phase === "prep" && !state.gameOver) {
+    ctx.font = "bold 18px sans-serif";
+    ctx.fillStyle = "#ffe27a";
+    ctx.fillText("Compra tu ejército, dale órdenes y pulsa «¡Al ataque!»", CANVAS_WIDTH / 2, 30);
+  }
+  // (A loaded preparation waits paused, but nothing runs in it anyway.)
+  if (state.paused && !state.gameOver && state.attack.phase === "battle") {
+    ctx.font = "36px sans-serif";
+    ctx.fillStyle = "#ffd700";
+    ctx.fillText("PAUSA", CANVAS_WIDTH / 2, 70);
+  }
+  ctx.restore();
+}
+
 const buildMenuEl = document.getElementById("build-menu");
 initBuildMenu(buildMenuEl, {
   onSelect: (type) => {
@@ -1057,10 +1159,32 @@ initUpgradePanel(upgradePanelEl, {
   },
 });
 
+// The attack mode's shop and unit upgrade panel (attackUI.js), in place of
+// the build menu and the towers' upgrade panel.
+const attackShopEl = document.getElementById("attack-shop");
+initShop(attackShopEl, {
+  onBuy: (type, count) => {
+    if (!attacking() || state.gameOver) return;
+    if (!buyUnits(state, type, count).ok) playSound("error");
+  },
+});
+const unitUpgradeEl = document.getElementById("unit-upgrade-panel");
+let unitUpgradeType = null; // the type whose upgrades show (a tab per type in the selection)
+initUnitUpgrades(unitUpgradeEl, {
+  onUpgrade: (skill) => {
+    if (attacking() && unitUpgradeType) upgradeUnitType(state, unitUpgradeType, skill);
+  },
+  onTab: (type) => {
+    unitUpgradeType = type;
+  },
+});
+
 const skipWaveBtn = document.getElementById("skip-wave-btn");
 skipWaveBtn.addEventListener("click", () => {
   if (state.gameOver || state.win || state.levelComplete) return;
-  actions.skip();
+  // In an attack's preparation it's «¡Al ataque!».
+  if (attacking()) startAttack(state);
+  else actions.skip();
 });
 
 const statsBtn = document.getElementById("stats-btn");
@@ -1106,7 +1230,7 @@ pauseBtn.addEventListener("click", () => {
 // --- Menus, saved games, settings ----------------------------------------
 // Per user request (docs/2026-10-08-menu-y-guardado-design.md): a main
 // menu first, a pause menu during play (☰ or Esc), saving and loading.
-// `started` gates stepSimulation in LOCAL mode only: a fresh
+// `started` gates stepGame in LOCAL mode only: a fresh
 // createGameState() isn't over, so without it the level-1 game would tick
 // along under the main menu before the player has chosen anything.
 // Networked mode never needs it -- the server ticks on its own, and a
@@ -1162,6 +1286,8 @@ function enterGame() {
   menu.close();
   selectedId = null;
   selectedBuildType = null;
+  attackControls.reset();
+  unitUpgradeType = null;
   // Forces loop()'s "state.level changed" check to re-fire even for the
   // SAME level number (replaying level 3 after a loss, loading another
   // level-3 game) so the camera recenters on the new game.
@@ -1170,11 +1296,12 @@ function enterGame() {
   gameEndShown = false;
 }
 
-function startNewGame(level) {
+// options: { mode: "attack", difficulty } for an attack (menu.js).
+function startNewGame(level, { mode = "defense", difficulty = "normal" } = {}) {
   if (networked) {
     postAction({ type: "restart", level });
   } else {
-    state = createGameState(level);
+    state = mode === "attack" ? createAttackState(level, difficulty) : createGameState(level);
     saveScheduler.reset(state);
     started = true;
   }
@@ -1186,7 +1313,7 @@ async function loadSlot(slot) {
     const result = await askServer({ type: "load", slot });
     if (!result.ok) return showToast("No se puede cargar esta partida");
   } else {
-    const restored = restoreSave(readSave(slot));
+    const restored = restoreGameSave(readSave(slot));
     if (!restored) return showToast("No se puede cargar esta partida");
     state = restored;
     saveScheduler.reset(state); // «Continuar» now means this game
@@ -1203,7 +1330,8 @@ async function saveToSlot(slot) {
     return;
   }
   const result = saveScheduler.request(slot, state);
-  showToast(result.done ? savedMessage(slot, result.result) : "Se guardará al terminar la oleada");
+  const later = attacking() ? "Se guardará al empezar la ronda siguiente" : "Se guardará al terminar la oleada";
+  showToast(result.done ? savedMessage(slot, result.result) : later);
 }
 
 // The pause menu pauses a solo game while it's open, and leaves it as it
@@ -1234,7 +1362,8 @@ const menu = createMenu(document.getElementById("menu"), {
   },
   listSaves: listSavesForMenu,
   canStore: () => networked || canStore(),
-  canSaveNow: () => canSaveNow(state),
+  canSaveNow: () => canSaveGame(state),
+  attacking: () => attacking(),
   hasGame: () => !networked && started,
   getSettings: () => settings,
   onContinue: () => (networked ? enterGame() : loadSlot("auto")),
@@ -1329,6 +1458,13 @@ let currentMatchScore = 0;
 let gameEndShown = false;
 
 async function showGameEndScreen() {
+  if (attacking()) {
+    // An attack's end: who won and how it went -- no score or ranking.
+    renderAttackEndScreen(gameEndOverlay, attackSummary(state));
+    gameEndCloseBtn.textContent = "Jugar de nuevo";
+    gameEndOverlay.classList.remove("hidden");
+    return;
+  }
   currentMatchScore = renderGameEndScreen(gameEndOverlay, state);
   const interim = state.levelComplete;
   gameEndCloseBtn.textContent = interim ? `Continuar al Nivel ${state.level + 1} ▶` : "Jugar de nuevo";
@@ -1485,9 +1621,48 @@ function canvasPoint(evt) {
   };
 }
 
+// The attack mode's mouse, keyboard and touch (attackControls.js).
+const attackControls = createAttackControls({
+  getState: () => state,
+  worldAt: worldPos,
+  canvasAt: canvasPoint,
+  view: () => ({ x: camera.x, y: camera.y, w: CANVAS_WIDTH / zoom, h: CANVAS_HEIGHT / zoom }),
+  canvasSize: { w: CANVAS_WIDTH, h: CANVAS_HEIGHT },
+  clientToCanvas: () => CANVAS_WIDTH / canvas.getBoundingClientRect().width,
+  panCanvas: (dx, dy) => {
+    camera.x += dx / zoom;
+    camera.y += dy / zoom;
+    clampCamera(state.level);
+  },
+  centerOn: centerCameraOn,
+  entries: () => attackMapOf(levelData(state.level)).entries,
+  now: () => performance.now() / 1000,
+  onRefused: () => playSound("error"),
+});
+// The middle button pans the map in an attack: not the browser's autoscroll.
+canvas.addEventListener("mousedown", (evt) => {
+  if (evt.button === 1) evt.preventDefault();
+});
+canvas.addEventListener("pointerleave", () => attackControls.pointerLeave());
 canvas.addEventListener("contextmenu", (evt) => evt.preventDefault());
 
 canvas.addEventListener("pointerdown", (evt) => {
+  if (attacking()) {
+    if (!started || state.gameOver) return;
+    // The minimap still moves the camera -- or, right-clicked, sends the
+    // selected units there; everything else is the attack controls'.
+    const mini = currentMinimap();
+    const cp = canvasPoint(evt);
+    const onMinimap = mini && minimapToWorld(mini, cp.x, cp.y);
+    if (onMinimap && evt.button === 2) return attackControls.orderAt(onMinimap);
+    if (onMinimap && evt.button === 0) {
+      minimapDragging = true;
+      centerCameraOn(onMinimap);
+      return;
+    }
+    attackControls.pointerDown(evt);
+    return;
+  }
   if (evt.button === 2) {
     // Right-click cancels build selection
     if (selectedBuildType) {
@@ -1524,6 +1699,10 @@ canvas.addEventListener("pointermove", (evt) => {
   const pos = worldPos(evt);
   mouseX = pos.x;
   mouseY = pos.y;
+  if (attacking() && !minimapDragging) {
+    attackControls.pointerMove(evt);
+    return;
+  }
   if (wallPaint) {
     paintWall(pos, false);
     return;
@@ -1547,8 +1726,13 @@ canvas.addEventListener("pointermove", (evt) => {
 });
 
 window.addEventListener("pointerup", (evt) => {
+  const wasOnMinimap = minimapDragging;
   minimapDragging = false;
   wallPaint = null;
+  if (attacking()) {
+    if (!wasOnMinimap) attackControls.pointerUp(evt);
+    return;
+  }
   if (!dragState) return;
   const dxScreen = evt.clientX - dragState.startClientX;
   const dyScreen = evt.clientY - dragState.startClientY;
@@ -1602,6 +1786,7 @@ canvas.addEventListener(
 // stepping the camera once per keydown, so panning is smooth and speed
 // doesn't depend on OS key-repeat timing.
 const PAN_KEYS = new Set(["arrowup", "arrowdown", "arrowleft", "arrowright", "w", "a", "s", "d"]);
+const WASD = new Set(["w", "a", "s", "d"]);
 const pressedPanKeys = new Set();
 const PAN_SPEED = 600; // world px/sec
 
@@ -1613,6 +1798,8 @@ window.addEventListener("keydown", (evt) => {
     // opens the pause menu, or (in a menu) goes back a screen.
     if (selectedBuildType) {
       selectedBuildType = null;
+    } else if (!menu.isOpen() && attacking() && attackControls.escape()) {
+      // Esc in an attack first lets go of the selected units.
     } else if (menu.isOpen()) {
       menu.back();
     } else {
@@ -1629,6 +1816,11 @@ window.addEventListener("keydown", (evt) => {
     // state instead of actually resetting it).
     backToNewGame();
     return;
+  }
+  if (attacking()) {
+    if (started && !state.gameOver && attackControls.keyDown(evt)) return;
+    // WASD don't pan in an attack: S is «stop».
+    if (WASD.has(key)) return;
   }
   if (PAN_KEYS.has(key)) pressedPanKeys.add(key);
 });
@@ -1683,6 +1875,155 @@ wireNavButton("nav-up", "arrowup");
 wireNavButton("nav-down", "arrowdown");
 wireNavButton("nav-left", "arrowleft");
 wireNavButton("nav-right", "arrowright");
+
+// --- The attack mode's battlefield ---------------------------------------
+// The defence's towers and wall blocks show only where the army can see
+// them; elsewhere as they were when last seen (fog.js's memory), greyed by
+// the fog drawn over them. Shots and blasts only in sight; the army itself
+// always. Over the fog: the base, the entries' flags, the orders' marks
+// and the reach of a known tower under the pointer.
+const fogLayer = createFogLayer();
+
+// A tower as the attacker last saw it, drawn like a live one.
+function rememberedTower(m) {
+  return { ...m, id: -1, buildTimeRemaining: m.building ? BUILD_DURATION / 2 : 0, muzzleFlash: 0, ammo: 1, maxAmmo: 1, range: 0 };
+}
+
+// A live or remembered tower's reach.
+function towerRange(t) {
+  if (t.range) return t.range;
+  return TOWER_TYPES[t.type].range * UPGRADE_DEFS.range.mult ** ((t.level && t.level.range) || 0);
+}
+
+// The defence the attacker knows of: what's in sight as it is, the rest as
+// it was when last seen.
+function knownDefence(view) {
+  const fog = state.attack.fog;
+  const remembered = Object.values(fog.memory).filter((m) => !isVisible(fog, m.x, m.y));
+  return {
+    towers: [...view.towers.filter((t) => isVisible(fog, t.x, t.y)), ...remembered.filter((m) => m.kind === "tower").map(rememberedTower)],
+    walls: [...(view.walls || []).filter((w) => isVisible(fog, w.x, w.y)), ...remembered.filter((m) => m.kind === "wall").map((m) => ({ ...m, id: -1 }))],
+  };
+}
+
+// A laser beam from a tower out of sight shows only its last stretch, as
+// it comes out of the fog onto the unit it hits.
+function drawBeamInFog(b, fog) {
+  if (isVisible(fog, b.x1, b.y1)) return drawBeam(b);
+  if (!isVisible(fog, b.x2, b.y2)) return;
+  const len = Math.hypot(b.x2 - b.x1, b.y2 - b.y1) || 1;
+  const k = Math.max(0, 1 - 60 / len);
+  drawBeam({ ...b, x1: b.x1 + (b.x2 - b.x1) * k, y1: b.y1 + (b.y2 - b.y1) * k });
+}
+
+function drawAttackWorld(view, now) {
+  const fog = state.attack.fog;
+  const inSight = (o) => isVisible(fog, o.x, o.y);
+  const known = knownDefence(view);
+  drawWalls(known.walls);
+  for (const t of known.towers) drawTower(t);
+  const picked = attackControls.selectedIds();
+  for (const e of view.enemies) if (picked.has(e.id)) drawSelectionRing(ctx, e);
+  for (const e of view.enemies) drawEnemy(e);
+  drawForeground(state.level);
+  for (const e of view.enemies) {
+    const group = attackControls.groupOf(e.id);
+    if (group != null) drawGroupNumber(ctx, e, group, 1 / zoom);
+  }
+  for (const p of view.projectiles) if (inSight(p)) drawProjectile(p);
+  for (const bm of view.beams) drawBeamInFog(bm, fog);
+  for (const ex of view.explosions) if (inSight(ex)) drawExplosion(ex);
+  drawAirEffects(fx, ctx);
+  fogLayer.draw(ctx, fog);
+  const map = attackMapOf(levelData(state.level));
+  drawBaseMarker(ctx, map.base, now / 1000, 1 / zoom);
+  drawEntryFlags(ctx, map.entries, state.attack.entry, 1 / zoom);
+  drawOrderMarkers(ctx, attackControls.markers(), now / 1000);
+  const hover = attackControls.hoverWorld();
+  const hovered = hover && known.towers.find((t) => Math.hypot(t.x - hover.x, t.y - hover.y) < 38);
+  if (hovered) drawRange(ctx, hovered.x, hovered.y, towerRange(hovered));
+}
+
+// The minimap of an attack: fogged, with the defence the attacker knows
+// of, its own army, the entries and the base.
+function attackMinimap(view, mapImage) {
+  const map = attackMapOf(levelData(state.level));
+  const known = knownDefence(view);
+  return {
+    mapImage: ready(mapImage) ? mapImage : null,
+    enemies: [],
+    units: view.enemies,
+    towers: known.towers,
+    walls: known.walls,
+    base: map.base,
+    view: { camera, w: CANVAS_WIDTH / zoom, h: CANVAS_HEIGHT / zoom },
+    fog: fogLayer.canvas(),
+    entries: map.entries,
+    activeEntry: state.attack.entry,
+  };
+}
+
+// An attack's panels, every frame: the shop instead of the build menu, the
+// upgrade panel of the selected units' types, and «¡Al ataque!» on the
+// start button while the attack is being prepared.
+function updateAttackPanels() {
+  buildMenuEl.classList.add("hidden");
+  upgradePanelEl.classList.add("hidden");
+  attackShopEl.classList.remove("hidden");
+  updateShop(attackShopEl, state);
+  const picked = attackControls.selected();
+  const types = UNIT_ORDER.filter((type) => picked.some((u) => u.type === type));
+  if (!types.includes(unitUpgradeType)) unitUpgradeType = types[0] || null;
+  updateUnitUpgrades(unitUpgradeEl, state, types, unitUpgradeType);
+  const preparing = state.attack.phase === "prep" && !state.gameOver;
+  skipWaveBtn.classList.toggle("hidden", !preparing);
+  if (preparing) {
+    skipWaveBtn.textContent = "⚔ ¡Al ataque!";
+    skipWaveBtn.classList.add("pulse");
+    skipWaveBtn.title = "Empezar la ronda 1";
+  }
+}
+
+// A defence game's panels, every frame: the build menu, the towers'
+// upgrade panel and the start / next-wave button.
+function updateDefencePanels() {
+  buildMenuEl.classList.remove("hidden");
+  attackShopEl.classList.add("hidden");
+  unitUpgradeEl.classList.add("hidden");
+  const selectedTower = state.towers.find((t) => t.id === selectedId) || null;
+  const selectedWall = (state.walls || []).find((w) => w.id === selectedId) || null;
+  if (selectedId != null && !selectedTower && !selectedWall) selectedId = null; // sold/destroyed
+  updateBuildMenu(buildMenuEl, {
+    towers: state.towers,
+    walls: state.walls || [],
+    economy: state.economy,
+    selectedType: selectedBuildType,
+    selected: selectedTower || selectedWall,
+  });
+  updateUpgradePanel(upgradePanelEl, selectedTower);
+
+  // Play / Advance Wave button: during the countdown it starts the next
+  // wave now (and carries the countdown itself -- the canvas HUD line it
+  // used to sit on top of is gone); mid-wave it calls the next wave in
+  // early, but only once the current one has finished spawning (see
+  // simulate.js's skipWave).
+  const playing = !state.gameOver && !state.win && !state.levelComplete;
+  const inCountdown = state.interWaveTimer > 0;
+  const canCallEarly = state.spawnQueue.length === 0 && state.waveIndex < WAVES.length - 1;
+  const canAdvanceWave = playing && (inCountdown || canCallEarly);
+  skipWaveBtn.classList.toggle("hidden", !canAdvanceWave);
+  if (canAdvanceWave) {
+    if (inCountdown) {
+      skipWaveBtn.textContent = `▶ Iniciar Oleada ${state.waveIndex + 1} (${Math.ceil(state.interWaveTimer)}s)`;
+      skipWaveBtn.classList.add("pulse");
+      skipWaveBtn.title = "Comenzar oleada inmediatamente";
+    } else {
+      skipWaveBtn.textContent = `▶ +Oleada ${state.waveIndex + 2}`;
+      skipWaveBtn.classList.remove("pulse");
+      skipWaveBtn.title = "Llamar a la siguiente oleada de inmediato (acelerar juego)";
+    }
+  }
+}
 
 // --- Networked (multiplayer) mode ---------------------------------------
 // Polls the host's /api/state every POLL_MS and replaces `state` wholesale
@@ -1792,7 +2133,7 @@ function loop(now) {
     // Before stepping: a level's start is only between waves until its
     // first tick spawns the opening units.
     saveScheduler.tick(state, (slot, ok) => showToast(savedMessage(slot, ok)));
-    stepSimulation(state, dt);
+    stepGame(state, dt);
   }
   playNewShotSounds();
   syncMusicToPause();
@@ -1804,6 +2145,7 @@ function loop(now) {
     clearEffects(fx);
   }
   updateCameraFromKeys(dt);
+  if (attacking() && started && !menu.isOpen()) attackControls.update(dt);
 
   ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
   // Everything below, up to ctx.restore(), draws in WORLD space -- the
@@ -1832,17 +2174,21 @@ function loop(now) {
   // Effects freeze with the game when it's paused.
   if (!state.paused) stepEffects(fx, view, dt);
   drawGroundEffects(fx, ctx, wreckSprite);
-  drawWalls(view.walls || []);
-  for (const t of view.towers) drawTower(t);
-  for (const e of view.enemies) drawEnemy(e);
-  drawForeground(state.level);
-  // Over the foreground: a rocket truck shelling from behind a skyscraper
-  // still shows where it's firing from.
-  for (const e of view.enemies) if (e.holding) drawSiegeDesignator(e);
-  for (const p of view.projectiles) drawProjectile(p);
-  for (const bm of view.beams) drawBeam(bm);
-  for (const ex of view.explosions) drawExplosion(ex);
-  drawAirEffects(fx, ctx);
+  if (attacking()) {
+    drawAttackWorld(view, now);
+  } else {
+    drawWalls(view.walls || []);
+    for (const t of view.towers) drawTower(t);
+    for (const e of view.enemies) drawEnemy(e);
+    drawForeground(state.level);
+    // Over the foreground: a rocket truck shelling from behind a skyscraper
+    // still shows where it's firing from.
+    for (const e of view.enemies) if (e.holding) drawSiegeDesignator(e);
+    for (const p of view.projectiles) drawProjectile(p);
+    for (const bm of view.beams) drawBeam(bm);
+    for (const ex of view.explosions) drawExplosion(ex);
+    drawAirEffects(fx, ctx);
+  }
 
   if (selectedBuildType) {
     // A slot-based level (levels.js's buildSlots) only allows building at
@@ -1891,8 +2237,14 @@ function loop(now) {
   }
   ctx.restore();
 
+  // The box being dragged to select units, over the map in screen space.
+  const dragBox = attacking() ? attackControls.box() : null;
+  if (dragBox) drawSelectionBox(ctx, dragBox);
+
   const mini = currentMinimap();
-  if (mini) {
+  if (mini && attacking()) {
+    drawMinimap(ctx, mini, attackMinimap(view, currentMapImage));
+  } else if (mini) {
     drawMinimap(ctx, mini, {
       mapImage: ready(currentMapImage) ? currentMapImage : null,
       enemies: view.enemies,
@@ -1904,39 +2256,8 @@ function loop(now) {
   }
 
   drawHud();
-  const selectedTower = state.towers.find((t) => t.id === selectedId) || null;
-  const selectedWall = (state.walls || []).find((w) => w.id === selectedId) || null;
-  if (selectedId != null && !selectedTower && !selectedWall) selectedId = null; // sold/destroyed
-  updateBuildMenu(buildMenuEl, {
-    towers: state.towers,
-    walls: state.walls || [],
-    economy: state.economy,
-    selectedType: selectedBuildType,
-    selected: selectedTower || selectedWall,
-  });
-  updateUpgradePanel(upgradePanelEl, selectedTower);
-
-  // Play / Advance Wave button: during the countdown it starts the next
-  // wave now (and carries the countdown itself -- the canvas HUD line it
-  // used to sit on top of is gone); mid-wave it calls the next wave in
-  // early, but only once the current one has finished spawning (see
-  // simulate.js's skipWave).
-  const playing = !state.gameOver && !state.win && !state.levelComplete;
-  const inCountdown = state.interWaveTimer > 0;
-  const canCallEarly = state.spawnQueue.length === 0 && state.waveIndex < WAVES.length - 1;
-  const canAdvanceWave = playing && (inCountdown || canCallEarly);
-  skipWaveBtn.classList.toggle("hidden", !canAdvanceWave);
-  if (canAdvanceWave) {
-    if (inCountdown) {
-      skipWaveBtn.textContent = `▶ Iniciar Oleada ${state.waveIndex + 1} (${Math.ceil(state.interWaveTimer)}s)`;
-      skipWaveBtn.classList.add("pulse");
-      skipWaveBtn.title = "Comenzar oleada inmediatamente";
-    } else {
-      skipWaveBtn.textContent = `▶ +Oleada ${state.waveIndex + 2}`;
-      skipWaveBtn.classList.remove("pulse");
-      skipWaveBtn.title = "Llamar a la siguiente oleada de inmediato (acelerar juego)";
-    }
-  }
+  if (attacking()) updateAttackPanels();
+  else updateDefencePanels();
 
   pauseBtn.textContent = state.paused ? "▶" : "⏸";
   pauseBtn.title = state.paused ? "Reanudar" : "Pausar";
