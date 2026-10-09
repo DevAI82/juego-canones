@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { playBotGame } from "./attackBot.js";
+import { playBotGame, botRound, sendIn, GROUP_SIZE } from "./attackBot.js";
 import { attackMapOf, nearestRoadPoint } from "./roadGraph.js";
-import { ROUNDS } from "./attack.js";
+import { ROUNDS, createAttackState } from "./attack.js";
 import { LEVELS } from "./levels.js";
 
 test("whole attack games play out on every map: the army keeps to the roads and the game ends with a winner", () => {
@@ -29,4 +29,20 @@ test("whole attack games play out on every map: the army keeps to the roads and 
     assert.ok(worst < 75, `level ${level}: a unit ${Math.round(worst)}px off the road`);
     assert.ok(s.attack.stats.moneySpent > 0 && s.stats.towersBuilt > 0);
   }
+});
+
+test("the bot gathers its army at one entry and sends it in together", () => {
+  const s = createAttackState(2, "normal", { aiSetup: false });
+  s.economy.money = 0;
+  s.attack.money = 1000;
+  botRound(s);
+  assert.ok(s.enemies.length >= GROUP_SIZE);
+  sendIn(s);
+  const going = s.enemies.filter((u) => u.order?.kind === "enter").length;
+  assert.equal(going, s.enemies.length);
+  const t = createAttackState(2, "normal", { aiSetup: false });
+  t.attack.money = 60; // a few soldiers: not a group yet
+  botRound(t);
+  sendIn(t);
+  assert.ok(t.enemies.length > 0 && t.enemies.every((u) => !u.order));
 });

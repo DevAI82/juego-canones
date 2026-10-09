@@ -1,11 +1,16 @@
 // A simple attacker for headless games -- the tests' whole games and the
-// balance runs of the design's §9: as each round starts it buys an army
-// with its money, picks the entry whose way to the base the towers cover
-// least, and sends everything it has into the base.
+// balance runs of the design's §9 («compra unidades, las agrupa y las manda
+// por la carretera menos defendida»): as each round starts it buys an army
+// with its money, gathers it at the entry whose way to the base the towers
+// cover least, and once the group is big enough sends it into the base
+// together.
 import { levelData } from "./levels.js";
 import { attackMapOf, roadRoute } from "./roadGraph.js";
 import { routeThreat } from "./ai.js";
-import { createAttackState, stepAttack, startAttack, buyUnits, setEntry, orderEnter } from "./attack.js";
+import { createAttackState, stepAttack, startAttack, buyUnits, setEntry, orderEnter, ROUNDS } from "./attack.js";
+
+// How many units the bot gathers before it sends them in.
+export const GROUP_SIZE = 12;
 
 // The entry whose road to the base runs past the least firepower.
 function safestEntry(state) {
@@ -22,22 +27,26 @@ function safestEntry(state) {
   return best;
 }
 
-// Sends every unit standing idle into the base.
+const waiting = (state) => state.enemies.filter((u) => u.alive && !u.order);
+
+// Sends the gathered group into the base once it's GROUP_SIZE strong -- or,
+// in the last two rounds, whatever has gathered.
 export function sendIn(state) {
-  const idle = state.enemies.filter((u) => u.alive && !u.order).map((u) => u.id);
-  if (idle.length) orderEnter(state, idle);
+  const group = waiting(state);
+  const lastRounds = state.attack.round >= ROUNDS - 1;
+  if (group.length && (group.length >= GROUP_SIZE || lastRounds)) orderEnter(state, group.map((u) => u.id));
 }
 
-// The bot's turn as a round starts: at the safest entry, a tank or two to
-// soak up fire (from round 3), buggies with half of the rest of the money,
-// soldiers with what's left -- and everyone in.
+// The bot's turn as a round starts: a new group gathers at the entry the
+// towers cover least (one already gathering stays where it is); it buys a
+// tank or two to soak up fire (from round 3), buggies with half of the rest
+// of the money and soldiers with what's left.
 export function botRound(state) {
   const a = state.attack;
-  setEntry(state, safestEntry(state));
+  if (!waiting(state).length) setEntry(state, safestEntry(state));
   if (a.round >= 3) buyUnits(state, "tank", Math.floor(a.money / 300));
   buyUnits(state, "buggy", Math.floor(a.money / 2 / 35));
   buyUnits(state, "soldier", 60);
-  sendIn(state);
 }
 
 // A whole game, the bot against the computer's defence; onTick(state)
