@@ -4,3 +4,4 @@ js/*.test.js
 data
 server-saves.js
 server-saves.test.js
+js/attackBot.js

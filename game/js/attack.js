@@ -36,6 +36,8 @@ export const DAMAGE_REWARD = 0.25;
 export const ENTRY_REWARD = 20;
 // A right-click this close to the base sends the units into it.
 export const BASE_CLICK_RADIUS = 60;
+// How close to the map's edge a unit may get.
+const MAP_MARGIN = 10;
 
 // What the attacker is paid as round `round` starts (round 1's: when the
 // preparation starts).
@@ -372,6 +374,13 @@ function moveUnits(state, dt) {
   state.enemies = state.enemies.filter((u) => u.alive);
   separateEnemies(state.enemies, dt, walls);
   if (L.water) for (const u of state.enemies) pushOutOfPolygons(u, L.water, L.worldWidth, L.worldHeight);
+  // Nobody drives off the map: shoved about in a crowd at an entry (the
+  // entries are just inside the edge), a unit could end up where the
+  // player can neither see nor select it.
+  for (const u of state.enemies) {
+    u.x = Math.max(MAP_MARGIN, Math.min(L.worldWidth - MAP_MARGIN, u.x));
+    u.y = Math.max(MAP_MARGIN, Math.min(L.worldHeight - MAP_MARGIN, u.y));
+  }
 }
 
 // What a unit fires at: the structure it was sent against, once it's in

@@ -282,3 +282,20 @@ test("the fog follows the army", () => {
   assert.ok(runUntil(s, () => s.enemies[0].order === null, 40));
   assert.ok(isVisible(s.attack.fog, 762, 245));
 });
+
+test("nobody drives off the map, even shoved about in a crowd at an entry", () => {
+  const s = empty();
+  buyUnits(s, "buggy");
+  const [u] = s.enemies;
+  orderMove(s, ids(s), 457, 191);
+  startAttack(s);
+  // Right at the corner, heading out at full speed.
+  u.x = 2;
+  u.y = 2;
+  u.angle = (-3 * Math.PI) / 4;
+  u.v = u.speed;
+  for (let i = 0; i < 20; i++) {
+    stepAttack(s, 0.05);
+    assert.ok(u.x >= 0 && u.y >= 0 && u.x <= LEVELS[2].worldWidth && u.y <= LEVELS[2].worldHeight, `at (${u.x}, ${u.y})`);
+  }
+});
