@@ -7,7 +7,7 @@
 import { levelData } from "./levels.js";
 import { attackMapOf, roadRoute } from "./roadGraph.js";
 import { routeThreat } from "./ai.js";
-import { createAttackState, stepAttack, startAttack, buyUnits, setEntry, orderEnter, ROUNDS } from "./attack.js";
+import { createAttackState, stepAttack, startAttack, buyUnits, setEntry, orderEnter, upgradeUnitType, ROUNDS } from "./attack.js";
 
 // How many units the bot gathers before it sends them in.
 export const GROUP_SIZE = 12;
@@ -37,16 +37,33 @@ export function sendIn(state) {
   if (group.length && (group.length >= GROUP_SIZE || lastRounds)) orderEnter(state, group.map((u) => u.id));
 }
 
+// What the bot upgrades with the money its army's cap leaves over, in turn.
+const UPGRADE_PLAN = [
+  ["soldier", "armor"],
+  ["buggy", "armor"],
+  ["tank", "armor"],
+  ["soldier", "damage"],
+  ["buggy", "damage"],
+  ["tank", "damage"],
+  ["soldier", "rate"],
+  ["buggy", "rate"],
+];
+
 // The bot's turn as a round starts: a new group gathers at the entry the
 // towers cover least (one already gathering stays where it is); it buys a
 // tank or two to soak up fire (from round 3), buggies with half of the rest
-// of the money and soldiers with what's left.
+// of the money and soldiers with what's left -- and with whatever the army's
+// cap leaves over, upgrades, round the plan above (a player would too).
 export function botRound(state) {
   const a = state.attack;
   if (!waiting(state).length) setEntry(state, safestEntry(state));
   if (a.round >= 3) buyUnits(state, "tank", Math.floor(a.money / 300));
   buyUnits(state, "buggy", Math.floor(a.money / 2 / 35));
   buyUnits(state, "soldier", 60);
+  for (let bought = true; bought; ) {
+    bought = false;
+    for (const [type, skill] of UPGRADE_PLAN) if (upgradeUnitType(state, type, skill).ok) bought = true;
+  }
 }
 
 // A whole game, the bot against the computer's defence; onTick(state)

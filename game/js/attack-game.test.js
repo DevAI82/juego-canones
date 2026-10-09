@@ -46,3 +46,13 @@ test("the bot gathers its army at one entry and sends it in together", () => {
   sendIn(t);
   assert.ok(t.enemies.length > 0 && t.enemies.every((u) => !u.order));
 });
+
+test("with its army at the cap, the bot spends what's left on upgrades", () => {
+  const s = createAttackState(2, "normal", { aiSetup: false });
+  s.attack.money = 100000;
+  botRound(s);
+  assert.equal(s.enemies.length, 60);
+  const levels = Object.values(s.attack.upgrades).flatMap((u) => Object.values(u));
+  assert.ok(levels.some((l) => l > 0));
+  assert.ok(s.attack.upgrades.soldier.armor > 0);
+});
