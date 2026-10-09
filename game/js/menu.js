@@ -16,7 +16,7 @@
 const SLOT_NAMES = { auto: "Autoguardado", 1: "Hueco 1", 2: "Hueco 2", 3: "Hueco 3" };
 const pad = (n) => String(n).padStart(2, "0");
 
-const DIFFICULTY_NAMES = { easy: "Fácil", normal: "Normal", hard: "Difícil" };
+export const DIFFICULTY_NAMES = { easy: "Fácil", normal: "Normal", hard: "Difícil" };
 
 // "Defensa · Nivel 4 · Oleada 12 · ❤ 15 · $320 · 08/10 18:30" or "Ataque ·
 // Nivel 3 · Ronda 5 · Difícil · ❤ 12 · $240 · ...": a save as the menu

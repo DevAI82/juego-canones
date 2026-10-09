@@ -12,6 +12,9 @@ import {
   knownStructure,
   saveFog,
   restoreFog,
+  fogPixels,
+  greyPixels,
+  VEIL_ALPHA,
 } from "./fog.js";
 
 const tower = (x, y) => ({ id: 1, type: "basic", x, y, hp: 80, maxHp: 80, angle: 0, level: { damage: 0, range: 0, fireRate: 0, armor: 0, ammo: 0 }, buildTimeRemaining: 0 });
@@ -98,4 +101,16 @@ test("a damaged fog save is ignored rather than breaking the load", () => {
   restoreFog(fog, "nonsense");
   assert.ok(![...fog.explored].some(Boolean));
   assert.deepEqual(Object.keys(fog.memory), ["tower:50,60"]);
+});
+
+test("the fog's look, a pixel per cell: black where never seen, a veil where seen before, clear in sight", () => {
+  const fog = createFog(96, 32); // three cells in a row
+  fog.explored[0] = 1;
+  fog.visible[0] = 1;
+  fog.explored[1] = 1;
+  const veil = fogPixels(fog);
+  assert.deepEqual([veil[3], veil[7], veil[11]], [0, VEIL_ALPHA, 255]);
+  const grey = greyPixels(fog);
+  assert.deepEqual([grey[3], grey[7], grey[11]], [0, 255, 0]);
+  assert.deepEqual([grey[4], grey[5], grey[6]], [128, 128, 128]);
 });

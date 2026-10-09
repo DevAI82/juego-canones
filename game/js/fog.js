@@ -120,3 +120,32 @@ export function restoreFog(fog, saved) {
     fog.memory[structureKey(m)] = m;
   }
 }
+
+// How the fog looks, one pixel per cell (RGBA, cols x rows, row by row):
+// never seen, black; seen before, a dark veil (VEIL_ALPHA); in sight,
+// clear. attackDraw.js stretches it over the map, which softens the
+// cells' edges into fog.
+export const VEIL_ALPHA = 150;
+
+export function fogPixels(fog, out = new Uint8ClampedArray(fog.cols * fog.rows * 4)) {
+  for (let i = 0; i < fog.cols * fog.rows; i++) {
+    out[i * 4] = 6;
+    out[i * 4 + 1] = 8;
+    out[i * 4 + 2] = 10;
+    out[i * 4 + 3] = fog.visible[i] ? 0 : fog.explored[i] ? VEIL_ALPHA : 255;
+  }
+  return out;
+}
+
+// The grey areas (seen before, not in sight now) as an opaque mid-grey
+// mask, the rest clear: drawn with the "saturation" blend, it takes the
+// colour out of them -- the design's grey fog.
+export function greyPixels(fog, out = new Uint8ClampedArray(fog.cols * fog.rows * 4)) {
+  for (let i = 0; i < fog.cols * fog.rows; i++) {
+    out[i * 4] = 128;
+    out[i * 4 + 1] = 128;
+    out[i * 4 + 2] = 128;
+    out[i * 4 + 3] = !fog.visible[i] && fog.explored[i] ? 255 : 0;
+  }
+  return out;
+}

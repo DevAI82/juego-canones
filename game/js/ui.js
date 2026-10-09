@@ -316,6 +316,26 @@ export function renderGameEndScreen(overlay, state) {
   return total;
 }
 
+// An attack's end screen (attackUI.js's attackSummary): who won and how it
+// went. The attack mode has no score or ranking yet (design §3.7), so those
+// sections stay hidden -- renderGameEndScreen shows them again for the next
+// defence game.
+export function renderAttackEndScreen(overlay, summary) {
+  overlay.querySelector("#gameend-title").textContent = summary.title;
+  for (const id of ["#gameend-save-row", "#gameend-save-status", "#gameend-ranking-title", "#gameend-ranking"]) {
+    overlay.querySelector(id).classList.add("hidden");
+  }
+  const table = overlay.querySelector("#gameend-breakdown");
+  table.innerHTML = "";
+  for (const [label, value] of summary.rows) {
+    const tr = document.createElement("tr");
+    tr.className = "gameend-info-row";
+    tr.append(scoreCell(label), scoreCell(value));
+    table.appendChild(tr);
+  }
+  overlay.querySelector("#gameend-total").textContent = summary.subtitle;
+}
+
 export function renderRanking(overlay, entries, highlightIndex = -1) {
   const list = overlay.querySelector("#gameend-ranking");
   list.innerHTML = "";
