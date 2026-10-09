@@ -5,7 +5,7 @@
 // without a page); the panels are built once and refreshed every frame,
 // like ui.js's build menu and towers' upgrade panel, whose look they share.
 import { UNIT_ORDER, UNIT_PRICES, UNIT_UPGRADES, UNIT_CAP, ROUNDS, unitUpgradeCost } from "./attack.js";
-import { DIFFICULTY_NAMES } from "./menu.js";
+import { DIFFICULTY_NAMES, MONEY_NAMES } from "./menu.js";
 
 export const UNIT_NAMES = { soldier: "Soldado", motorcycle: "Moto", buggy: "Buggy", tank: "Tanque", rocket: "Lanzacohetes" };
 export const SKILL_NAMES = { damage: "Daño", range: "Alcance", armor: "Blindaje", rate: "Cadencia", speed: "Velocidad" };
@@ -76,13 +76,25 @@ export function attackHudLines(state) {
   return [head, `Base: ❤ ${state.economy.lives}`, `$${Math.floor(a.money)}`, `Unidades ${armySize(state)}/${UNIT_CAP}`];
 }
 
-// What the end screen says about a finished attack (design §3.7).
-export function attackSummary(state) {
+// The same game seen by the defender, one against the other: the round
+// and its clock, the base's lives, the defence's money and the army
+// coming at it.
+export function defenderHudLines(state) {
+  const [head] = attackHudLines(state);
+  return [head, `Base: ❤ ${state.economy.lives}`, `$${Math.floor(state.economy.money)}`, `Ejército enemigo ${armySize(state)}/${UNIT_CAP}`];
+}
+
+// What the end screen says about a finished attack (design §3.7) to the
+// player on `side` -- the attacker's, unless it's the defender of a game
+// one against the other.
+export function attackSummary(state, side = "attack") {
   const a = state.attack;
-  const won = a.winner === "attacker";
+  const baseFell = a.winner === "attacker";
+  const won = baseFell === (side === "attack");
   const lost = Object.values(state.stats.kills).reduce((sum, n) => sum + n, 0);
+  const byPerson = a.defender === "player";
   return {
-    title: won ? "¡BASE DESTRUIDA!" : "LA BASE HA RESISTIDO",
+    title: baseFell ? "¡BASE DESTRUIDA!" : "LA BASE HA RESISTIDO",
     subtitle: won ? "Has ganado" : "Has perdido",
     rows: [
       ["Ronda alcanzada", `${a.round}/${ROUNDS}`],
@@ -90,7 +102,9 @@ export function attackSummary(state) {
       ["Torres destruidas", String(state.stats.towersLost)],
       ["Unidades perdidas", String(lost)],
       ["Dinero gastado", `$${Math.round(a.stats.moneySpent)}`],
-      ["Dificultad", DIFFICULTY_NAMES[a.difficulty] || DIFFICULTY_NAMES.normal],
+      byPerson
+        ? ["Dinero de la defensa", MONEY_NAMES[a.difficulty] || MONEY_NAMES.normal]
+        : ["Dificultad", DIFFICULTY_NAMES[a.difficulty] || DIFFICULTY_NAMES.normal],
     ],
   };
 }

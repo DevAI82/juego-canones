@@ -73,6 +73,11 @@
                 <span class="menu-choice-name">Atacar</span>
                 <span class="menu-choice-desc">Forma un ejército y rompe la base</span>
               </button>
+              <!-- At home (server.js) only: one computer defends, another attacks. -->
+              <button class="menu-choice hidden" data-mode="versus">
+                <span class="menu-choice-name">Uno contra otro</span>
+                <span class="menu-choice-desc">Un ordenador defiende y otro ataca</span>
+              </button>
             </div>
             <button class="menu-back">Volver</button>
           </div>
@@ -116,6 +121,53 @@
             </div>
             <button class="menu-back">Volver</button>
           </div>
+          <!-- One against the other (docs/2026-10-09-uno-contra-otro-design.md):
+               the side this player takes, then the defence's money. -->
+          <div class="menu-screen hidden" data-screen="side">
+            <div class="menu-subtitle">¿Qué bando llevas tú?</div>
+            <div class="menu-choices">
+              <button class="menu-choice" data-side="defense">
+                <span class="menu-choice-name">Defender</span>
+                <span class="menu-choice-desc">Torres y muros contra su ejército</span>
+              </button>
+              <button class="menu-choice" data-side="attack">
+                <span class="menu-choice-name">Atacar</span>
+                <span class="menu-choice-desc">Tu ejército contra sus torres</span>
+              </button>
+            </div>
+            <button class="menu-back">Volver</button>
+          </div>
+          <div class="menu-screen hidden" data-screen="money">
+            <div class="menu-subtitle">Dinero de la defensa</div>
+            <div class="menu-choices">
+              <button class="menu-choice" data-money="easy">
+                <span class="menu-choice-name">Poco</span>
+                <span class="menu-choice-desc">$250 al empezar y $60 por ronda</span>
+              </button>
+              <button class="menu-choice" data-money="normal">
+                <span class="menu-choice-name">Normal</span>
+                <span class="menu-choice-desc">$350 al empezar y $90 por ronda</span>
+              </button>
+              <button class="menu-choice" data-money="hard">
+                <span class="menu-choice-name">Mucho</span>
+                <span class="menu-choice-desc">$450 al empezar y $120 por ronda</span>
+              </button>
+            </div>
+            <button class="menu-back">Volver</button>
+          </div>
+          <!-- A tab with no side in a game one against the other: join the
+               free side, or see that both are taken (menu.js's openSeat). -->
+          <div class="menu-screen hidden" data-screen="join">
+            <div class="menu-subtitle">Unirse a la partida</div>
+            <div class="menu-note join-info"></div>
+            <div class="menu-choices join-sides"></div>
+            <button class="menu-back" data-go="home">Menú principal</button>
+          </div>
+          <div class="menu-screen hidden" data-screen="full">
+            <div class="menu-subtitle">Hay una partida uno contra otro en marcha</div>
+            <div class="menu-note">Sus dos jugadores están conectados. Cuando acaben, o si se va alguno, podrás unirte o empezar otra.</div>
+            <button class="menu-btn" data-go="settings">Ajustes</button>
+          </div>
           <div class="menu-screen hidden" data-screen="load">
             <div class="menu-subtitle">Cargar partida</div>
             <div class="menu-note"></div>
@@ -135,10 +187,6 @@
                 <div class="menu-option-name">En casa (red local)</div>
                 <div class="menu-option-desc lan-info"></div>
                 <button class="menu-btn hidden" data-do="continue-lan">Volver a la partida</button>
-              </div>
-              <div class="menu-option soon">
-                <div class="menu-option-name">2 jugadores en este PC</div>
-                <div class="menu-option-desc">Próximamente</div>
               </div>
               <div class="menu-option soon">
                 <div class="menu-option-name">En línea</div>
@@ -184,6 +232,8 @@
           <div id="gameend-save-status"></div>
           <div id="gameend-ranking-title">Ranking</div>
           <ol id="gameend-ranking"></ol>
+          <!-- One against the other: the same map again, each on the other side. -->
+          <button id="gameend-rematch-btn" class="hidden">Revancha (cambiando de bando)</button>
           <button id="gameend-close-btn">Jugar de nuevo</button>
         </div>
       </div>

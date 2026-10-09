@@ -534,6 +534,22 @@ body {
   border: 1px solid #6fd8e6;
 }
 #gameend-close-btn:hover { filter: brightness(1.2); }
+#gameend-rematch-btn {
+  display: block;
+  width: 100%;
+  height: 40px;
+  margin-bottom: 10px;
+  cursor: pointer;
+  color: #f2e391;
+  font-weight: bold;
+  letter-spacing: 0.5px;
+  background: linear-gradient(#56603f, #333a24);
+  border: 1px solid #c9a43e;
+  border-radius: 4px;
+  box-shadow: 0 0 10px rgba(255, 205, 80, 0.35);
+}
+#gameend-rematch-btn:hover { filter: brightness(1.2); }
+#gameend-rematch-btn.hidden { display: none; }
 
 /* The lettering of the user's menu drawings (SIL Open Font License,
    assets/fonts/OFL.txt). */
@@ -638,6 +654,7 @@ body {
 }
 .menu-choice:hover:not(:disabled) { filter: brightness(1.25); }
 .menu-choice:disabled { cursor: not-allowed; opacity: 0.45; }
+.menu-choice.hidden { display: none; }
 .menu-choice-name { display: block; font-size: 22px; font-weight: bold; color: #ffe27a; margin-bottom: 6px; }
 .menu-choice-desc { display: block; font-size: 14px; }
 .menu-note { min-height: 18px; margin-bottom: 8px; font-size: 14px; color: #a9e8b0; }
@@ -801,14 +818,18 @@ body {
 #menu.main.home .menu-btn:hover { filter: brightness(1.18); color: #fff3b8; }
 
 /* The game's own controls stay out of the way while a menu is open, and
-   its panels while the statistics are. */
+   its panels while the statistics or the end of the game are (the build
+   menu, a band across the top on a narrow window, would hide the end
+   screen's title). */
 body.menu-open #top-controls,
 body.menu-open #build-menu,
 body.menu-open #attack-shop,
 body.menu-open #nav-controls,
 body.stats-open #build-menu,
 body.stats-open #attack-shop,
-body.stats-open #nav-controls { display: none; }
+body.stats-open #nav-controls,
+body.gameend-open #build-menu,
+body.gameend-open #attack-shop { display: none; }
 
 /* Short messages ("Partida guardada en el hueco 2"...). */
 #toast {

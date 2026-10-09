@@ -12,13 +12,18 @@
 //   getSettings()       -- { music, effects }
 //   attacking()         -- the game behind the menu is an attack
 //   onContinue(), onNewGame(level, options), onLoad(slot), onSave(slot),
-//     (options: { mode: "attack", difficulty } for an attack)
+//     (options: { mode: "attack", difficulty } for an attack;
+//      { mode: "versus", side, money } for one against the other at home)
+//   onJoin(side)         -- one against the other: take that free side
 //   onRecords(), onQuitToMain(), onResume(), onSettingsChange(settings)
 
 const SLOT_NAMES = { auto: "Autoguardado", 1: "Hueco 1", 2: "Hueco 2", 3: "Hueco 3" };
 const pad = (n) => String(n).padStart(2, "0");
 
 export const DIFFICULTY_NAMES = { easy: "Fácil", normal: "Normal", hard: "Difícil" };
+// The same levels as the money of a defence played by a person, one
+// against the other (docs/2026-10-09-uno-contra-otro-design.md §4).
+export const MONEY_NAMES = { easy: "Poco", normal: "Normal", hard: "Mucho" };
 
 // "Defensa · Nivel 4 · Oleada 12 · ❤ 15 · $320 · 08/10 18:30", "Ataque ·
 // Nivel 3 · Ronda 5 · Difícil · ❤ 12 · $240 · ..." or "Uno contra otro ·
@@ -54,6 +59,7 @@ export function createMenu(root, handlers) {
   // picked on the way.
   let chosenMode = "defense";
   let chosenLevel = null;
+  let chosenSide = null;
 
   function open(ctx, screen) {
     context = ctx;
@@ -183,23 +189,54 @@ export function createMenu(root, handlers) {
 
   function renderMultiplayer() {
     root.querySelector(".lan-info").textContent = handlers.networked
-      ? `Ya estáis jugando en red. Los demás dispositivos de casa pueden unirse abriendo ${location.origin}`
-      : "Para jugar en red en casa, el juego tiene que abrirse desde el ordenador que hace de servidor.";
+      ? `Estáis jugando en la red de casa: los demás aparatos se unen abriendo ${location.origin}. En «Nueva partida», «Defender juntos» o «Uno contra otro».`
+      : "Para jugar en red en casa, un ordenador arranca el servidor del juego (node server.js) y los demás abren la dirección que muestra.";
     root.querySelector('[data-do="continue-lan"]').classList.toggle("hidden", !handlers.networked);
   }
 
-  // The attack mode is solo only for now (design §7).
+  // At home (server.js): everybody defending one map, or one against the
+  // other; an attack against the computer is solo only (its design §7).
   function renderMode() {
-    const attack = root.querySelector('[data-mode="attack"]');
-    attack.disabled = Boolean(handlers.networked);
-    attack.querySelector(".menu-choice-desc").textContent = handlers.networked
-      ? "Solo en partida individual, por ahora"
-      : "Forma un ejército y rompe la base";
+    const home = Boolean(handlers.networked);
+    root.querySelector('[data-mode="attack"]').classList.toggle("hidden", home);
+    root.querySelector('[data-mode="versus"]').classList.toggle("hidden", !home);
+    const defense = root.querySelector('[data-mode="defense"]');
+    defense.querySelector(".menu-choice-name").textContent = home ? "Defender juntos" : "Defender";
+    defense.querySelector(".menu-choice-desc").textContent = home ? "Todos defendéis el mismo mapa" : "Construye torres y protege la base";
   }
 
   function renderLevels() {
     root.querySelector('[data-screen="levels"] .menu-subtitle').textContent =
-      chosenMode === "attack" ? "Elige el mapa que atacarás" : "Elige nivel";
+      chosenMode === "attack" ? "Elige el mapa que atacarás" : chosenMode === "versus" ? "Elige el mapa" : "Elige nivel";
+  }
+
+  // One against the other, a tab without a side (main.js): the free sides to
+  // join -- or, both taken, that there's a game going on. `info`: { level,
+  // money, free: the free sides }.
+  function renderSeat(info) {
+    const join = info.free.length > 0;
+    for (const el of screens) el.classList.toggle("hidden", el.dataset.screen !== (join ? "join" : "full"));
+    current = join ? "join" : "full";
+    root.classList.remove("home"); // (the start screen's own layout)
+    if (!join) return;
+    const money = MONEY_NAMES[info.money] || MONEY_NAMES.normal;
+    const yours = info.free.length === 1 ? ` · Te toca ${info.free[0] === "attack" ? "atacar" : "defender"}` : "";
+    root.querySelector(".join-info").textContent = `Mapa ${info.level}${yours} · Dinero de la defensa: ${money}`;
+    const sides = root.querySelector(".join-sides");
+    sides.textContent = "";
+    for (const side of info.free) {
+      const button = document.createElement("button");
+      button.className = "menu-choice";
+      button.dataset.joinSide = side;
+      const name = document.createElement("span");
+      name.className = "menu-choice-name";
+      name.textContent = side === "attack" ? "Atacar" : "Defender";
+      const desc = document.createElement("span");
+      desc.className = "menu-choice-desc";
+      desc.textContent = side === "attack" ? "Tu ejército contra sus torres" : "Tus torres contra su ejército";
+      button.append(name, desc);
+      sides.append(button);
+    }
   }
 
   async function chooseLevel(level, options) {
@@ -261,12 +298,21 @@ export function createMenu(root, handlers) {
     const levelBtn = target.closest(".start-level-btn");
     if (levelBtn) {
       const level = Number(levelBtn.dataset.level);
-      if (chosenMode !== "attack") return chooseLevel(level);
+      if (chosenMode !== "attack" && chosenMode !== "versus") return chooseLevel(level);
       chosenLevel = level;
-      return show("difficulty");
+      return show(chosenMode === "attack" ? "difficulty" : "side");
     }
     const difficultyBtn = target.closest("[data-difficulty]");
     if (difficultyBtn) return chooseLevel(chosenLevel, { mode: "attack", difficulty: difficultyBtn.dataset.difficulty });
+    const sideBtn = target.closest("[data-side]");
+    if (sideBtn) {
+      chosenSide = sideBtn.dataset.side;
+      return show("money");
+    }
+    const moneyBtn = target.closest("[data-money]");
+    if (moneyBtn) return chooseLevel(chosenLevel, { mode: "versus", side: chosenSide, money: moneyBtn.dataset.money });
+    const joinBtn = target.closest("[data-join-side]");
+    if (joinBtn) return handlers.onJoin(joinBtn.dataset.joinSide);
     if (target.closest(".menu-back")) back();
   });
 
@@ -288,6 +334,14 @@ export function createMenu(root, handlers) {
       open("main", "home");
       show("mode");
     },
+    // One against the other, for a tab without a side: join or watch
+    // (renderSeat). Called again as the sides change, it just refreshes.
+    openSeat(info) {
+      if (context !== "main") open("main", "home");
+      history = [];
+      renderSeat(info);
+    },
+    isSeatScreen: () => context !== null && (current === "join" || current === "full"),
     close,
     back,
     isOpen: () => context !== null,

@@ -59,3 +59,12 @@ test("the server still serves the game and its saves list, and turns down nonsen
     assert.equal(bad.reason, "bad-request");
   });
 });
+
+test("the server tells a tab its address on the home network, for the other player", async () => {
+  await withServer(async ({ base }) => {
+    const { urls } = await (await fetch(`${base}/api/address`)).json();
+    assert.ok(Array.isArray(urls));
+    const port = new URL(base).port;
+    for (const url of urls) assert.match(url, new RegExp(`^http://\\d+\\.\\d+\\.\\d+\\.\\d+:${port}$`));
+  });
+});

@@ -38,6 +38,20 @@ const STRUCTURE_REACH = 38; // world px round a tower's centre that pick it
 // out the map is zoomed (BASE_CLICK_RADIUS is world px).
 const BASE_SCREEN_REACH = 40;
 
+// The army's orders carried out on the spot (solo play). In a game on the
+// home network main.js gives the controls its own (env.orders), which send
+// them to the server instead; either way an order answers { ok: false }
+// when it's refused (or nothing yet, on its way to the server).
+export function localOrders(getState) {
+  return {
+    move: (ids, x, y) => orderMove(getState(), ids, x, y),
+    attack: (ids, targetId) => orderAttack(getState(), ids, targetId),
+    enter: (ids) => orderEnter(getState(), ids),
+    stop: (ids) => orderStop(getState(), ids),
+    entry: (index) => setEntry(getState(), index),
+  };
+}
+
 export function createAttackControls(env) {
   let selected = new Set();
   const groups = createGroups();
@@ -52,6 +66,8 @@ export function createAttackControls(env) {
   const markers = [];
 
   const auto = () => Boolean(env.autoArmy?.());
+  const local = localOrders(env.getState);
+  const orders = () => env.orders || local;
   const units = () => env.getState().enemies;
   const alive = () => new Set(units().filter((u) => u.alive).map((u) => u.id));
   const adding = (evt) => Boolean(evt.shiftKey || evt.ctrlKey || evt.metaKey);
@@ -100,25 +116,20 @@ export function createAttackControls(env) {
   }
 
   // A click (or a tap) at world point `p`: the selection's order, and a
-  // mark where it was given.
+  // mark where it was given -- a move's where the player clicked, an
+  // attack's on its target, going in's on the base.
   function orderAt(p) {
     const ids = [...pruned()];
     if (!ids.length) return;
-    const state = env.getState();
     const kind = orderKind(p);
+    const target = kind === "attack" ? structureAt(p) : kind === "enter" ? env.base() : p;
     const result =
-      kind === "enter"
-        ? orderEnter(state, ids)
-        : kind === "attack"
-          ? orderAttack(state, ids, structureAt(p).id)
-          : orderMove(state, ids, p.x, p.y);
-    if (!result.ok) {
+      kind === "enter" ? orders().enter(ids) : kind === "attack" ? orders().attack(ids, target.id) : orders().move(ids, p.x, p.y);
+    if (result && result.ok === false) {
       env.onRefused();
       return;
     }
-    // A move's mark where the player clicked; an attack's (or the base's) on its target.
-    const at = result.stops ? p : result.target;
-    markers.push({ x: at.x, y: at.y, kind: result.stops ? "move" : "attack", t: env.now() });
+    markers.push({ x: target.x, y: target.y, kind: kind === "move" ? "move" : "attack", t: env.now() });
   }
 
   // The entry whose flag (drawn above it, attackDraw.js) is at world point
@@ -135,7 +146,7 @@ export function createAttackControls(env) {
     const u = unitAt(units(), p.x, p.y);
     if (!u) {
       lastClick = null;
-      if (flag >= 0) setEntry(env.getState(), flag);
+      if (flag >= 0) orders().entry(flag);
       else orderAt(p);
       return;
     }
@@ -285,13 +296,12 @@ export function createAttackControls(env) {
       const key = attackKey(evt);
       if (!key) return false;
       evt.preventDefault();
-      const state = env.getState();
       if (key.kind === "assign") {
         groups.assign(key.n, [...pruned()]);
         return true;
       }
       if (key.kind === "stop") {
-        if (pruned().size) orderStop(state, [...selected]);
+        if (pruned().size) orders().stop([...selected]);
         return true;
       }
       const ids = groups.members(key.n, units());

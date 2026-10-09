@@ -42,7 +42,7 @@ import { createMenu } from "./menu.js";
 import { stepGame, canSaveGame, restoreGameSave } from "./modes.js";
 import { createAttackState, startAttack, buyUnits, upgradeUnitType, UNIT_ORDER } from "./attack.js";
 import { attackMapOf } from "./roadGraph.js";
-import { isVisible } from "./fog.js";
+import { isVisible, fogFromWire } from "./fog.js";
 import { createAttackControls } from "./attackControls.js";
 import {
   createFogLayer,
@@ -54,9 +54,10 @@ import {
   drawRange,
   drawSelectionBox,
 } from "./attackDraw.js";
-import { initShop, updateShop, initUnitUpgrades, updateUnitUpgrades, attackHudLines, attackSummary } from "./attackUI.js";
+import { initShop, updateShop, initUnitUpgrades, updateUnitUpgrades, attackHudLines, defenderHudLines, attackSummary } from "./attackUI.js";
 import { BUILDING_TYPES, BUILDING_ORDER, PHASE_COUNT, SHEET_COLS, buildingProgress, constructionFrame } from "./buildings.js";
 import { RTS_UNIT_TYPES, RTS_UNIT_ORDER } from "./rtsUnits.js";
+import { entrySafePoints, reachesEntryRoad } from "./entryRoads.js";
 
 // Browsers refuse to start any audio (synthesized SFX or the background
 // music) before a real user gesture. Fire once, on whichever happens
@@ -272,9 +273,42 @@ function ready(img) {
 let state = createGameState();
 let networked = false; // set once, before the loop starts (see boot() below)
 // An attack (attack.js, docs/2026-10-09-modo-atacante-design.md) rather
-// than a defence game: every piece of the screen below has an attack
-// version, picked by this.
+// than a defence game: what the rules and the state are.
 const attacking = () => state.mode === "attack";
+
+// --- Who's playing (docs/2026-10-09-uno-contra-otro-design.md) -----------
+// On the home network, one against the other, the server knows this tab
+// by an id it makes up once and keeps in the tab's sessionStorage -- a
+// reload keeps its side; another tab, even on this computer, is another
+// player -- and tells it, with every snapshot, where it stands (`net`,
+// host.js's viewJson): the game's kind, its side, the two sides', whose
+// pause it is, whether it may change the game.
+const playerId = (() => {
+  try {
+    let id = sessionStorage.getItem("td_player");
+    if (!id) {
+      id = `${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+      sessionStorage.setItem("td_player", id);
+    }
+    return id;
+  } catch {
+    return Math.random().toString(36).slice(2);
+  }
+})();
+let net = { kind: "coop", you: null, mayChange: true };
+const versusGame = () => networked && net.kind === "versus";
+// The side this tab plays: in solo play, the game's; at home in co-op, the
+// defence; one against the other, the server's word (null: no side yet).
+function mySide() {
+  if (versusGame()) return net.you;
+  if (networked) return "defense";
+  return attacking() ? "attack" : "defense";
+}
+// Every piece of the screen has an attacker's version -- shop, army, fog,
+// orders -- and a defender's: picked by the side, not only by the game's
+// kind, since the defender of an attack plays with the defence's screen.
+const commanding = () => attacking() && mySide() === "attack";
+const SIDE_NAMES = { attack: "el atacante", defense: "el defensor" };
 
 let selectedBuildType = null;
 // The selected tower or wall block is tracked by id, not object reference: in networked
@@ -327,7 +361,7 @@ function clampZoom(level) {
 // hidden.
 const UNIT_PANEL_ROOM = 245; // #unit-upgrade-panel: 225 px tall, 20 px off the bottom (style.css)
 function cameraPadding() {
-  if (!attacking()) return { right: 0, top: 0, bottom: 0 };
+  if (!commanding()) return { right: 0, top: 0, bottom: 0 };
   const shopInColumn = document.getElementById("attack-shop").classList.contains("column-mode");
   return shopInColumn ? { right: SHOP_COLUMN_WIDTH + 24, top: 128, bottom: UNIT_PANEL_ROOM } : { right: 0, top: 0, bottom: UNIT_PANEL_ROOM };
 }
@@ -345,8 +379,12 @@ function recenterCamera(level) {
   zoom = minZoomFor(level);
   clampZoom(level);
   const d = levelData(level);
-  // An attack opens on where the army comes in; a defence game on its base.
-  const anchor = attacking() ? attackMapOf(d).entries[state.attack.entry] : d.soldierExit || { x: w / 2, y: h / 2 };
+  // The army's commander starts where it comes in; a defender on the base.
+  const anchor = commanding()
+    ? attackMapOf(d).entries[state.attack.entry]
+    : attacking()
+      ? attackMapOf(d).base
+      : d.soldierExit || { x: w / 2, y: h / 2 };
   camera.x = anchor.x - (CANVAS_WIDTH / zoom) / 2;
   camera.y = anchor.y - (CANVAS_HEIGHT / zoom) / 2;
   clampCamera(level);
@@ -488,13 +526,47 @@ const actions = {
     const fresh = startNextLevel(state);
     if (fresh) state = fresh;
   },
+  // The army's shop and its upgrades (attack.js).
+  buy(type, count) {
+    if (networked) {
+      postAction({ type: "buy", unitType: type, count });
+      return;
+    }
+    if (!buyUnits(state, type, count).ok) playSound("error");
+  },
+  upgradeUnit(type, skill) {
+    if (networked) {
+      postAction({ type: "upgradeUnit", unitType: type, skill });
+      return;
+    }
+    upgradeUnitType(state, type, skill);
+  },
+  // «¡Al ataque!» -- or, one against the other, «¡Listo!»: the round starts
+  // once both sides have said so (versus.js).
+  startAttack() {
+    if (networked) {
+      postAction({ type: "ready" });
+      return;
+    }
+    startAttack(state);
+  },
+};
+
+// The army's orders on the home network (attackControls.js's env.orders):
+// to the server, which carries them out.
+const networkOrders = {
+  move: (ids, x, y) => postAction({ type: "order", kind: "move", ids, x, y }),
+  attack: (ids, targetId) => postAction({ type: "order", kind: "attack", ids, targetId }),
+  enter: (ids) => postAction({ type: "order", kind: "enter", ids }),
+  stop: (ids) => postAction({ type: "order", kind: "stop", ids }),
+  entry: (index) => postAction({ type: "entry", index }),
 };
 
 function postAction(body) {
   fetch("/api/action", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ player: playerId, ...body }),
   }).catch(() => {}); // best-effort -- the next state poll is the real source of truth
 }
 
@@ -574,10 +646,10 @@ function drawEnemy(e) {
   ctx.save();
   ctx.fillStyle = "rgba(0, 0, 0, 0.75)";
   ctx.fillRect(e.x - barW / 2 - 1, barY - 1, barW + 2, barH + 2);
-  // In an attack these are the player's own units: green bars.
-  ctx.fillStyle = attacking() ? "#0d3a12" : "#3a0d0d";
+  // To the army's commander these are their own units: green bars.
+  ctx.fillStyle = commanding() ? "#0d3a12" : "#3a0d0d";
   ctx.fillRect(e.x - barW / 2, barY, barW, barH);
-  ctx.fillStyle = attacking() ? "#47d35a" : "#e5392f";
+  ctx.fillStyle = commanding() ? "#47d35a" : "#e5392f";
   ctx.fillRect(e.x - barW / 2, barY, barW * pct, barH);
   ctx.restore();
 }
@@ -1136,7 +1208,12 @@ function drawProjectile(p) {
 }
 
 function drawHud() {
-  if (attacking()) return drawAttackHud();
+  if (attacking()) {
+    if (commanding()) drawAttackHud();
+    else drawDefenderHud();
+    drawVersusBanner();
+    return;
+  }
   ctx.save();
   ctx.fillStyle = "#fff";
   ctx.font = "20px sans-serif";
@@ -1198,8 +1275,9 @@ function drawAttackHud() {
   } else if (state.attack.phase === "prep" && !state.gameOver) {
     ctx.font = "bold 18px sans-serif";
     ctx.fillStyle = "#ffe27a";
+    const go = versusGame() ? "«¡Listo!»" : "«¡Al ataque!»";
     ctx.fillText(
-      autoArmyOn() ? "Compra tu ejército y pulsa «¡Al ataque!»: irá solo" : "Compra tu ejército, elígelo con clic o recuadro y pulsa «¡Al ataque!»",
+      autoArmyOn() ? `Compra tu ejército y pulsa ${go}: irá solo` : `Compra tu ejército, elígelo con clic o recuadro y pulsa ${go}`,
       CANVAS_WIDTH / 2,
       30,
     );
@@ -1215,12 +1293,78 @@ function drawAttackHud() {
     ctx.fillStyle = "#ffe27a";
     ctx.fillText(`Refuerzos: ${waiting} · atacan en la próxima ronda`, CANVAS_WIDTH / 2, 30);
   }
-  // (A loaded preparation waits paused, but nothing runs in it anyway.)
-  if (state.paused && !state.gameOver && state.attack.phase === "battle") {
+  // (A loaded preparation waits paused, but nothing runs in it anyway. One
+  // against the other, drawVersusBanner says whose pause it is.)
+  if (state.paused && !state.gameOver && state.attack.phase === "battle" && !versusGame()) {
     ctx.font = "36px sans-serif";
     ctx.fillStyle = "#ffd700";
     ctx.fillText("PAUSA", CANVAS_WIDTH / 2, 70);
   }
+  ctx.restore();
+}
+
+// The defender's HUD in an attack, one against the other: the round and its
+// clock, the base, the defence's money and the army coming (attackUI.js),
+// and while preparing, what to do.
+function drawDefenderHud() {
+  ctx.save();
+  ctx.fillStyle = "#fff";
+  ctx.font = "20px sans-serif";
+  ctx.shadowColor = "rgba(0, 0, 0, 0.8)";
+  ctx.shadowBlur = 4;
+  const [head, ...rest] = defenderHudLines(state);
+  ctx.fillText(head, 20, 30);
+  ctx.fillText(rest.join("   ·   "), 20, 55);
+  if (state.attack.phase === "prep" && !state.gameOver) {
+    ctx.textAlign = "center";
+    ctx.font = "bold 18px sans-serif";
+    ctx.fillStyle = "#ffe27a";
+    ctx.fillText("Construye tus torres y pulsa «¡Listo!»: no se puede tapar la entrada del ejército", CANVAS_WIDTH / 2, 30);
+  }
+  ctx.restore();
+}
+
+// The address the other computer opens: this page's own, unless it was
+// opened as localhost on the server's computer -- then the server's
+// address on the home network (server.js's /api/address, asked at boot).
+let lanUrls = [];
+function homeAddress() {
+  const local = ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname);
+  return local && lanUrls.length ? lanUrls[0] : location.origin;
+}
+
+// One against the other: what the other player is up to, over the game --
+// waiting for them to come, getting ready, a pause and whose it is, a
+// player gone.
+const capitalised = (text) => text[0].toUpperCase() + text.slice(1);
+function drawVersusBanner() {
+  if (!versusGame() || state.gameOver) return;
+  const a = state.attack;
+  const other = net.you === "attack" ? "defense" : net.you === "defense" ? "attack" : null;
+  let text = null;
+  if (state.paused && a.phase === "battle") {
+    if (net.gone) text = `${capitalised(SIDE_NAMES[net.gone])} se ha desconectado. Esperando a que vuelva…`;
+    else if (net.pausedBy && net.pausedBy !== net.you) text = `Pausa: ${SIDE_NAMES[net.pausedBy]} ha parado la partida`;
+    else text = "PAUSA · pulsa ▶ para seguir";
+  } else if (a.phase === "prep" && other) {
+    if (!net.sides[other].connected) text = `Esperando al otro jugador: que abra ${homeAddress()} en su ordenador`;
+    else if (net.sides[net.you].ready) text = `Listo. Esperando a ${SIDE_NAMES[other]}…`;
+    else if (net.sides[other].ready) text = `${capitalised(SIDE_NAMES[other])} está listo`;
+  }
+  if (!text) return;
+  ctx.save();
+  ctx.font = "bold 19px sans-serif";
+  const w = ctx.measureText(text).width + 36;
+  ctx.fillStyle = "rgba(6, 10, 12, 0.85)";
+  ctx.strokeStyle = "#ffe27a";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.roundRect(CANVAS_WIDTH / 2 - w / 2, 74, w, 34, 6);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = "#ffe27a";
+  ctx.textAlign = "center";
+  ctx.fillText(text, CANVAS_WIDTH / 2, 98);
   ctx.restore();
 }
 
@@ -1246,6 +1390,17 @@ initBuildMenu(buildMenuEl, {
 initUpgradePanel(upgradePanelEl, {
   onUpgrade: (skill) => {
     if (state.gameOver || state.win || state.levelComplete || selectedId == null) return;
+    // In an attack no tower may reach the entries' safe stretch, and a
+    // longer range mustn't take one over it either (simulate.js's
+    // upgradeTower): said at once, not left to a silent refusal.
+    const tower = state.towers.find((t) => t.id === selectedId);
+    if (attacking() && skill === "range" && tower && tower.level.range < UPGRADE_DEFS.range.levels) {
+      const range = TOWER_TYPES[tower.type].range * UPGRADE_DEFS.range.mult ** (tower.level.range + 1);
+      if (reachesEntryRoad(levelData(state.level), tower.x, tower.y, range)) {
+        playSound("error");
+        return showToast(ENTRY_ROAD_REFUSED);
+      }
+    }
     actions.upgrade(selectedId, skill);
   },
 });
@@ -1255,8 +1410,8 @@ initUpgradePanel(upgradePanelEl, {
 const attackShopEl = document.getElementById("attack-shop");
 initShop(attackShopEl, {
   onBuy: (type, count) => {
-    if (!attacking() || state.gameOver) return;
-    if (!buyUnits(state, type, count).ok) playSound("error");
+    if (!commanding() || state.gameOver) return;
+    actions.buy(type, count);
   },
 });
 const unitUpgradeEl = document.getElementById("unit-upgrade-panel");
@@ -1264,7 +1419,7 @@ let unitUpgradeType = null; // the type whose upgrades show (a tab per type in t
 let unitUpgradesOpen = false; // folded away to its tabs until the player opens it
 initUnitUpgrades(unitUpgradeEl, {
   onUpgrade: (skill) => {
-    if (attacking() && unitUpgradeType) upgradeUnitType(state, unitUpgradeType, skill);
+    if (commanding() && unitUpgradeType) actions.upgradeUnit(unitUpgradeType, skill);
   },
   onTab: (type) => {
     unitUpgradeType = type;
@@ -1278,8 +1433,9 @@ initUnitUpgrades(unitUpgradeEl, {
 const skipWaveBtn = document.getElementById("skip-wave-btn");
 skipWaveBtn.addEventListener("click", () => {
   if (state.gameOver || state.win || state.levelComplete) return;
-  // In an attack's preparation it's «¡Al ataque!».
-  if (attacking()) startAttack(state);
+  // In an attack's preparation it's «¡Al ataque!» (one against the other,
+  // either player's «¡Listo!»).
+  if (attacking()) actions.startAttack();
   else actions.skip();
 });
 
@@ -1321,9 +1477,12 @@ muteBtn.addEventListener("click", () => {
 });
 
 const pauseBtn = document.getElementById("pause-btn");
-pauseBtn.addEventListener("click", () => {
+pauseBtn.addEventListener("click", async () => {
   if (state.gameOver || state.win || state.levelComplete) return;
-  actions.pause();
+  if (!versusGame()) return actions.pause();
+  // One against the other, only the side that paused carries on (versus.js).
+  const result = await askServer({ type: "pause" });
+  if (result.reason === "not-yours") showToast(`Solo ${SIDE_NAMES[net.pausedBy] || "el otro jugador"} puede reanudar la partida`);
 });
 
 // --- Menus, saved games, settings ----------------------------------------
@@ -1362,7 +1521,7 @@ async function askServer(body) {
     const res = await fetch("/api/action", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ player: playerId, ...body }),
     });
     return await res.json();
   } catch {
@@ -1392,14 +1551,23 @@ function enterGame() {
   // SAME level number (replaying level 3 after a loss, loading another
   // level-3 game) so the camera recenters on the new game.
   lastCameraLevel = null;
-  gameEndOverlay.classList.add("hidden");
+  showGameEndOverlay(false);
   gameEndShown = false;
 }
 
-// options: { mode: "attack", difficulty } for an attack (menu.js).
-function startNewGame(level, { mode = "defense", difficulty = "normal" } = {}) {
+// A tower (or its range) refused over the army's entries (entryRoads.js).
+const ENTRY_ROAD_REFUSED = "Ahí alcanzaría la entrada del ejército: elige un hueco que no esté en rojo";
+
+// Why the home server turned a new game or a load down, for the player.
+const GAME_IN_PROGRESS = "Hay una partida uno contra otro en marcha: solo sus dos jugadores pueden cambiarla";
+
+// options (menu.js): { mode: "attack", difficulty } for an attack against
+// the computer; { mode: "versus", side, money } for one against the other
+// at home -- this tab takes `side`, the other is left for the second player.
+async function startNewGame(level, { mode = "defense", difficulty = "normal", side = "defense", money = "normal" } = {}) {
   if (networked) {
-    postAction({ type: "restart", level });
+    const result = await askServer(mode === "versus" ? { type: "newVersus", level, side, money } : { type: "restart", level });
+    if (!result.ok) return showToast(result.reason === "game-in-progress" ? GAME_IN_PROGRESS : "No se ha podido empezar la partida");
   } else {
     state = mode === "attack" ? createAttackState(level, difficulty) : createGameState(level);
     saveScheduler.reset(state);
@@ -1408,10 +1576,18 @@ function startNewGame(level, { mode = "defense", difficulty = "normal" } = {}) {
   enterGame();
 }
 
+// One against the other: this tab takes a free side of the game (menu.js's
+// «Unirse a la partida»).
+async function joinSide(side) {
+  const result = await askServer({ type: "join", side });
+  if (!result.ok) return showToast("Ese bando ya lo juega otro");
+  enterGame();
+}
+
 async function loadSlot(slot) {
   if (networked) {
     const result = await askServer({ type: "load", slot });
-    if (!result.ok) return showToast("No se puede cargar esta partida");
+    if (!result.ok) return showToast(result.reason === "game-in-progress" ? GAME_IN_PROGRESS : "No se puede cargar esta partida");
   } else {
     const restored = restoreGameSave(readSave(slot));
     if (!restored) return showToast("No se puede cargar esta partida");
@@ -1425,8 +1601,9 @@ async function loadSlot(slot) {
 async function saveToSlot(slot) {
   if (networked) {
     const result = await askServer({ type: "save", slot });
+    const later = attacking() ? "Se guardará al empezar la ronda siguiente" : "Se guardará al terminar la oleada";
     if (!result.ok) showToast("No se ha podido guardar");
-    else showToast(result.queued ? "Se guardará al terminar la oleada" : `Partida guardada en el hueco ${slot}`);
+    else showToast(result.queued ? later : `Partida guardada en el hueco ${slot}`);
     return;
   }
   const result = saveScheduler.request(slot, state);
@@ -1435,8 +1612,10 @@ async function saveToSlot(slot) {
 }
 
 // The pause menu pauses a solo game while it's open, and leaves it as it
-// was on closing (paused with ⏸ beforehand: still paused). In co-op it
-// pauses nobody -- the shared ⏸ is for that.
+// was on closing (paused with ⏸ beforehand: still paused). One against the
+// other it pauses the game for both, and closing it carries on if the pause
+// was this player's (versus.js). In co-op it pauses nobody -- the shared ⏸
+// is for that.
 let pausedBeforeMenu = false;
 function openPauseMenu() {
   if (menu.isOpen() || gameEndShown) return;
@@ -1444,13 +1623,16 @@ function openPauseMenu() {
     if (!started) return;
     pausedBeforeMenu = state.paused;
     state.paused = true;
+  } else if (versusGame() && net.you) {
+    pausedBeforeMenu = state.paused;
+    postAction({ type: "pause", on: true });
   }
   menu.openPause();
 }
 
 // After a finished game ("Jugar de nuevo", or R): pick how to play the next.
 function backToNewGame() {
-  gameEndOverlay.classList.add("hidden");
+  showGameEndOverlay(false);
   gameEndShown = false;
   if (!networked) started = false;
   menu.openNewGame();
@@ -1468,6 +1650,7 @@ const menu = createMenu(document.getElementById("menu"), {
   getSettings: () => settings,
   onContinue: () => (networked ? enterGame() : loadSlot("auto")),
   onNewGame: startNewGame,
+  onJoin: joinSide,
   onLoad: loadSlot,
   onSave: saveToSlot,
   onRecords: openStatsModal,
@@ -1477,6 +1660,7 @@ const menu = createMenu(document.getElementById("menu"), {
   },
   onResume: () => {
     if (!networked) state.paused = pausedBeforeMenu;
+    else if (versusGame() && net.you && !pausedBeforeMenu) postAction({ type: "pause", on: false });
   },
   onSettingsChange: (next) => {
     settings = next;
@@ -1505,6 +1689,11 @@ const gameEndNameInput = document.getElementById("gameend-name-input");
 const gameEndSaveBtn = document.getElementById("gameend-save-btn");
 const gameEndSaveStatus = document.getElementById("gameend-save-status");
 const gameEndCloseBtn = document.getElementById("gameend-close-btn");
+// The end screen, with the board's panels out of its way (style.css).
+function showGameEndOverlay(visible) {
+  gameEndOverlay.classList.toggle("hidden", !visible);
+  document.body.classList.toggle("gameend-open", visible);
+}
 
 async function fetchLeaderboard() {
   if (!networked) {
@@ -1558,17 +1747,22 @@ let currentMatchScore = 0;
 let gameEndShown = false;
 
 async function showGameEndScreen() {
+  gameEndRematchBtn.classList.add("hidden");
   if (attacking()) {
-    // An attack's end: who won and how it went -- no score or ranking.
-    renderAttackEndScreen(gameEndOverlay, attackSummary(state));
-    gameEndCloseBtn.textContent = "Jugar de nuevo";
-    gameEndOverlay.classList.remove("hidden");
+    // An attack's end: who won and how it went -- no score or ranking. One
+    // against the other, each player reads their own result and may ask
+    // for the rematch.
+    renderAttackEndScreen(gameEndOverlay, attackSummary(state, mySide() || "attack"));
+    const rematch = versusGame() && Boolean(net.you);
+    gameEndRematchBtn.classList.toggle("hidden", !rematch);
+    gameEndCloseBtn.textContent = rematch ? "Menú principal" : "Jugar de nuevo";
+    showGameEndOverlay(true);
     return;
   }
   currentMatchScore = renderGameEndScreen(gameEndOverlay, state);
   const interim = state.levelComplete;
   gameEndCloseBtn.textContent = interim ? `Continuar al Nivel ${state.level + 1} ▶` : "Jugar de nuevo";
-  gameEndOverlay.classList.remove("hidden");
+  showGameEndOverlay(true);
   if (interim) return; // no save/ranking UI to prep -- ui.js already hid that section
 
   gameEndSaveStatus.textContent = "";
@@ -1598,9 +1792,17 @@ gameEndSaveBtn.addEventListener("click", async () => {
   gameEndSaveStatus.textContent = "¡Puntuación guardada!";
 });
 
+// «Revancha»: the server starts the same map again with the sides swapped
+// (host.js); the end screen goes when the new game's snapshot arrives.
+const gameEndRematchBtn = document.getElementById("gameend-rematch-btn");
+gameEndRematchBtn.addEventListener("click", async () => {
+  const result = await askServer({ type: "rematch" });
+  if (!result.ok) showToast("No se ha podido empezar la revancha");
+});
+
 gameEndCloseBtn.addEventListener("click", () => {
   if (state.levelComplete) {
-    gameEndOverlay.classList.add("hidden");
+    showGameEndOverlay(false);
     gameEndShown = false;
     actions.nextLevel();
     selectedId = null;
@@ -1625,7 +1827,7 @@ function checkGameEnd() {
     showGameEndScreen();
   } else if (!ended && gameEndShown) {
     gameEndShown = false;
-    gameEndOverlay.classList.add("hidden");
+    showGameEndOverlay(false);
   }
 }
 
@@ -1654,6 +1856,7 @@ function handleClick(pos) {
     const check = canPlaceTower(state, selectedBuildType, pos.x, pos.y);
     if (!check.ok) {
       playSound("error");
+      if (check.reason === "entry-road") showToast(ENTRY_ROAD_REFUSED);
       return;
     }
     actions.place(selectedBuildType, check.x, check.y);
@@ -1740,13 +1943,18 @@ const attackControls = createAttackControls({
   now: () => performance.now() / 1000,
   onRefused: () => playSound("error"),
   autoArmy: () => autoArmyOn(),
+  // On the home network the army's orders go to the server; solo, the
+  // controls carry them out themselves.
+  get orders() {
+    return networked ? networkOrders : null;
+  },
 });
 
 // The pointer's look over an attack's map: a hand over a unit a click
 // would pick, a crosshair where a click would attack or go into the base.
 let mapCursor = "";
 function updateMapCursor() {
-  const look = attacking() && started && !state.gameOver && !menu.isOpen() ? attackControls.hoverOrder() : null;
+  const look = commanding() && started && !state.gameOver && !menu.isOpen() ? attackControls.hoverOrder() : null;
   const cursor = look === "pick" ? "pointer" : look === "attack" || look === "enter" ? "crosshair" : "";
   if (cursor === mapCursor) return;
   mapCursor = cursor;
@@ -1761,7 +1969,7 @@ const autoArmy = createAutoArmy();
 const AUTO_ARMY_EVERY = 0.25; // s between its looks at the army
 let autoArmyClock = 0;
 function autoArmyOn() {
-  return attacking() && resolveControls(settings.controls, browserControlsEnv()) === "touch";
+  return commanding() && resolveControls(settings.controls, browserControlsEnv()) === "touch";
 }
 
 // Two-finger pinch zoom on a touch screen, per user request ("poder hacer
@@ -1844,7 +2052,7 @@ window.addEventListener("blur", () => attackControls.pointerAt(null));
 
 canvas.addEventListener("pointerdown", (evt) => {
   if (pinchDown(evt)) return;
-  if (attacking()) {
+  if (commanding()) {
     if (!started || state.gameOver) return;
     // The minimap still moves the camera -- or, right-clicked, sends the
     // selected units there; everything else is the attack controls'.
@@ -1897,7 +2105,7 @@ canvas.addEventListener("pointermove", (evt) => {
   const pos = worldPos(evt);
   mouseX = pos.x;
   mouseY = pos.y;
-  if (attacking() && !minimapDragging) {
+  if (commanding() && !minimapDragging) {
     attackControls.pointerMove(evt);
     return;
   }
@@ -1933,7 +2141,7 @@ window.addEventListener("pointerup", (evt) => {
   const wasOnMinimap = minimapDragging;
   minimapDragging = false;
   wallPaint = null;
-  if (attacking()) {
+  if (commanding()) {
     if (!wasOnMinimap) attackControls.pointerUp(evt);
     return;
   }
@@ -2010,7 +2218,7 @@ window.addEventListener("keydown", (evt) => {
     // opens the pause menu, or (in a menu) goes back a screen.
     if (selectedBuildType) {
       selectedBuildType = null;
-    } else if (!menu.isOpen() && attacking() && attackControls.escape()) {
+    } else if (!menu.isOpen() && commanding() && attackControls.escape()) {
       // Esc in an attack first lets go of the selected units.
     } else if (menu.isOpen()) {
       menu.back();
@@ -2029,7 +2237,7 @@ window.addEventListener("keydown", (evt) => {
     backToNewGame();
     return;
   }
-  if (attacking()) {
+  if (commanding()) {
     if (started && !state.gameOver && attackControls.keyDown(evt)) return;
     // WASD don't pan in an attack: S is «stop».
     if (WASD.has(key)) return;
@@ -2188,13 +2396,20 @@ function updateAttackPanels() {
   const types = UNIT_ORDER.filter((type) => picked.some((u) => u.type === type));
   if (!types.includes(unitUpgradeType)) unitUpgradeType = types[0] || null;
   updateUnitUpgrades(unitUpgradeEl, state, types, unitUpgradeType, unitUpgradesOpen);
-  const preparing = state.attack.phase === "prep" && !state.gameOver;
+  showStartButton("⚔ ¡Al ataque!");
+}
+
+// The start of round 1 on the start button, in an attack's preparation:
+// «¡Al ataque!» -- or, one against the other, either player's «¡Listo!»,
+// waiting for the other once pressed.
+function showStartButton(label) {
+  const preparing = state.attack.phase === "prep" && !state.gameOver && (!versusGame() || Boolean(net.you));
   skipWaveBtn.classList.toggle("hidden", !preparing);
-  if (preparing) {
-    skipWaveBtn.textContent = "⚔ ¡Al ataque!";
-    skipWaveBtn.classList.add("pulse");
-    skipWaveBtn.title = "Empezar la ronda 1";
-  }
+  if (!preparing) return;
+  const ready = versusGame() && net.sides[net.you].ready;
+  skipWaveBtn.textContent = versusGame() ? (ready ? "✔ Listo" : "✔ ¡Listo!") : label;
+  skipWaveBtn.classList.toggle("pulse", !ready);
+  skipWaveBtn.title = versusGame() ? "La ronda 1 empieza cuando los dos estéis listos" : "Empezar la ronda 1";
 }
 
 // A defence game's panels, every frame: the build menu, the towers'
@@ -2214,6 +2429,9 @@ function updateDefencePanels() {
     selected: selectedTower || selectedWall,
   });
   updateUpgradePanel(upgradePanelEl, selectedTower);
+  // The defender of an attack, one against the other: no waves to call,
+  // only «¡Listo!» while preparing.
+  if (attacking()) return showStartButton("✔ ¡Listo!");
 
   // Play / Advance Wave button: during the countdown it starts the next
   // wave now (and carries the countdown itself -- the canvas HUD line it
@@ -2246,9 +2464,15 @@ function updateDefencePanels() {
 // separate "host" vs "guest" UI, only whichever machine happens to be
 // running server.js becomes the authority both browsers poll.
 const POLL_MS = 120;
+// Asking for news says who's asking (playerId) and whether this device
+// plays the attack with the phone's automatic army, which the server then
+// runs for it (host.js).
+const stateUrl = () =>
+  `/api/state?player=${encodeURIComponent(playerId)}&auto=${resolveControls(settings.controls, browserControlsEnv()) === "touch" ? 1 : 0}`;
+
 async function pollState() {
   try {
-    const res = await fetch("/api/state");
+    const res = await fetch(stateUrl());
     if (res.ok) receiveSnapshot(await res.json());
   } catch {
     // transient network hiccup on a LAN -- just try again next tick
@@ -2256,15 +2480,60 @@ async function pollState() {
   setTimeout(pollState, POLL_MS);
 }
 
+// The server's answer: { state, net } (host.js's viewJson) -- the game, its
+// fog back from the wire form it travels in (fog.js), and where this tab
+// stands in it.
+function unpackView(body) {
+  const next = body.state;
+  if (next?.attack?.fog) next.attack.fog = fogFromWire(next.attack.fog);
+  return { state: next, net: body.net || { kind: "coop", you: null, mayChange: true } };
+}
+
 // The snapshot before the latest one, and when the latest arrived -- see
 // drawnView.
 let prevSnapshot = null;
 let snapshotAt = 0;
 
-function receiveSnapshot(next) {
+function receiveSnapshot(body) {
+  const view = unpackView(body);
+  const before = { you: net.you, kind: net.kind, over: state.gameOver };
   prevSnapshot = { state, at: snapshotAt };
-  state = next;
+  state = view.state;
+  net = view.net;
   snapshotAt = performance.now();
+  // Another game under this tab -- a rematch, a load, a new game started by
+  // the other player, a side taken: its picks and camera start over.
+  if (net.you !== before.you || net.kind !== before.kind || (before.over && !state.gameOver)) resetLocalView();
+}
+
+function resetLocalView() {
+  selectedId = null;
+  selectedBuildType = null;
+  attackControls.reset();
+  unitUpgradeType = null;
+  lastCameraLevel = null; // (the camera recentres: on the army's entry, or the base)
+}
+
+// One against the other, a tab without a side can join a free one -- or, with
+// both taken, only wait (menu.js's «Unirse a la partida» / «Hay una partida
+// uno contra otro en marcha»), over the game going on.
+let lastSeatInfo = null;
+function checkSeat() {
+  if (!versusGame() || net.you) {
+    if (menu.isSeatScreen()) menu.close();
+    lastSeatInfo = null;
+    return;
+  }
+  if (menu.isOpen() && !menu.isSeatScreen()) return; // (choosing something else)
+  const info = {
+    level: state.level,
+    money: state.attack?.difficulty,
+    free: ["defense", "attack"].filter((side) => !net.sides[side].connected),
+  };
+  const key = JSON.stringify(info);
+  if (key === lastSeatInfo && menu.isSeatScreen()) return;
+  lastSeatInfo = key;
+  menu.openSeat(info);
 }
 
 // What to draw this frame. Solo play simulates every frame, so that's the
@@ -2318,12 +2587,18 @@ if ("serviceWorker" in navigator && location.protocol === "https:") {
 
 async function boot() {
   try {
-    const res = await fetch("/api/state");
+    const res = await fetch(stateUrl());
     if (res.ok) {
       networked = true;
-      state = await res.json();
+      const view = unpackView(await res.json());
+      state = view.state;
+      net = view.net;
       snapshotAt = performance.now();
       pollState();
+      fetch("/api/address")
+        .then((r) => (r.ok ? r.json() : { urls: [] }))
+        .then((body) => (lanUrls = Array.isArray(body.urls) ? body.urls : []))
+        .catch(() => {});
     }
   } catch {
     // no /api/state -- solo play, local simulation (the default)
@@ -2362,6 +2637,7 @@ function loop(now) {
   playNewShotSounds();
   syncMusicToPause();
   checkGameEnd();
+  if (networked) checkSeat();
 
   if (state.level !== lastCameraLevel) {
     lastCameraLevel = state.level;
@@ -2369,7 +2645,7 @@ function loop(now) {
     clearEffects(fx);
   }
   updateCameraFromKeys(dt);
-  if (attacking() && started && !menu.isOpen()) attackControls.update(dt);
+  if (commanding() && started && !menu.isOpen()) attackControls.update(dt);
   updateMapCursor();
 
   ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
@@ -2399,7 +2675,7 @@ function loop(now) {
   // Effects freeze with the game when it's paused.
   if (!state.paused) stepEffects(fx, view, dt);
   drawGroundEffects(fx, ctx, wreckSprite);
-  if (attacking()) {
+  if (commanding()) {
     drawAttackWorld(view, now);
   } else {
     drawWalls(view.walls || []);
@@ -2422,14 +2698,31 @@ function loop(now) {
     // fixed points -- show every unoccupied one faintly while placing so
     // it's clear where those are at a glance, not just wherever the mouse
     // happens to be hovering.
-    const slots = selectedBuildType === "wall" ? null : levelData(state.level).buildSlots;
+    const L = levelData(state.level);
+    const slots = selectedBuildType === "wall" ? null : L.buildSlots;
+    // In an attack (the defender, one against the other) the entries' safe
+    // stretch is off limits to the towers (entryRoads.js): it shows as a red
+    // band, and so do the slots where this tower would reach it.
+    const guarded = attacking() && slots;
+    if (guarded) {
+      ctx.save();
+      ctx.globalAlpha = 0.28;
+      ctx.fillStyle = "#ff3b30";
+      for (const p of entrySafePoints(L)) {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 15, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
     if (slots) {
       ctx.save();
       ctx.globalAlpha = 0.35;
-      ctx.fillStyle = "#5fd8e6";
       for (const slot of slots) {
         const occupied = state.towers.some((t) => t.hp > 0 && Math.hypot(t.x - slot.x, t.y - slot.y) < 20);
         if (occupied) continue;
+        const banned = guarded && reachesEntryRoad(L, slot.x, slot.y, TOWER_TYPES[selectedBuildType].range);
+        ctx.fillStyle = banned ? "#ff5a4a" : "#5fd8e6";
         ctx.beginPath();
         ctx.arc(slot.x, slot.y, 18, 0, Math.PI * 2);
         ctx.fill();
@@ -2465,11 +2758,11 @@ function loop(now) {
   ctx.restore();
 
   // The box being dragged to select units, over the map in screen space.
-  const dragBox = attacking() ? attackControls.box() : null;
+  const dragBox = commanding() ? attackControls.box() : null;
   if (dragBox) drawSelectionBox(ctx, dragBox);
 
   const mini = currentMinimap();
-  if (mini && attacking()) {
+  if (mini && commanding()) {
     drawMinimap(ctx, mini, attackMinimap(view, currentMapImage));
   } else if (mini) {
     drawMinimap(ctx, mini, {
@@ -2477,13 +2770,13 @@ function loop(now) {
       enemies: view.enemies,
       towers: view.towers,
       walls: view.walls || [],
-      base: levelData(state.level).soldierExit,
+      base: attacking() ? attackMapOf(levelData(state.level)).base : levelData(state.level).soldierExit,
       view: { camera, w: CANVAS_WIDTH / zoom, h: CANVAS_HEIGHT / zoom },
     });
   }
 
   drawHud();
-  if (attacking()) updateAttackPanels();
+  if (commanding()) updateAttackPanels();
   else updateDefencePanels();
 
   pauseBtn.textContent = state.paused ? "▶" : "⏸";

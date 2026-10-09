@@ -1,7 +1,7 @@
 # Uno contra otro en la red de casa — Diseño
 
 Fecha: 2026-10-09
-Estado: decisiones tomadas en conversación, pendiente de revisión por escrito
+Estado: hecho (2026-10-09). Probado con dos pestañas contra un servidor de prueba: crear, unirse, preparar, ronda, pausa, recarga a mitad de ronda, desconexión, final y revancha.
 
 ## 1. Contexto
 

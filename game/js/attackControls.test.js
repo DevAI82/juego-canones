@@ -10,7 +10,7 @@ import { assignId } from "./ids.js";
 // The controls on level 2 against an empty defence, on a 1200 x 750
 // canvas shown at its own size (client px = canvas px), the camera at
 // `camera` and `zoom`.
-function setup({ zoom = 1, camera = { x: 0, y: 0 }, autoArmy = false } = {}) {
+function setup({ zoom = 1, camera = { x: 0, y: 0 }, autoArmy = false, orders = null } = {}) {
   const state = createAttackState(2, "normal", { aiSetup: false });
   state.economy.money = 0;
   const map = attackMapOf(levelData(2));
@@ -35,6 +35,7 @@ function setup({ zoom = 1, camera = { x: 0, y: 0 }, autoArmy = false } = {}) {
     onRefused: () => refused.push(true),
     autoArmy: () => autoArmy,
   };
+  if (orders) env.orders = orders;
   const controls = createAttackControls(env);
   // A pointer event at world point p.
   const at = (p, extra = {}) => ({
@@ -225,4 +226,31 @@ test("with the automatic army, a left click neither picks nor orders, and a drag
   controls.pointerUp({ clientX: 560, clientY: 400, button: 0, pointerType: "mouse", target: {}, preventDefault() {} });
   assert.equal(cam.x, 40);
   assert.equal(controls.hoverOrder(), null);
+});
+
+// On the home network the orders go to the server (main.js's env.orders):
+// nothing is carried out here, and the marks still show at once.
+test("with orders of their own to give them to, the controls carry nothing out themselves", () => {
+  const sent = [];
+  const orders = {
+    move: (ids, x, y) => sent.push(["move", ids, Math.round(x), Math.round(y)]),
+    attack: (ids, targetId) => sent.push(["attack", ids, targetId]),
+    enter: (ids) => sent.push(["enter", ids]),
+    stop: (ids) => sent.push(["stop", ids]),
+    entry: (index) => sent.push(["entry", index]),
+  };
+  const { state, map, controls, click } = setup({ orders });
+  buyUnits(state, "soldier", 1);
+  const [a] = state.enemies;
+  click(a);
+  click({ x: 457, y: 191 });
+  click(map.base);
+  controls.keyDown({ code: "KeyS", key: "s", preventDefault() {} });
+  const other = state.attack.entry === 0 ? 1 : 0;
+  const e = map.entries[other];
+  click({ x: e.x + 6, y: e.y - 22 });
+  assert.deepEqual(sent, [["move", [a.id], 457, 191], ["enter", [a.id]], ["stop", [a.id]], ["entry", other]]);
+  assert.equal(a.order, null);
+  assert.equal(state.attack.entry === other, false);
+  assert.deepEqual(controls.markers().map((m) => m.kind), ["move", "attack"]);
 });

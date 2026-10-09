@@ -67,53 +67,53 @@ game/
 
 ### Task 1: The entries' safe stretch, for both defenders
 
-- [ ] Failing tests (`entryRoads.test.js`): a slot whose basic tower would reach an entry's first 320 px of road reaches it; one far away doesn't; the stretch stops 400 px of road short of the base (level 3's southern road). In `simulate-steps.test.js` (or a new test): in an attack, `canPlaceTower` there answers `{ ok: false, reason: "entry-road" }`, and a range upgrade that would reach it `{ ok: false, reason: "entry-road" }`; in a defence game the same slot is fine.
-- [ ] `entryRoads.js`: `entrySafePoints(level)` (cached per level) and `reachesEntryRoad(level, x, y, range)`. `defenseAI.js` uses them instead of its own copy. `simulate.js`'s `canPlaceTower` and `upgradeTower` check them when `state.mode === "attack"`.
-- [ ] `node --test` (the bot's tests unchanged). Commit.
+- [x] Failing tests (`entryRoads.test.js`): a slot whose basic tower would reach an entry's first 320 px of road reaches it; one far away doesn't; the stretch stops 400 px of road short of the base (level 3's southern road). In `simulate-steps.test.js` (or a new test): in an attack, `canPlaceTower` there answers `{ ok: false, reason: "entry-road" }`, and a range upgrade that would reach it `{ ok: false, reason: "entry-road" }`; in a defence game the same slot is fine.
+- [x] `entryRoads.js`: `entrySafePoints(level)` (cached per level) and `reachesEntryRoad(level, x, y, range)`. `defenseAI.js` uses them instead of its own copy. `simulate.js`'s `canPlaceTower` and `upgradeTower` check them when `state.mode === "attack"`.
+- [x] `node --test` (the bot's tests unchanged). Commit.
 
 ### Task 2: A defender that is a person
 
-- [ ] Failing tests (`attack.test.js`): `createAttackState(level, "hard", { defender: "player" })` has no towers and $450; rounds pay $120 and the computer never builds; a tower placed in preparation is finished; the attacker's fog sees a tower built in preparation in sight; saves keep `defender`, and the summary says it.
-- [ ] `attack.js`: `state.attack.defender` ("computer" by default); no `aiPrepare`/`aiStep` for a person; in preparation, towers under construction are finished and the fog refreshed.
-- [ ] `node --test`. Commit.
+- [x] Failing tests (`attack.test.js`): `createAttackState(level, "hard", { defender: "player" })` has no towers and $450; rounds pay $120 and the computer never builds; a tower placed in preparation is finished; the attacker's fog sees a tower built in preparation in sight; saves keep `defender`, and the summary says it.
+- [x] `attack.js`: `state.attack.defender` ("computer" by default); no `aiPrepare`/`aiStep` for a person; in preparation, towers under construction are finished and the fog refreshed.
+- [x] `node --test`. Commit.
 
 ### Task 3: The fog in transit
 
-- [ ] Failing test (`fog.test.js`): `fogFromWire(JSON.parse(JSON.stringify(fogForWire(fog))))` answers the same `isVisible`, `isExplored` and memory.
-- [ ] `fog.js`: both functions (hex strings, like `saveFog`, for `explored` and `visible`).
-- [ ] Commit.
+- [x] Failing test (`fog.test.js`): `fogFromWire(JSON.parse(JSON.stringify(fogForWire(fog))))` answers the same `isVisible`, `isExplored` and memory.
+- [x] `fog.js`: both functions (hex strings, like `saveFog`, for `explored` and `visible`).
+- [x] Commit.
 
 ### Task 4: Seats and turns (`versus.js`)
 
-- [ ] Failing tests: create with a side and money; join the free side; can't join a taken, connected side; the same id gets its side back; after 5 s without news the side is free, and a running round pauses, owned by that side; «¡Listo!» from both starts round 1; pause by either, resume only by its owner or by anyone once the owner is gone; rematch: same level and money, sides swapped, preparation; `mayChangeGame`: only the seated players while both are connected.
-- [ ] `versus.js`: pure functions on a small seats object and the attack state.
-- [ ] Commit.
+- [x] Failing tests: create with a side and money; join the free side; can't join a taken, connected side; the same id gets its side back; after 5 s without news the side is free, and a running round pauses, owned by that side; «¡Listo!» from both starts round 1; pause by either, resume only by its owner or by anyone once the owner is gone; rematch: same level and money, sides swapped, preparation; `mayChangeGame`: only the seated players while both are connected.
+- [x] `versus.js`: pure functions on a small seats object and the attack state.
+- [x] Commit.
 
 ### Task 5: The home server's game (`host.js`)
 
-- [ ] Failing tests (`host.test.js`, with an in-memory saves store): a co-op game as before (actions from anyone); a new 1v1 game seats its creator; the other tab joins; actions are refused from the wrong side; the attacker's orders, buys and upgrades work; the view for each tab says its side, the seats, the pause and its owner; the fog arrives in wire form; the attacker's automatic army runs on the server when that tab says so; autosave at the start of each round; load keeps who was playing; a third tab can't start a game during a match.
-- [ ] `host.js`: `createHost({ store, now })` with `tick(dt)`, `view(playerId, info)`, `act(playerId, body)`.
-- [ ] Commit.
+- [x] Failing tests (`host.test.js`, with an in-memory saves store): a co-op game as before (actions from anyone); a new 1v1 game seats its creator; the other tab joins; actions are refused from the wrong side; the attacker's orders, buys and upgrades work; the view for each tab says its side, the seats, the pause and its owner; the fog arrives in wire form; the attacker's automatic army runs on the server when that tab says so; autosave at the start of each round; load keeps who was playing; a third tab can't start a game during a match.
+- [x] `host.js`: `createHost({ store, now })` with `tick(dt)`, `view(playerId, info)`, `act(playerId, body)`.
+- [x] Commit.
 
 ### Task 6: HTTP on top (`server.js`)
 
-- [ ] Failing test (`server.test.js`): a server on a free port with `DATA_DIR` in a temporary folder; two players create, join, get ready, the round starts; a wrong-side action is refused.
-- [ ] `server.js`: `GET /api/state?player=…&auto=…`, `POST /api/action` with `player`, the rest as before; the startup message mentions both ways to play. The server can be started by a test (exported `startServer({ port, dataDir })`, `node server.js` unchanged).
-- [ ] Commit.
+- [x] Failing test (`server.test.js`): a server on a free port with `DATA_DIR` in a temporary folder; two players create, join, get ready, the round starts; a wrong-side action is refused.
+- [x] `server.js`: `GET /api/state?player=…&auto=…`, `POST /api/action` with `player`, the rest as before; the startup message mentions both ways to play. The server can be started by a test (exported `startServer({ port, dataDir })`, `node server.js` unchanged).
+- [x] Commit.
 
 ### Task 7: The browser speaks for its side
 
-- [ ] `attackControls.js` sends orders through `env.orders` (tests keep a local implementation); `main.js` routes buying, unit upgrades, entries, «¡Listo!» and pause to the server in networked play; the tab's id in `sessionStorage`; the poll sends it and the automatic-army flag; snapshots bring `{ state, net }` and the fog is revived.
-- [ ] `mySide()` replaces `attacking()` wherever the screen depends on who is playing.
-- [ ] Commit.
+- [x] `attackControls.js` sends orders through `env.orders` (tests keep a local implementation); `main.js` routes buying, unit upgrades, entries, «¡Listo!» and pause to the server in networked play; the tab's id in `sessionStorage`; the poll sends it and the automatic-army flag; snapshots bring `{ state, net }` and the fog is revived.
+- [x] `mySide()` replaces `attacking()` wherever the screen depends on who is playing.
+- [x] Commit.
 
 ### Task 8: The defender's screen and the menus
 
-- [ ] The defender of an attack: defence screen, HUD (round, clock, lives, money, units), «¡Listo!», safe stretch striped red while building, red bars on the units, camera on the base.
-- [ ] Menu at home: «Defender juntos» / «Uno contra otro» → map → side → money; «Unirse a la partida»; «Hay una partida uno contra otro en marcha»; banners for waiting, pause and disconnection; end screen per side with «Revancha»; saves listed as «Uno contra otro».
-- [ ] Commit.
+- [x] The defender of an attack: defence screen, HUD (round, clock, lives, money, units), «¡Listo!», safe stretch striped red while building, red bars on the units, camera on the base.
+- [x] Menu at home: «Defender juntos» / «Uno contra otro» → map → side → money; «Unirse a la partida»; «Hay una partida uno contra otro en marcha»; banners for waiting, pause and disconnection; end screen per side with «Revancha»; saves listed as «Uno contra otro».
+- [x] Commit.
 
 ### Task 9: Two tabs, one game
 
-- [ ] A test server on port 8423 with `DATA_DIR` in the scratchpad; two browser pages: create, join, prepare, rounds, pause, a reload mid-round, the end and the rematch; screenshots of both screens. Fix anything broken with a failing test first.
-- [ ] Update the design's state line; commit and push.
+- [x] A test server on port 8423 with `DATA_DIR` in the scratchpad; two browser pages: create, join, prepare, rounds, pause, a reload mid-round, the end and the rematch; screenshots of both screens. Fix anything broken with a failing test first.
+- [x] Update the design's state line; commit and push.

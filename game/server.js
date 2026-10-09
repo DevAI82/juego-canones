@@ -167,6 +167,14 @@ export async function startServer({ port = 8420, dataDir = path.join(GAME_DIR, "
       return;
     }
 
+    // Where the other computer finds the game (the banner while waiting
+    // for the second player): this one's addresses on the home network.
+    if (urlPath === "/api/address" && req.method === "GET") {
+      const { port: actual } = server.address();
+      sendJson(res, { urls: lanAddresses().map((addr) => `http://${addr}:${actual}`) });
+      return;
+    }
+
     if (urlPath === "/api/saves" && req.method === "GET") {
       sendJson(res, await listSaveFile(savesPath));
       return;
