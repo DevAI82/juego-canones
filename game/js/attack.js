@@ -501,6 +501,9 @@ export function restoreAttackSave(save) {
   const state = createAttackState(save.level, save.difficulty, { aiSetup: false });
   const a = state.attack;
   a.phase = save.phase === "battle" ? "battle" : "prep";
+  // It stands at the start of its round: a save can be made at once, and
+  // the autosave moves on to the game just loaded.
+  a.roundJustStarted = a.phase === "battle";
   a.round = clamp(Math.floor(num(save.round, 1)), 1, ROUNDS);
   a.money = Math.max(0, num(save.money, roundIncome(1)));
   const upgrades = objectOr(save.upgrades);

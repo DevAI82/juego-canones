@@ -232,3 +232,20 @@ test("paused right as a round starts: the autosave is made once", () => {
   }
   assert.deepEqual(writes, ["auto"]);
 });
+
+test("a loaded attack stands at its round's start: it can be saved at once, and the autosave follows the loaded game", () => {
+  const loaded = restoreAttackSave(roundTrip(createAttackSave(attackInProgress())));
+  assert.equal(canSaveAttack(loaded), true);
+  const writes = [];
+  const scheduler = createSaveScheduler((slot, save) => {
+    writes.push([slot, save.round]);
+    return true;
+  });
+  scheduler.reset(loaded);
+  scheduler.tick(loaded);
+  assert.deepEqual(writes, [["auto", 3]]);
+  assert.equal(scheduler.request(2, loaded).done, true);
+  loaded.paused = false;
+  stepAttack(loaded, 0.1);
+  assert.equal(canSaveAttack(loaded), false);
+});
