@@ -56,6 +56,7 @@ import {
 } from "./attackDraw.js";
 import { initShop, updateShop, initUnitUpgrades, updateUnitUpgrades, attackHudLines, attackSummary } from "./attackUI.js";
 import { BUILDING_TYPES, BUILDING_ORDER, PHASE_COUNT, SHEET_COLS, buildingProgress, constructionFrame } from "./buildings.js";
+import { RTS_UNIT_TYPES, RTS_UNIT_ORDER } from "./rtsUnits.js";
 
 // Browsers refuse to start any audio (synthesized SFX or the background
 // music) before a real user gesture. Fire once, on whichever happens
@@ -235,6 +236,11 @@ for (const key of BUILDING_ORDER) {
   sprites[`building_${key}`] = loadImage(BUILDING_TYPES[key].sprite);
   sprites[`building_${key}_build`] = loadImage(BUILDING_TYPES[key].sheet);
 }
+// The RTS mode's vehicles (rtsUnits.js): seen from above, like the units.
+for (const key of RTS_UNIT_ORDER) sprites[`unit_${key}`] = loadImage(RTS_UNIT_TYPES[key].sprite);
+// A unit's picture: the defence's and the attack's units' (enemy_*), or an
+// RTS vehicle's (unit_*).
+const unitSprite = (type) => sprites[`enemy_${type}`] || sprites[`unit_${type}`];
 
 // Build-animation sheets: 8x6 grids of 48 frames each, keyed from the 720p
 // 4-second build videos (tools/extract_all_turrets.py -- COLS/ROWS there
@@ -502,11 +508,12 @@ const ENEMY_DRAW_SIZES = {
   buggy: { h: 30, shadowRx: 22, shadowRy: 13 },
   motorcycle: { h: 26, shadowRx: 18, shadowRy: 10 },
   soldier: { h: 24, shadowRx: 11, shadowRy: 11 },
+  // The RTS mode's vehicles: drawn as wide as their footprint (rtsUnits.js).
+  harvester: { h: RTS_UNIT_TYPES.harvester.footprint[1], shadowRx: 50, shadowRy: 24 },
 };
 
 function drawEnemy(e) {
-  const spriteKey = `enemy_${e.type}`;
-  const img = sprites[spriteKey];
+  const img = unitSprite(e.type);
   const sizeDef = ENEMY_DRAW_SIZES[e.type] || { h: 28, shadowRx: 20, shadowRy: 12 };
   const h = sizeDef.h;
   const w = ready(img) ? h * (img.naturalWidth / img.naturalHeight) : h * 1.5;
@@ -578,7 +585,7 @@ function drawEnemy(e) {
 // What effects.js draws a destroyed vehicle's wreck from: its sprite at the
 // same size drawEnemy draws it, or null until the image has loaded.
 function wreckSprite(type) {
-  const img = sprites[`enemy_${type}`];
+  const img = unitSprite(type);
   if (!ready(img)) return null;
   const h = (ENEMY_DRAW_SIZES[type] || { h: 28 }).h;
   return { img, w: h * (img.naturalWidth / img.naturalHeight), h };
