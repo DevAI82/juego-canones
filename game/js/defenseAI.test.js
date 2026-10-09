@@ -126,3 +126,12 @@ test("the defence leaves the army somewhere to come in: no tower reaches the fir
     }
   }
 });
+
+test("the defence guards the base's approaches first: every attacker has to pass there", () => {
+  // Level 3's five roads only meet at the fortress: with nothing else to go
+  // on, the opening towers all stand near the base.
+  const s = defence(3, DIFFICULTIES.normal.startMoney);
+  aiPrepare(s, "normal", { rand: best });
+  const { base } = attackMapOf(LEVELS[3]);
+  for (const t of s.towers) assert.ok(Math.hypot(t.x - base.x, t.y - base.y) < 600, `a ${t.type} at (${t.x},${t.y})`);
+});

@@ -33,6 +33,8 @@ const MIN_WORTH = 3; // road a new tower must cover (in points' worth) to be wor
 const UPGRADE_SKILLS = ["damage", "fireRate", "range", "armor"];
 const WALL_AHEAD = [160, 200, 240, 280]; // px ahead of the leading unit where it tries walls
 const MAX_WALLS = 12;
+const BASE_PULL = 2;
+const BASE_PULL_REACH = 600; // px from the base over which that pull fades out
 
 // The army must have somewhere to come in: no tower may be built where it
 // would reach the first ENTRY_SAFE_ROAD px of an entry's road -- where
@@ -43,17 +45,23 @@ export const ENTRY_SAFE_ROAD = 320;
 
 // The level's roads as points every SAMPLE_STEP px, each worth 1 per road
 // to the base it lies on -- a stretch several roads share is worth more --
-// and the extra streets half; and, for each build slot, which points each
-// tower type would have in range. Worked out once per level.
+// and the extra streets half, all worth up to 1 + BASE_PULL times as much
+// the nearer the base they are (every attacker has to come that way in the
+// end: bot games on level 3, whose roads only meet at the fortress, were won
+// in round 2 through whichever approach the towers had left open); and, for
+// each build slot, which points each tower type would have in range. Worked
+// out once per level.
 const plans = new WeakMap();
 function planOf(level) {
   if (plans.has(level)) return plans.get(level);
   const samples = [];
+  const { base } = attackMapOf(level);
   const add = (line, weight) => {
     const len = routeLength(line);
     for (let s = SAMPLE_STEP / 2; s < len; s += SAMPLE_STEP) {
       const p = pointAlong(line, s);
-      samples.push({ x: p.x, y: p.y, weight });
+      const pull = 1 + BASE_PULL * Math.max(0, 1 - Math.hypot(p.x - base.x, p.y - base.y) / BASE_PULL_REACH);
+      samples.push({ x: p.x, y: p.y, weight: weight * pull });
     }
   };
   for (const route of attackMapOf(level).routes) add(route, 1);
