@@ -2,6 +2,7 @@ import { TOWER_TYPES } from "./tower.js";
 import { UPGRADE_DEFS, upgradeCost, canUpgrade } from "./upgrades.js";
 import { computeScoreBreakdown } from "./scoring.js";
 import { WALL, repairCost, sellRefund } from "./simulate.js";
+import { statsBoardRows, formatCount } from "./statsBoard.js";
 
 const LABELS = { basic: "Básica", double: "Doble", laser: "Láser" };
 const SKILL_LABELS = { damage: "Daño", range: "Alcance", fireRate: "Vel. disparo", armor: "Blindaje", ammo: "Munición" };
@@ -200,25 +201,25 @@ export function initUpgradePanel(container, { onUpgrade }) {
 }
 
 export function renderStatsModal(overlay, state, rankingEntries) {
+  // The board's five lines (statsBoard.js): its labels, and its numbers in
+  // the green boxes -- the fourth on the shield.
+  statsBoardRows(state).forEach((row, i) => {
+    overlay.querySelector(`.stats-board-label[data-row="${i}"]`).textContent = row.label;
+    overlay.querySelector(`[data-row="${i}"]:not(.stats-board-label)`).textContent = row.value;
+  });
+  // Beside it, what each kind of unit lost.
   const summary = overlay.querySelector("#stats-summary-card");
   if (summary) {
     const kills = state.stats.kills || {};
-    const totalKills = Object.values(kills).reduce((a, b) => a + b, 0);
+    const title = state.mode === "attack" ? "Unidades perdidas" : "Bajas enemigas";
     summary.innerHTML = `
-      <div class="stats-grid">
-        <div class="stats-item"><span class="stats-num">${state.level}/3</span><span class="stats-lbl">Nivel</span></div>
-        <div class="stats-item"><span class="stats-num">${state.waveIndex + 1}/40</span><span class="stats-lbl">Oleada</span></div>
-        <div class="stats-item"><span class="stats-num">${state.economy.lives}</span><span class="stats-lbl">Vidas</span></div>
-        <div class="stats-item"><span class="stats-num">$${state.economy.money}</span><span class="stats-lbl">Fondos</span></div>
-        <div class="stats-item"><span class="stats-num">${state.stats.towersBuilt}</span><span class="stats-lbl">Torretas</span></div>
-        <div class="stats-item"><span class="stats-num">${totalKills}</span><span class="stats-lbl">Bajas</span></div>
-      </div>
+      <div class="stats-kills-title">${title}</div>
       <div class="stats-kills-detail">
-        <span class="kill-tag">💂 Soldados: ${kills.soldier || 0}</span>
-        <span class="kill-tag">🏎️ Buggies: ${kills.buggy || 0}</span>
-        <span class="kill-tag">🏍️ Motos: ${kills.motorcycle || 0}</span>
-        <span class="kill-tag">🛡️ Tanques: ${kills.tank || 0}</span>
-        <span class="kill-tag">🚀 Cohetes: ${kills.rocket || 0}</span>
+        <span class="kill-tag">💂 Soldados: ${formatCount(kills.soldier || 0)}</span>
+        <span class="kill-tag">🏎️ Buggies: ${formatCount(kills.buggy || 0)}</span>
+        <span class="kill-tag">🏍️ Motos: ${formatCount(kills.motorcycle || 0)}</span>
+        <span class="kill-tag">🛡️ Tanques: ${formatCount(kills.tank || 0)}</span>
+        <span class="kill-tag">🚀 Lanzacohetes: ${formatCount(kills.rocket || 0)}</span>
       </div>
     `;
   }

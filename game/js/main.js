@@ -1292,6 +1292,8 @@ const statsCloseBtn = document.getElementById("stats-close-btn");
 
 async function openStatsModal() {
   statsOverlay.classList.remove("hidden");
+  // (the game's panels stay out of the way, as under the menu)
+  document.body.classList.add("stats-open");
   // Same source the end-of-game screen uses (server's /api/leaderboard in
   // co-op, this browser's localStorage in solo play) -- this used to ask
   // for a nonexistent /api/ranking and a different localStorage key, so
@@ -1301,6 +1303,7 @@ async function openStatsModal() {
 
 function closeStatsModal() {
   statsOverlay.classList.add("hidden");
+  document.body.classList.remove("stats-open");
 }
 
 statsBtn.addEventListener("click", () => {

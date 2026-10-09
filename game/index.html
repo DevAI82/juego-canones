@@ -179,13 +179,29 @@
       </div>
       <div id="stats-overlay" class="hidden">
         <div id="stats-modal">
-          <div class="stats-modal-header">
-            <div id="stats-title">🏆 RANKING Y ESTADÍSTICAS</div>
-            <button id="stats-close-btn" class="stats-close-btn" title="Cerrar">✕</button>
+          <!-- The user's statistics drawing (assets/stats_board.jpg), with
+               this game's numbers on its five lines (statsBoard.js). -->
+          <div class="stats-board">
+            <div class="stats-board-label" data-row="0"></div>
+            <div class="stats-board-value" data-row="0"></div>
+            <div class="stats-board-label" data-row="1"></div>
+            <div class="stats-board-value" data-row="1"></div>
+            <div class="stats-board-label" data-row="2"></div>
+            <div class="stats-board-value" data-row="2"></div>
+            <div class="stats-board-label" data-row="3"></div>
+            <div class="stats-board-shield" data-row="3"></div>
+            <div class="stats-board-label" data-row="4"></div>
+            <div class="stats-board-value" data-row="4"></div>
           </div>
-          <div id="stats-summary-card"></div>
-          <div class="stats-ranking-header">Top 20 Mejores Puntuaciones</div>
-          <ol id="stats-ranking-list"></ol>
+          <div class="stats-side">
+            <div class="stats-modal-header">
+              <div id="stats-title">RANKING</div>
+              <button id="stats-close-btn" class="stats-close-btn" title="Cerrar">✕</button>
+            </div>
+            <div id="stats-summary-card"></div>
+            <div class="stats-ranking-header">Las 20 mejores puntuaciones</div>
+            <ol id="stats-ranking-list"></ol>
+          </div>
         </div>
       </div>
     </div>
