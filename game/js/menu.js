@@ -172,6 +172,7 @@ export function createMenu(root, handlers) {
   function renderSettings() {
     const settings = handlers.getSettings();
     for (const box of root.querySelectorAll("input[data-setting]")) box.checked = Boolean(settings[box.dataset.setting]);
+    for (const pick of root.querySelectorAll("select[data-setting-choice]")) pick.value = settings[pick.dataset.settingChoice] ?? pick.value;
   }
 
   function renderMultiplayer() {
@@ -263,10 +264,12 @@ export function createMenu(root, handlers) {
     if (target.closest(".menu-back")) back();
   });
 
-  for (const box of root.querySelectorAll("input[data-setting]")) {
-    box.addEventListener("change", () => {
+  // The sound switches and the controls' choice, all reported together.
+  for (const field of root.querySelectorAll("input[data-setting], select[data-setting-choice]")) {
+    field.addEventListener("change", () => {
       const settings = {};
       for (const b of root.querySelectorAll("input[data-setting]")) settings[b.dataset.setting] = b.checked;
+      for (const pick of root.querySelectorAll("select[data-setting-choice]")) settings[pick.dataset.settingChoice] = pick.value;
       handlers.onSettingsChange(settings);
     });
   }

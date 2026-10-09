@@ -9,6 +9,10 @@
 // minimap stay main.js's). On a touch screen a tap on a unit picks it, a tap
 // elsewhere orders the selection there, and a drag pans.
 //
+// With the phone's automatic army (env.autoArmy(), inputMode.js) the army
+// takes no orders from the player: a drag -- finger or mouse -- pans, and
+// taps, right clicks, the entry flags and the group keys do nothing.
+//
 // main.js creates it once with what it needs (`env`) and hands it its
 // canvas events while an attack is on; it keeps the selection, the groups,
 // the box and the order marks, and draws nothing itself (attackDraw.js).
@@ -37,6 +41,7 @@ export function createAttackControls(env) {
   let hover = null; // world point under the pointer
   const markers = [];
 
+  const auto = () => Boolean(env.autoArmy?.());
   const units = () => env.getState().enemies;
   const alive = () => new Set(units().filter((u) => u.alive).map((u) => u.id));
 
@@ -137,11 +142,11 @@ export function createAttackControls(env) {
         return;
       }
       if (evt.button === 2) {
-        orderAt(p);
+        if (!auto()) orderAt(p);
         return;
       }
       if (evt.button !== 0) return;
-      if (evt.pointerType === "touch") {
+      if (evt.pointerType === "touch" || auto()) {
         touch = { x: evt.clientX, y: evt.clientY, moved: false };
         return;
       }
@@ -192,7 +197,7 @@ export function createAttackControls(env) {
       if (touch) {
         const tapped = !touch.moved;
         touch = null;
-        if (!tapped) return;
+        if (!tapped || auto()) return;
         const u = unitAt(units(), p.x, p.y);
         if (u) selected = new Set([u.id]);
         else orderAt(p);
@@ -209,6 +214,13 @@ export function createAttackControls(env) {
       selected = applyPick(selected, picked, { shift: b.shift, box: true });
     },
 
+    // A second finger came down (main.js's pinch zoom): the first one's
+    // touch is neither a pan nor a tap any more.
+    cancelTouch() {
+      touch = null;
+      box = null;
+    },
+
     pointerLeave() {
       mouse = null;
       hover = null;
@@ -216,6 +228,7 @@ export function createAttackControls(env) {
 
     // Ctrl/Alt + 1-9, 1-9, S. True if the key was the attack mode's.
     keyDown(evt) {
+      if (auto()) return false;
       const key = attackKey(evt);
       if (!key) return false;
       evt.preventDefault();

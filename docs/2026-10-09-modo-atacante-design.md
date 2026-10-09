@@ -157,9 +157,15 @@ Solo en modo ataque, y solo para el atacante: la defensa del ordenador ve todo e
 - **Esc:** si hay unidades seleccionadas, primero las suelta; si no, abre el menú de pausa.
 - **Cámara:** flechas del teclado, ratón en el borde de la pantalla, arrastrar con el botón central, minimapa y rueda para el zoom. WASD no mueve la cámara en este modo, porque la S es «parar».
 
-### 4.5 Pantalla táctil (básico)
+### 4.5 Móvil: ejército automático (petición del usuario, 2026-10-09)
 
-Tocar una unidad la selecciona; tocar el suelo, una torre o la base da la orden a la selección. El recuadro y los grupos son solo con ratón y teclado.
+«En el móvil todo automático y en PC jugar con ratón.»
+
+- **Detección:** si la pantalla táctil es el puntero principal del aparato (móvil, tableta), el modo atacante se juega con el **ejército automático**; en un PC (también un portátil con pantalla táctil) se juega con el **ratón**, como en 4.1–4.4. **Ajustes › Controles en el modo atacante** permite forzar uno u otro: «Automático (según el dispositivo)», «Móvil: el ejército va solo», «PC: mandas tú con el ratón». Se guarda en el navegador de cada aparato (`inputMode.js`, `settings.js`).
+- **Ejército automático** (`autoArmy.js`): mientras no hay unidades esperando, las siguientes se reúnen en la entrada cuyo camino a la base pasa por menos fuego de torres (la misma elección del bot, §9). El grupo que espera entra en la base **todo junto** al empezar cada ronda (el de la preparación, con «¡Al ataque!»), en cuanto llega a 25 unidades, o enseguida en las dos últimas rondas. Las unidades compradas durante una ronda esperan en la entrada a la siguiente («Refuerzos: N · atacan en la próxima ronda»), para no entrar de una en una.
+- **Lo que hace el jugador:** comprar unidades, pulsar «¡Al ataque!», mover el mapa arrastrando un dedo y hacer **zoom con dos dedos**. No hay selección ni órdenes: los toques, las banderas de entrada y las teclas de grupo no hacen nada; por eso tampoco aparece el panel de mejoras por tipo de unidad.
+- **Pantalla táctil con «PC: mandas tú con el ratón»:** sigue lo básico de antes: tocar una unidad la selecciona; tocar el suelo, una torre o la base da la orden a la selección.
+- **Zoom con dos dedos:** en los dos modos de juego, hacia el punto entre los dedos (`camera.js`); el dedo que queda tras un pellizco no mueve, ni toca, ni construye hasta levantar todos.
 
 ## 5. Interfaz
 

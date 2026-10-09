@@ -663,6 +663,8 @@ body {
   cursor: pointer;
 }
 .menu-toggle input { width: 22px; height: 22px; cursor: pointer; }
+.menu-select { flex-direction: column; align-items: stretch; gap: 6px; width: 300px; cursor: default; }
+.menu-select select { padding: 6px 8px; font-size: 16px; background: #102226; color: #e8f4f2; border: 1px solid #2c5a62; border-radius: 4px; }
 .menu-confirm {
   position: absolute;
   inset: 0;

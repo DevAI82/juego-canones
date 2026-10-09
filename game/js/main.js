@@ -32,7 +32,9 @@ import { lerpAngle, isTypingTarget } from "./util.js";
 import { createEffects, clearEffects, stepEffects, hitFlash, drawGroundEffects, drawAirEffects } from "./effects.js";
 import { minimapRect, minimapToWorld, drawMinimap } from "./minimap.js";
 import { playSound, toggleMuted, startMusic, pauseMusic, resumeMusic, setMusicOn, setEffectsOn } from "./audio.js";
-import { clampCameraPosition } from "./camera.js";
+import { clampCameraPosition, zoomAt, pinchZoom } from "./camera.js";
+import { createAutoArmy } from "./autoArmy.js";
+import { resolveControls, browserControlsEnv } from "./inputMode.js";
 import { createSaveScheduler } from "./autosave.js";
 import { readSave, writeSave, listSaves, canStore } from "./saves.js";
 import { loadSettings, saveSettings } from "./settings.js";
@@ -1113,7 +1115,18 @@ function drawAttackHud() {
   if (state.attack.phase === "prep" && !state.gameOver) {
     ctx.font = "bold 18px sans-serif";
     ctx.fillStyle = "#ffe27a";
-    ctx.fillText("Compra tu ejército, dale órdenes y pulsa «¡Al ataque!»", CANVAS_WIDTH / 2, 30);
+    ctx.fillText(
+      autoArmyOn() ? "Compra tu ejército y pulsa «¡Al ataque!»: irá solo" : "Compra tu ejército, dale órdenes y pulsa «¡Al ataque!»",
+      CANVAS_WIDTH / 2,
+      30,
+    );
+  }
+  // The automatic army's reinforcements wait at the entry for the next round.
+  const waiting = autoArmyOn() && state.attack.phase === "battle" && !state.gameOver ? state.enemies.filter((u) => u.alive && !u.order).length : 0;
+  if (waiting) {
+    ctx.font = "bold 18px sans-serif";
+    ctx.fillStyle = "#ffe27a";
+    ctx.fillText(`Refuerzos: ${waiting} · atacan en la próxima ronda`, CANVAS_WIDTH / 2, 30);
   }
   // (A loaded preparation waits paused, but nothing runs in it anyway.)
   if (state.paused && !state.gameOver && state.attack.phase === "battle") {
@@ -1278,6 +1291,7 @@ function enterGame() {
   selectedId = null;
   selectedBuildType = null;
   attackControls.reset();
+  autoArmy.reset();
   unitUpgradeType = null;
   // Forces loop()'s "state.level changed" check to re-fire even for the
   // SAME level number (replaying level 3 after a loss, loading another
@@ -1629,7 +1643,71 @@ const attackControls = createAttackControls({
   entries: () => attackMapOf(levelData(state.level)).entries,
   now: () => performance.now() / 1000,
   onRefused: () => playSound("error"),
+  autoArmy: () => autoArmyOn(),
 });
+
+// The phone's automatic army (autoArmy.js), per user request: on a touch
+// screen -- or with Ajustes › Controles set to «Móvil» -- the player only
+// buys units and zooms, and the army goes on its own to the least defended
+// entry; on a PC the mouse commands it (attackControls.js).
+const autoArmy = createAutoArmy();
+const AUTO_ARMY_EVERY = 0.25; // s between its looks at the army
+let autoArmyClock = 0;
+function autoArmyOn() {
+  return attacking() && resolveControls(settings.controls, browserControlsEnv()) === "touch";
+}
+
+// Two-finger pinch zoom on a touch screen, per user request ("poder hacer
+// zoom en la pantalla" on the phone), in both modes. The fingers on the
+// canvas are tracked here; while two are down they zoom toward the point
+// between them, and the finger left on after a pinch neither pans, taps,
+// orders nor builds until every finger is up.
+const touchPoints = new Map(); // pointerId -> canvas point
+let pinch = null; // { zoom, dist } as the second finger touched down
+let pinchEnded = false;
+
+function pinchDown(evt) {
+  if (evt.pointerType !== "touch") return false;
+  touchPoints.set(evt.pointerId, canvasPoint(evt));
+  if (touchPoints.size === 2) {
+    const [a, b] = [...touchPoints.values()];
+    pinch = { zoom, dist: Math.hypot(a.x - b.x, a.y - b.y) };
+    attackControls.cancelTouch();
+    dragState = null;
+    wallPaint = null;
+    minimapDragging = false;
+    return true;
+  }
+  return touchPoints.size > 2 || pinchEnded;
+}
+
+function pinchMove(evt) {
+  if (evt.pointerType !== "touch" || !touchPoints.has(evt.pointerId)) return false;
+  touchPoints.set(evt.pointerId, canvasPoint(evt));
+  if (pinch && touchPoints.size >= 2) {
+    const [a, b] = [...touchPoints.values()];
+    const p = pinchZoom(pinch.zoom, pinch.dist, a, b);
+    const oldZoom = zoom;
+    zoom = p.zoom;
+    clampZoom(state.level);
+    Object.assign(camera, zoomAt(camera, oldZoom, zoom, p.cx, p.cy));
+    clampCamera(state.level);
+    return true;
+  }
+  return pinchEnded;
+}
+
+// True if the lifted finger belonged to a pinch (nothing else should see it).
+function pinchUp(evt) {
+  if (evt.pointerType !== "touch" || !touchPoints.delete(evt.pointerId)) return false;
+  if (pinch && touchPoints.size < 2) {
+    pinch = null;
+    pinchEnded = true;
+  }
+  const swallowed = pinchEnded;
+  if (touchPoints.size === 0) pinchEnded = false;
+  return swallowed;
+}
 // The middle button pans the map in an attack: not the browser's autoscroll.
 canvas.addEventListener("mousedown", (evt) => {
   if (evt.button === 1) evt.preventDefault();
@@ -1638,6 +1716,7 @@ canvas.addEventListener("pointerleave", () => attackControls.pointerLeave());
 canvas.addEventListener("contextmenu", (evt) => evt.preventDefault());
 
 canvas.addEventListener("pointerdown", (evt) => {
+  if (pinchDown(evt)) return;
   if (attacking()) {
     if (!started || state.gameOver) return;
     // The minimap still moves the camera -- or, right-clicked, sends the
@@ -1687,6 +1766,7 @@ canvas.addEventListener("pointerdown", (evt) => {
 });
 
 canvas.addEventListener("pointermove", (evt) => {
+  if (pinchMove(evt)) return;
   const pos = worldPos(evt);
   mouseX = pos.x;
   mouseY = pos.y;
@@ -1717,6 +1797,12 @@ canvas.addEventListener("pointermove", (evt) => {
 });
 
 window.addEventListener("pointerup", (evt) => {
+  if (pinchUp(evt)) {
+    minimapDragging = false;
+    wallPaint = null;
+    dragState = null;
+    return;
+  }
   const wasOnMinimap = minimapDragging;
   minimapDragging = false;
   wallPaint = null;
@@ -1746,6 +1832,16 @@ window.addEventListener("pointerup", (evt) => {
   dragState = null;
 });
 
+// The browser took a finger away (a system gesture, say): forget it.
+window.addEventListener("pointercancel", (evt) => {
+  if (evt.pointerType !== "touch") return;
+  touchPoints.delete(evt.pointerId);
+  if (touchPoints.size < 2) pinch = null;
+  if (touchPoints.size === 0) pinchEnded = false;
+  attackControls.cancelTouch();
+  dragState = null;
+});
+
 // Mouse-wheel zoom, per user request ("hacer zoom con el scroll del
 // ratón") -- zooms toward whatever world point is currently under the
 // cursor (same feel as Google Maps) rather than always zooming toward
@@ -1759,13 +1855,11 @@ canvas.addEventListener(
     const rect = canvas.getBoundingClientRect();
     const cx = ((evt.clientX - rect.left) / rect.width) * CANVAS_WIDTH;
     const cy = ((evt.clientY - rect.top) / rect.height) * CANVAS_HEIGHT;
-    const worldX = camera.x + cx / zoom;
-    const worldY = camera.y + cy / zoom;
     const ZOOM_STEP = 1.15;
+    const oldZoom = zoom;
     zoom *= evt.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
     clampZoom(state.level);
-    camera.x = worldX - cx / zoom;
-    camera.y = worldY - cy / zoom;
+    Object.assign(camera, zoomAt(camera, oldZoom, zoom, cx, cy));
     clampCamera(state.level);
   },
   { passive: false },
@@ -2125,6 +2219,11 @@ function loop(now) {
     // first tick spawns the opening units.
     saveScheduler.tick(state, (slot, ok) => showToast(savedMessage(slot, ok)));
     stepGame(state, dt);
+    autoArmyClock += dt;
+    if (autoArmyOn() && autoArmyClock >= AUTO_ARMY_EVERY) {
+      autoArmyClock = 0;
+      autoArmy.step(state);
+    }
   }
   playNewShotSounds();
   syncMusicToPause();
