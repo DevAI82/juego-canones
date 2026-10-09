@@ -15,6 +15,7 @@ import {
   DAMAGE_REWARD,
   ENTRY_REWARD,
   BASE_CLICK_RADIUS,
+  BOUNTY_SHARE,
 } from "./attack.js";
 import { DIFFICULTIES, AI_PERIOD } from "./defenseAI.js";
 import { attackMapOf, nearestRoadPoint } from "./roadGraph.js";
@@ -298,4 +299,16 @@ test("nobody drives off the map, even shoved about in a crowd at an entry", () =
     stepAttack(s, 0.05);
     assert.ok(u.x >= 0 && u.y >= 0 && u.x <= LEVELS[2].worldWidth && u.y <= LEVELS[2].worldHeight, `at (${u.x}, ${u.y})`);
   }
+});
+
+test("each unit destroyed pays the defence a share of its bounty", () => {
+  const s = empty();
+  buyUnits(s, "tank");
+  const [u] = s.enemies;
+  startAttack(s);
+  u.hp = 1;
+  tower(s, "basic", u.x + 60, u.y);
+  run(s, 3);
+  assert.equal(u.alive, false);
+  assert.equal(s.economy.money + (s.stats.moneySpent - 0), Math.round(20 * BOUNTY_SHARE));
 });

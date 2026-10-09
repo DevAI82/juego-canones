@@ -36,6 +36,9 @@ export const DAMAGE_REWARD = 0.25;
 export const ENTRY_REWARD = 20;
 // A right-click this close to the base sends the units into it.
 export const BASE_CLICK_RADIUS = 60;
+// What the defence earns for each unit it destroys: this share of the
+// defence game's bounty for that type (enemy.js).
+export const BOUNTY_SHARE = 1;
 // How close to the map's edge a unit may get.
 const MAP_MARGIN = 10;
 
@@ -90,6 +93,7 @@ function createUnit(state, type, x, y, angle) {
   const u = createEnemy(type, [{ x, y }]);
   // createEnemy gives each unit its own speed, +/-10%: kept through upgrades.
   u.jitter = u.speed / ENEMY_TYPES[type].speed;
+  u.bounty = Math.round(ENEMY_TYPES[type].bounty * BOUNTY_SHARE);
   u.angle = angle;
   u.v = 0;
   u.order = null;
