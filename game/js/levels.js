@@ -564,6 +564,35 @@ function level4BuildSlots() {
 // over the enemies, so traffic passes behind those towers.
 const LEVEL4_FOREGROUND = { image: "assets/map_fg_level4.png", x: 288, y: 328 };
 
+// Streets that show on the map but that the defence game's enemies never
+// use. In attack mode (docs/2026-10-09-modo-atacante-design.md) the army
+// can drive along them too: roadGraph.js joins them to the roads where
+// they meet or cross. Traced over the map images.
+const LEVEL3_STREETS = [
+  // The avenue across the top of the town, from the north road's corner
+  // to the north-east highway.
+  P([[498, 196], [700, 195], [900, 195], [1100, 195], [1300, 195], [1500, 195], [1700, 195], [1849, 195]]),
+  // The long street down the east side, from that avenue to the
+  // south-east highway (crossing the north-east one on the way).
+  P([[1810, 195], [1810, 400], [1810, 600], [1810, 800], [1810, 1000], [1808, 1200], [1808, 1400], [1808, 1600], [1810, 1795]]),
+  // The dirt road east of the fortress, from the north-east approach
+  // down to the south road.
+  P([[785, 1280], [830, 1380], [850, 1500], [850, 1700], [852, 1850], [860, 1935]]),
+  // The lane north of the fortress, from the west road to the north road.
+  P([[67, 1150], [150, 1165], [250, 1162], [350, 1160], [468, 1161]]),
+];
+
+const LEVEL4_STREETS = [
+  // The loop round the south of the building site, from the south avenue
+  // up to the HQ's door.
+  P([[500, 1630], [476, 1632], [420, 1630], [350, 1624], [290, 1612], [276, 1585], [290, 1550], [306, 1520], [322, 1492]]),
+  // The north street's eastern half, on past the corner where the road to
+  // the HQ turns south.
+  P([[568, 1158], [650, 1160], [750, 1172], [850, 1190]]),
+  // The diagonal avenue from there down to the south avenue.
+  P([[850, 1190], [842, 1260], [808, 1340], [753, 1420], [699, 1500], [644, 1580], [589, 1660], [562, 1700], [538, 1750], [505, 1790]]),
+];
+
 export const MAX_LEVEL = 4;
 
 export const LEVELS = {
@@ -607,6 +636,7 @@ export const LEVELS = {
     worldWidth: LEVEL3_WORLD_SIZE,
     worldHeight: LEVEL3_WORLD_SIZE,
     wall: LEVEL3_WALL,
+    streets: LEVEL3_STREETS,
   },
   4: {
     paths: LEVEL4_PATHS,
@@ -621,6 +651,7 @@ export const LEVELS = {
     shores: shoreSegments(LEVEL4_WATER, LEVEL4_WORLD_SIZE),
     mapImage: "assets/map_bg_level4.jpg",
     foreground: LEVEL4_FOREGROUND,
+    streets: LEVEL4_STREETS,
     buildSlots: level4BuildSlots(),
     worldWidth: LEVEL4_WORLD_SIZE,
     worldHeight: LEVEL4_WORLD_SIZE,
