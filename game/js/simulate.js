@@ -613,15 +613,10 @@ export function saveMoment(state) {
   return `${state.level}:${state.waveIndex}:${state.totalWavesCleared}`;
 }
 
-export function createSave(state, now = new Date()) {
+// What both kinds of game keep the same way in a save: the defence's
+// towers and wall blocks, and the game's stats (attack.js saves them too).
+export function boardForSave(state) {
   return {
-    version: SAVE_VERSION,
-    savedAt: now.toISOString(),
-    level: state.level,
-    waveIndex: state.waveIndex,
-    totalWavesCleared: state.totalWavesCleared,
-    money: state.economy.money,
-    lives: state.economy.lives,
     stats: JSON.parse(JSON.stringify(state.stats)),
     towers: state.towers
       .filter((t) => t.hp > 0)
@@ -638,23 +633,34 @@ export function createSave(state, now = new Date()) {
   };
 }
 
+export function createSave(state, now = new Date()) {
+  return {
+    version: SAVE_VERSION,
+    mode: "defense",
+    savedAt: now.toISOString(),
+    level: state.level,
+    waveIndex: state.waveIndex,
+    totalWavesCleared: state.totalWavesCleared,
+    money: state.economy.money,
+    lives: state.economy.lives,
+    ...boardForSave(state),
+  };
+}
+
 const num = (v, fallback) => (typeof v === "number" && Number.isFinite(v) ? v : fallback);
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
 // The level a save is for, or null if it isn't a save this version reads.
 function readableLevel(save) {
   if (!save || typeof save !== "object" || save.version !== SAVE_VERSION) return null;
+  if (save.mode != null && save.mode !== "defense") return null;
   return Number.isInteger(save.level) && save.level >= 1 && save.level <= MAX_LEVEL ? save.level : null;
 }
 
 // The game a save describes, ready to play: paused in the countdown
-// before its next wave. Every tower is rebuilt from its type with its
-// upgrades applied again level by level, so a save made before a balance
-// change loads with today's values -- and stays where it stood even if
-// that's no longer a build slot. Everything gets a fresh id (assignId,
-// like anything placed in play), so nothing can clash with what comes
-// later. Fields it doesn't know are ignored, missing ones take their
-// defaults; null if it isn't a save this version can read.
+// before its next wave (restoreBoard brings back its towers, walls and
+// stats). Fields it doesn't know are ignored, missing ones take their
+// defaults; null if it isn't a defence save this version can read.
 export function restoreSave(save) {
   const level = readableLevel(save);
   if (level == null) return null;
@@ -667,6 +673,17 @@ export function restoreSave(save) {
   state.totalWavesCleared = Math.max(0, Math.floor(num(save.totalWavesCleared, 0)));
   state.economy.money = Math.max(0, num(save.money, START_MONEY));
   state.economy.lives = Math.max(1, Math.floor(num(save.lives, START_LIVES)));
+  restoreBoard(state, save);
+  return state;
+}
+
+// Puts a save's stats, towers and wall blocks into `state`, a fresh game of
+// the save's level. Every tower is rebuilt from its type with its upgrades
+// applied again level by level, so a save made before a balance change
+// loads with today's values -- and stays where it stood even if that's no
+// longer a build slot. Everything gets a fresh id (assignId, like anything
+// placed in play), so nothing can clash with what comes later.
+export function restoreBoard(state, save) {
   const stats = save.stats && typeof save.stats === "object" ? save.stats : {};
   const kills = stats.kills && typeof stats.kills === "object" ? stats.kills : {};
   for (const type of Object.keys(state.stats.kills)) state.stats.kills[type] = Math.max(0, num(kills[type], 0));
@@ -703,7 +720,6 @@ export function restoreSave(save) {
     if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
     state.walls.push(assignId({ kind: "wall", x, y, hp: clamp(num(saved.hp, WALL.hp), 1, WALL.hp), maxHp: WALL.hp }));
   }
-  return state;
 }
 
 // What the menu lists for a save (null: it can't be loaded).

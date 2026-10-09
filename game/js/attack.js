@@ -6,14 +6,24 @@
 // units (enemy.js) -- same stats, sprites and driving -- moved by the
 // player's orders instead of along a fixed road.
 import { assignId } from "./ids.js";
-import { levelData, narrowsOf, solidSegmentsOf } from "./levels.js";
+import { levelData, narrowsOf, solidSegmentsOf, MAX_LEVEL } from "./levels.js";
 import { createEnemy, stepEnemy, ENEMY_TYPES, FOOTPRINT } from "./enemy.js";
 import { loseLife } from "./economy.js";
 import { pushOutOfPolygons } from "./map.js";
-import { createGameState, separateEnemies, fireTowers, fireUnits, stepShots, clearDestroyed } from "./simulate.js";
+import {
+  createGameState,
+  separateEnemies,
+  fireTowers,
+  fireUnits,
+  stepShots,
+  clearDestroyed,
+  SAVE_VERSION,
+  boardForSave,
+  restoreBoard,
+} from "./simulate.js";
 import { attackMapOf, roadRoute, spreadStops, pointAlong, routeLength, routePrefix } from "./roadGraph.js";
 import { DIFFICULTIES, AI_PERIOD, aiPrepare, aiStep } from "./defenseAI.js";
-import { createFog, updateFog, SIGHT, ENTRY_SIGHT } from "./fog.js";
+import { createFog, updateFog, saveFog, restoreFog, SIGHT, ENTRY_SIGHT } from "./fog.js";
 
 export const ROUNDS = 15;
 export const ROUND_TIME = 60;
@@ -419,4 +429,112 @@ export function stepAttack(state, dt) {
   clearDestroyed(state);
   for (const u of state.enemies) if (u.order?.kind === "attack" && !structureById(state, u.order.targetId)) stopUnit(u);
   refreshFog(state);
+}
+
+// --- Saved games (design §6) -------------------------------------------
+// An attack is saved as each round starts (and in preparation): the moment
+// the money's been paid and the defence has spent. Orders aren't saved --
+// a loaded game starts paused at the start of its round, its army standing
+// where it was.
+
+export function canSaveAttack(state) {
+  return !state.gameOver && (state.attack.phase === "prep" || state.attack.roundJustStarted);
+}
+
+// Which moment a save would capture (autosave.js writes one per moment).
+export function attackSaveMoment(state) {
+  return `attack:${state.level}:${state.attack.round}:${state.attack.phase}`;
+}
+
+export function createAttackSave(state, now = new Date()) {
+  const a = state.attack;
+  return {
+    version: SAVE_VERSION,
+    mode: "attack",
+    savedAt: now.toISOString(),
+    level: state.level,
+    difficulty: a.difficulty,
+    phase: a.phase,
+    round: a.round,
+    money: a.money,
+    upgrades: JSON.parse(JSON.stringify(a.upgrades)),
+    entry: a.entry,
+    queue: [...a.queue],
+    units: state.enemies.filter((u) => u.alive).map((u) => ({ type: u.type, x: u.x, y: u.y, hp: u.hp, angle: u.angle })),
+    defense: { money: state.economy.money, lives: state.economy.lives },
+    ...boardForSave(state),
+    attackStats: { ...a.stats },
+    fog: saveFog(a.fog),
+  };
+}
+
+const num = (v, fallback) => (typeof v === "number" && Number.isFinite(v) ? v : fallback);
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const objectOr = (v) => (v && typeof v === "object" ? v : {});
+
+function readableAttack(save) {
+  return (
+    Boolean(save) &&
+    typeof save === "object" &&
+    save.version === SAVE_VERSION &&
+    save.mode === "attack" &&
+    Number.isInteger(save.level) &&
+    save.level >= 1 &&
+    save.level <= MAX_LEVEL
+  );
+}
+
+// The attack a save describes, paused at the start of its round with its
+// army standing still; null if it isn't an attack save this version can
+// read. A damaged field takes its default instead of breaking the load.
+export function restoreAttackSave(save) {
+  if (!readableAttack(save)) return null;
+  const state = createAttackState(save.level, save.difficulty, { aiSetup: false });
+  const a = state.attack;
+  a.phase = save.phase === "battle" ? "battle" : "prep";
+  a.round = clamp(Math.floor(num(save.round, 1)), 1, ROUNDS);
+  a.money = Math.max(0, num(save.money, roundIncome(1)));
+  const upgrades = objectOr(save.upgrades);
+  for (const type of UNIT_ORDER) {
+    const saved = objectOr(upgrades[type]);
+    for (const [skill, def] of Object.entries(UNIT_UPGRADES)) a.upgrades[type][skill] = clamp(Math.floor(num(saved[skill], 0)), 0, def.levels);
+  }
+  if (Number.isInteger(save.entry) && save.entry >= 0 && save.entry < mapOf(state).entries.length) a.entry = save.entry;
+  const defense = objectOr(save.defense);
+  state.economy.money = Math.max(0, num(defense.money, DIFFICULTIES[a.difficulty].startMoney));
+  state.economy.lives = clamp(Math.floor(num(defense.lives, state.economy.lives)), 1, state.economy.lives);
+  restoreBoard(state, save);
+  for (const saved of Array.isArray(save.units) ? save.units : []) {
+    if (state.enemies.length >= UNIT_CAP) break;
+    if (!saved || !UNIT_PRICES[saved.type]) continue;
+    const x = num(saved.x, NaN);
+    const y = num(saved.y, NaN);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    const u = createUnit(state, saved.type, x, y, num(saved.angle, 0));
+    u.hp = clamp(num(saved.hp, u.maxHp), 1, u.maxHp);
+    state.enemies.push(u);
+  }
+  const room = UNIT_CAP - state.enemies.length;
+  a.queue = (Array.isArray(save.queue) ? save.queue : []).filter((t) => UNIT_PRICES[t]).slice(0, room);
+  const stats = objectOr(save.attackStats);
+  for (const key of Object.keys(a.stats)) a.stats[key] = Math.max(0, num(stats[key], 0));
+  restoreFog(a.fog, save.fog);
+  refreshFog(state);
+  state.paused = true;
+  return state;
+}
+
+// What the menu lists for an attack save (null: it can't be loaded).
+export function attackSaveSummary(save) {
+  if (!readableAttack(save)) return null;
+  const defense = objectOr(save.defense);
+  return {
+    mode: "attack",
+    level: save.level,
+    round: clamp(Math.floor(num(save.round, 1)), 1, ROUNDS),
+    difficulty: DIFFICULTIES[save.difficulty] ? save.difficulty : "normal",
+    lives: clamp(Math.floor(num(defense.lives, 20)), 1, 20),
+    money: Math.max(0, Math.floor(num(save.money, 0))),
+    savedAt: typeof save.savedAt === "string" ? save.savedAt : null,
+  };
 }

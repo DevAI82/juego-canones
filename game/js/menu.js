@@ -16,15 +16,23 @@
 const SLOT_NAMES = { auto: "Autoguardado", 1: "Hueco 1", 2: "Hueco 2", 3: "Hueco 3" };
 const pad = (n) => String(n).padStart(2, "0");
 
-// "Nivel 4 · Oleada 12 · ❤ 15 · $320 · 08/10 18:30": a save as the menu
-// lists it, the date in this device's own time.
+const DIFFICULTY_NAMES = { easy: "Fácil", normal: "Normal", hard: "Difícil" };
+
+// "Defensa · Nivel 4 · Oleada 12 · ❤ 15 · $320 · 08/10 18:30" or "Ataque ·
+// Nivel 3 · Ronda 5 · Difícil · ❤ 12 · $240 · ...": a save as the menu
+// lists it, the date in this device's own time. A summary without a mode
+// is a defence game's.
 export function describeSave(summary) {
   const when = summary.savedAt ? new Date(summary.savedAt) : null;
   const date =
     when && !Number.isNaN(when.getTime())
       ? ` · ${pad(when.getDate())}/${pad(when.getMonth() + 1)} ${pad(when.getHours())}:${pad(when.getMinutes())}`
       : "";
-  return `Nivel ${summary.level} · Oleada ${summary.wave} · ❤ ${summary.lives} · $${summary.money}${date}`;
+  if (summary.mode === "attack") {
+    const difficulty = DIFFICULTY_NAMES[summary.difficulty] || DIFFICULTY_NAMES.normal;
+    return `Ataque · Nivel ${summary.level} · Ronda ${summary.round} · ${difficulty} · ❤ ${summary.lives} · $${summary.money}${date}`;
+  }
+  return `Defensa · Nivel ${summary.level} · Oleada ${summary.wave} · ❤ ${summary.lives} · $${summary.money}${date}`;
 }
 
 export function createMenu(root, handlers) {

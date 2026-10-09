@@ -6,7 +6,7 @@
 // and the game has to carry on without it. `storage` is a parameter so the
 // tests can pass a stand-in.
 import { browserStorage } from "./util.js";
-import { saveSummary } from "./simulate.js";
+import { gameSaveSummary } from "./modes.js";
 
 export const SAVE_SLOTS = ["auto", 1, 2, 3];
 const KEY_PREFIX = "td_save_";
@@ -45,11 +45,12 @@ export function writeSave(slot, save, storage = browserStorage()) {
 }
 
 // One slot as the menu lists it, from a save already read: status
-// "empty", "ok" (with simulate.js's saveSummary) or "unreadable". Also
+// "empty", "ok" (with modes.js's gameSaveSummary: a defence or an attack
+// save) or "unreadable". Also
 // used by server-saves.js for the server's file.
 export function slotListing(slot, save) {
   if (save == null) return { slot, status: "empty", summary: null };
-  const summary = saveSummary(save);
+  const summary = gameSaveSummary(save);
   return summary ? { slot, status: "ok", summary } : { slot, status: "unreadable", summary: null };
 }
 
