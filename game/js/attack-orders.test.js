@@ -16,6 +16,7 @@ import {
   ENTRY_REWARD,
   BASE_CLICK_RADIUS,
   BOUNTY_SHARE,
+  WALL_REWARD_SHARE,
 } from "./attack.js";
 import { DIFFICULTIES, AI_PERIOD } from "./defenseAI.js";
 import { attackMapOf, nearestRoadPoint } from "./roadGraph.js";
@@ -201,7 +202,7 @@ test("units with no orders stay put but fire at towers in range", () => {
   assert.equal(u.order, null);
 });
 
-test("wall blocks across the road hold the units up until they shoot their way through, paying a quarter of the damage", () => {
+test("wall blocks across the road hold the units up until they shoot their way through, paying less per point of damage than towers", () => {
   const s = empty();
   buyUnits(s, "tank");
   const [u] = s.enemies;
@@ -218,7 +219,7 @@ test("wall blocks across the road hold the units up until they shoot their way t
   assert.ok(dist(u, { x: 457, y: 191 }) < 60);
   const damage = walls.reduce((sum, w) => sum + (20 - Math.max(0, w.hp)), 0);
   assert.ok(damage >= 20);
-  assert.equal(s.attack.money, money + damage * DAMAGE_REWARD);
+  assert.equal(s.attack.money, money + damage * DAMAGE_REWARD * WALL_REWARD_SHARE);
 });
 
 test("each round's start pays the attacker 150 + 25 per round gone and the defence its budget", () => {

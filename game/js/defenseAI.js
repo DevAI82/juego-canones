@@ -172,7 +172,9 @@ function firstValid(options, count, valid) {
 
 // Difficult only: a wall across the road ahead of the attacking unit
 // nearest the base, to hold the army up in the towers' fire -- at the
-// first distance ahead where blocks can go.
+// first distance ahead where blocks can go and a finished tower can fire on
+// the units held up there (a wall no tower covers is just shot down: bot
+// games had the defence pay for ~45 of those a game).
 function wallAhead(state, log) {
   const { base } = attackMapOf(levelData(state.level));
   let lead = null;
@@ -191,6 +193,8 @@ function wallAhead(state, log) {
   for (const d of WALL_AHEAD) {
     if (d > length - 40) return;
     const p = pointAlong(ahead, d);
+    const covered = state.towers.some((t) => t.hp > 0 && !(t.buildTimeRemaining > 0) && Math.hypot(t.x - p.x, t.y - p.y) <= t.range);
+    if (!covered) continue;
     let placed = 0;
     for (const k of [0, 1, -1]) {
       if (state.walls.length >= MAX_WALLS) return;

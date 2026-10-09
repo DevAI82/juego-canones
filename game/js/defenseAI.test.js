@@ -2,12 +2,24 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { aiStep, aiPrepare, DIFFICULTIES, AI_PERIOD, ENTRY_SAFE_ROAD } from "./defenseAI.js";
 import { TOWER_TYPES } from "./tower.js";
-import { createGameState } from "./simulate.js";
+import { createGameState, placeTower } from "./simulate.js";
 import { createEnemy } from "./enemy.js";
 import { LEVELS } from "./levels.js";
 import { attackMapOf, pointAlong } from "./roadGraph.js";
 
 const best = () => 0; // always takes the best option
+
+// Sets the scene: a finished tower of the defence at a build slot, placed
+// by its own action but at no cost to the money the test gives it.
+function finishedTower(s, type, x, y) {
+  const money = s.economy.money;
+  s.economy.money = 10000;
+  const { towerId } = placeTower(s, type, x, y);
+  s.economy.money = money;
+  const t = s.towers.find((k) => k.id === towerId);
+  t.buildTimeRemaining = 0;
+  return t;
+}
 
 function defence(level, money) {
   const s = createGameState(level);
@@ -74,21 +86,29 @@ test("it builds where the attacker's army is", () => {
   assert.ok(d(forSouthEast, southEast) < d(forSouthEast, north), `tower at (${forSouthEast.x},${forSouthEast.y})`);
 });
 
-test("on Difficult it walls the road ahead of the army's leading unit; on Easy it never builds walls", () => {
-  const run = (difficulty) => {
+test("on Difficult it walls the road ahead of the army's leading unit where a tower can fire on it; on Easy never", () => {
+  // A tank on level 2's western road, past the entry's safe stretch, and a
+  // tower covering the road a little way ahead of it.
+  const route = attackMapOf(LEVELS[2]).routes[0];
+  const at = route.findIndex((p) => Math.hypot(p.x - 457, p.y - 191) < 3);
+  const run = (difficulty, withTower) => {
     const s = defence(2, 300);
-    s.enemies.push(createEnemy("tank", attackMapOf(LEVELS[2]).routes[0]));
+    s.enemies.push(createEnemy("tank", route.slice(at)));
+    if (withTower) finishedTower(s, "basic", 670, 282);
     return { s, log: aiStep(s, difficulty, { rand: best }) };
   };
-  const hard = run("hard");
+  const hard = run("hard", true);
   assert.ok(hard.s.walls.length >= 1);
   assert.ok(hard.log.every((r) => r.ok));
   const tank = hard.s.enemies[0];
   for (const w of hard.s.walls) {
     const d = Math.hypot(w.x - tank.x, w.y - tank.y);
     assert.ok(d > 100 && d < 340, `a wall ${Math.round(d)}px from the tank`);
+    assert.ok(hard.s.towers.some((t) => Math.hypot(t.x - w.x, t.y - w.y) <= t.range + 16), "a wall no tower covers");
   }
-  assert.equal(run("easy").s.walls.length, 0);
+  // No tower to hold the army up under: no walls -- they'd be shot down for nothing.
+  assert.equal(run("hard", false).s.walls.length, 0);
+  assert.equal(run("easy", true).s.walls.length, 0);
 });
 
 test("over a game's worth of decisions every action it takes is one the game accepts", () => {

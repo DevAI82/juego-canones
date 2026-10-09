@@ -33,6 +33,11 @@ export const SPAWN_INTERVAL = 0.5;
 // The attacker's pay besides each round's: a share of the damage done to
 // towers and wall blocks, and a bonus for each unit that gets into the base.
 export const DAMAGE_REWARD = 0.25;
+// Wall blocks pay this share of that rate per point of damage: a block is
+// cheap health ($15 for 150 points) and at the full rate one destroyed paid
+// the attacker 2.5 times its price (bot games: a defence building walls
+// funded the army that shot them down).
+export const WALL_REWARD_SHARE = 0.2;
 export const ENTRY_REWARD = 20;
 // A right-click this close to the base sends the units into it.
 export const BASE_CLICK_RADIUS = 60;
@@ -436,8 +441,9 @@ export function stepAttack(state, dt) {
   fireTowers(state, dt);
   fireUnits(state, dt, (u) => targetsOf(state, u));
   stepShots(state, dt, (structure, damage) => {
-    a.money += damage * DAMAGE_REWARD;
-    a.stats.moneyEarned += damage * DAMAGE_REWARD;
+    const pay = damage * DAMAGE_REWARD * (structure.kind === "wall" ? WALL_REWARD_SHARE : 1);
+    a.money += pay;
+    a.stats.moneyEarned += pay;
   });
   clearDestroyed(state);
   for (const u of state.enemies) if (u.order?.kind === "attack" && !structureById(state, u.order.targetId)) stopUnit(u);
