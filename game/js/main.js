@@ -848,57 +848,47 @@ function drawBuildings(buildings) {
   for (const b of [...buildings].sort((p, q) => p.y - q.y)) drawBuilding(b);
 }
 
-// The player's concrete wall blocks (walls.js): beveled slabs drawn as one
-// continuous wall where blocks touch (no edge between neighbours), cracking
-// as they take damage, outlined when selected.
+// The player's concrete wall blocks (walls.js), per user request in the
+// drawing Imágenes/muralla defensiva.jpg (tools/extract_walls.py): every
+// block a concrete barrier with hazard stripes, and where the wall turns --
+// a block with neighbours both across and up or down -- the corner piece
+// with razor wire. The pictures are 3/4 views taller than their 32 px
+// cell, standing on it: drawn from the back of the map to the front, so a
+// nearer block stands in front of the one behind. Damage darkens a block;
+// a damaged one shows its health bar, the selected one an outline.
+const WALL_DRAW_WIDTH = 37; // world px: the block picture's width, a little over its cell
+const wallBlockImg = loadImage("assets/wall_block.webp");
+const wallCornerImg = loadImage("assets/wall_corner.webp");
+
 function drawWalls(walls) {
   if (!walls.length) return;
   const S = WALL.size;
   const at = new Set(walls.map((w) => `${w.x},${w.y}`));
   const has = (x, y) => at.has(`${x},${y}`);
+  const scale = WALL_DRAW_WIDTH / (wallBlockImg.naturalWidth || 200);
   ctx.save();
-  // All the shadows first, so no block's shadow falls across its neighbour.
-  ctx.fillStyle = "rgba(0, 0, 0, 0.35)";
-  for (const w of walls) ctx.fillRect(w.x - S / 2 + 4, w.y - S / 2 + 5, S, S);
-  for (const w of walls) {
-    const x = w.x - S / 2;
-    const y = w.y - S / 2;
+  for (const w of [...walls].sort((a, b) => a.y - b.y || a.x - b.x)) {
+    const across = has(w.x - S, w.y) || has(w.x + S, w.y);
+    const upDown = has(w.x, w.y - S) || has(w.x, w.y + S);
+    const img = across && upDown ? wallCornerImg : wallBlockImg;
     const dmg = 1 - w.hp / w.maxHp;
-    const tone = (v) => Math.round(v * (1 - 0.35 * dmg));
-    ctx.fillStyle = `rgb(${tone(134)}, ${tone(129)}, ${tone(120)})`;
-    ctx.fillRect(x, y, S, S);
-    // Lighter top face, inset on the sides with no neighbour.
-    const l = has(w.x - S, w.y) ? 0 : 4;
-    const r = has(w.x + S, w.y) ? 0 : 4;
-    const t = has(w.x, w.y - S) ? 0 : 4;
-    const b = has(w.x, w.y + S) ? 0 : 7;
-    ctx.fillStyle = `rgb(${tone(172)}, ${tone(167)}, ${tone(157)})`;
-    ctx.fillRect(x + l, y + t, S - l - r, S - t - b);
-    if (!has(w.x, w.y + S)) {
-      ctx.fillStyle = `rgb(${tone(84)}, ${tone(80)}, ${tone(73)})`;
-      ctx.fillRect(x, y + S - 4, S, 4);
+    const foot = w.y + S / 2 + 3; // where the piece stands: its cell's front edge
+    if (ready(img)) {
+      const dw = img.naturalWidth * scale;
+      const dh = img.naturalHeight * scale;
+      if (dmg > 0) ctx.filter = `brightness(${(1 - 0.45 * dmg).toFixed(2)})`;
+      ctx.drawImage(img, w.x - dw / 2, foot - dh, dw, dh);
+      ctx.filter = "none";
+    } else {
+      // (pictures still loading: a plain concrete block)
+      ctx.fillStyle = "#8a857a";
+      ctx.fillRect(w.x - S / 2, w.y - S / 2, S, S);
     }
-    // Cracks, the same ones every frame for a given block.
-    if (dmg > 0.3) {
-      ctx.strokeStyle = "rgba(40, 36, 32, 0.85)";
-      ctx.lineWidth = 1.5;
-      const n = dmg > 0.65 ? 3 : 1;
-      for (let i = 0; i < n; i++) {
-        const seed = (w.id * 7919 + i * 104729) % 1000;
-        const sx = x + 6 + (seed % 20);
-        const sy = y + 6 + ((seed * 7) % 20);
-        ctx.beginPath();
-        ctx.moveTo(sx, sy);
-        ctx.lineTo(sx + ((seed % 13) - 6), sy + 7);
-        ctx.lineTo(sx + ((seed % 9) - 2), sy + 13);
-        ctx.stroke();
-      }
-    }
-    if (w.hp < w.maxHp) drawTowerBar(w.x, y - 8, 3, S - 6, w.hp / w.maxHp, "#3c3", "#400");
+    if (w.hp < w.maxHp) drawTowerBar(w.x, foot - WALL_DRAW_WIDTH * 1.45, 3, S - 6, w.hp / w.maxHp, "#3c3", "#400");
     if (w.id === selectedId) {
       ctx.strokeStyle = "#5fe0f0";
       ctx.lineWidth = 2;
-      ctx.strokeRect(x + 1, y + 1, S - 2, S - 2);
+      ctx.strokeRect(w.x - S / 2 + 1, w.y - S / 2 + 1, S - 2, S - 2);
     }
   }
   ctx.restore();
