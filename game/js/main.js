@@ -204,57 +204,110 @@ function positionNavControls() {
 }
 
 let state = null;
+let menu = null;
+const isRtsGame = () => Boolean(state && (state.isRts || state.mode === "rts"));
 
 function resizeGame() {
+  const winW = window.innerWidth;
+  const winH = window.innerHeight;
   const sidebar = document.getElementById("cnc-sidebar");
-  const isRts = Boolean(sidebar && !sidebar.classList.contains("hidden")) || Boolean(state && state.isRts);
+  const isRts = isRtsGame() || Boolean(sidebar && !sidebar.classList.contains("hidden"));
+  const isMenuOpen = Boolean(menu && menu.isOpen && menu.isOpen());
+  const isMainMenu = Boolean(isMenuOpen && document.getElementById("menu")?.classList.contains("main"));
 
-  if (isRts) {
-    const isSidebarVisible = Boolean(sidebar && !sidebar.classList.contains("hidden"));
-    const sidebarW = isSidebarVisible ? (sidebar.getBoundingClientRect().width || 270) : 0;
-    const availW = Math.max(300, window.innerWidth - sidebarW);
-    const availH = window.innerHeight;
-    const scaleX = availW / CANVAS_WIDTH;
-    const scaleY = availH / CANVAS_HEIGHT;
+  const buildMenuEl = document.getElementById("build-menu");
+  const attackShopEl = document.getElementById("attack-shop");
 
-    gameViewport.style.position = "fixed";
-    gameViewport.style.left = "0px";
-    gameViewport.style.top = "0px";
-    gameViewport.style.width = `${availW}px`;
-    gameViewport.style.height = `${availH}px`;
-    gameViewport.style.margin = "0";
-
-    gameContainer.style.transform = `scale(${scaleX}, ${scaleY})`;
-
-    const topControlsEl = document.getElementById("top-controls");
-    if (topControlsEl) {
-      topControlsEl.style.top = "12px";
-      topControlsEl.style.right = `${sidebarW + 12}px`;
-    }
-
-    const navControlsEl = document.getElementById("nav-controls");
-    if (navControlsEl) {
-      navControlsEl.style.display = "grid";
-    }
-
-    if (mode3D && rts3DRenderer) {
-      rts3DRenderer.resize(availW, availH);
-    }
-    return;
+  if (isMainMenu) {
+    if (buildMenuEl) buildMenuEl.classList.add("hidden");
+    if (attackShopEl) attackShopEl.classList.add("hidden");
+    if (sidebar) sidebar.classList.add("hidden");
   }
 
-  // Non-RTS modes: default centered proportional scaling
-  gameViewport.style.position = "relative";
-  gameViewport.style.left = "";
-  gameViewport.style.top = "";
-  gameViewport.style.margin = "";
-  const scale = Math.min(window.innerWidth / CANVAS_WIDTH, window.innerHeight / CANVAS_HEIGHT);
-  gameContainer.style.transform = `scale(${scale})`;
-  gameViewport.style.width = `${CANVAS_WIDTH * scale}px`;
-  gameViewport.style.height = `${CANVAS_HEIGHT * scale}px`;
-  positionBuildMenu(scale);
-  positionTopControls(scale);
-  positionNavControls();
+  const activeSidePanel = !isMenuOpen && !isRts && (
+    (buildMenuEl && !buildMenuEl.classList.contains("hidden")) ? buildMenuEl :
+    (attackShopEl && !attackShopEl.classList.contains("hidden")) ? attackShopEl : null
+  );
+
+  let sidebarLeftW = 0;
+  let sidebarRightW = 0;
+  let bottomH = 0;
+
+  if (isMenuOpen) {
+    // Menu is open: edge-to-edge full display
+    sidebarLeftW = 0;
+    sidebarRightW = 0;
+    bottomH = 0;
+  } else if (isRts) {
+    // RTS mode: C&C sidebar on the right
+    const isSidebarVisible = Boolean(sidebar && !sidebar.classList.contains("hidden"));
+    sidebarRightW = isSidebarVisible ? Math.min(300, Math.max(220, Math.round(sidebar.getBoundingClientRect().width) || 270)) : 0;
+  } else if (activeSidePanel) {
+    // Defense / Attack mode: build menu or attack shop
+    const isPortrait = winW < winH && winW < 650;
+    if (isPortrait) {
+      activeSidePanel.classList.remove("sidebar-mode");
+      activeSidePanel.style.position = "fixed";
+      activeSidePanel.style.left = "0px";
+      activeSidePanel.style.bottom = "0px";
+      activeSidePanel.style.top = "";
+      activeSidePanel.style.width = "100%";
+      activeSidePanel.style.height = "90px";
+      activeSidePanel.style.transform = "none";
+      bottomH = 90;
+      sidebarLeftW = 0;
+    } else {
+      const SIDEBAR_W = Math.min(150, Math.max(120, Math.round(winW * 0.12)));
+      activeSidePanel.classList.add("sidebar-mode");
+      activeSidePanel.style.position = "fixed";
+      activeSidePanel.style.left = "0px";
+      activeSidePanel.style.top = "0px";
+      activeSidePanel.style.bottom = "";
+      activeSidePanel.style.width = `${SIDEBAR_W}px`;
+      activeSidePanel.style.height = `${winH}px`;
+      activeSidePanel.style.transform = "none";
+      sidebarLeftW = SIDEBAR_W;
+      bottomH = 0;
+    }
+  }
+
+  // Calculate available game viewport area (zero margins, full edge-to-edge)
+  const availW = Math.max(300, winW - sidebarLeftW - sidebarRightW);
+  const availH = Math.max(200, winH - bottomH);
+  const scaleX = availW / CANVAS_WIDTH;
+  const scaleY = availH / CANVAS_HEIGHT;
+
+  gameViewport.style.position = "fixed";
+  gameViewport.style.left = `${sidebarLeftW}px`;
+  gameViewport.style.top = "0px";
+  gameViewport.style.width = `${availW}px`;
+  gameViewport.style.height = `${availH}px`;
+  gameViewport.style.margin = "0";
+
+  gameContainer.style.transformOrigin = "top left";
+  gameContainer.style.transform = `scale(${scaleX}, ${scaleY})`;
+
+  // Top Controls: anchored to top-right of game viewport
+  const topControlsEl = document.getElementById("top-controls");
+  if (topControlsEl) {
+    topControlsEl.style.top = "12px";
+    topControlsEl.style.right = `${sidebarRightW + 12}px`;
+  }
+
+  gameViewport.classList.toggle("menu-open", isMenuOpen);
+
+  // Nav Controls (D-pad): anchored to bottom-right of game viewport
+  const navControlsEl = document.getElementById("nav-controls");
+  if (navControlsEl) {
+    const show = !isMenuOpen && Boolean(state && (isRts || state.level === 3 || state.level === 4));
+    navControlsEl.style.display = show ? "grid" : "none";
+    navControlsEl.style.bottom = `${bottomH + 14}px`;
+    navControlsEl.style.right = `${sidebarRightW + 14}px`;
+  }
+
+  if (isRts && mode3D && rts3DRenderer) {
+    rts3DRenderer.resize(availW, availH);
+  }
 }
 
 // ============================================================================
@@ -318,6 +371,35 @@ if (mode3DBtn) {
   mode3DBtn.addEventListener("click", () => {
     set3DMode(!mode3D);
   });
+}
+
+function toggleFullscreen() {
+  if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+    const el = document.documentElement;
+    if (el.requestFullscreen) el.requestFullscreen().catch(() => {});
+    else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+  } else {
+    if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
+    else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+  }
+}
+
+function updateFullscreenBtn() {
+  const isFs = Boolean(document.fullscreenElement || document.webkitFullscreenElement);
+  const btn = document.getElementById("fullscreen-btn");
+  if (btn) {
+    btn.textContent = isFs ? "🗗" : "⛶";
+    btn.title = isFs ? "Salir de pantalla completa (F)" : "Pantalla completa (F)";
+  }
+  resizeGame();
+}
+
+document.addEventListener("fullscreenchange", updateFullscreenBtn);
+document.addEventListener("webkitfullscreenchange", updateFullscreenBtn);
+
+const fullscreenBtn = document.getElementById("fullscreen-btn");
+if (fullscreenBtn) {
+  fullscreenBtn.addEventListener("click", toggleFullscreen);
 }
 
 resizeGame();
@@ -483,14 +565,12 @@ function worldSize(level) {
   return { w: d.worldWidth || CANVAS_WIDTH, h: d.worldHeight || CANVAS_HEIGHT };
 }
 
-// The minimum zoom level at which the entire map world is 100% visible
-// on screen at once (whichever dimension is more constrained).
-// For Level 3 (2048x2048 world), minZoom is ~0.366, allowing full-map
-// overview with no scrolling needed. For Levels 1/2, minZoom is 1.0.
+// The minimum zoom level at which the map fills 100% of the screen.
+// For large maps (Level 3, Level 4, RTS 2048x2048), minZoom guarantees the map
+// covers 100% of the canvas with zero black/grey bars. For Levels 1/2, minZoom is 1.0.
 function minZoomFor(level) {
   const { w, h } = worldSize(level);
-  if (state && state.isRts) {
-    // In RTS mode, minimum zoom guarantees the map covers 100% of the canvas with zero grey bars
+  if (w > CANVAS_WIDTH || h > CANVAS_HEIGHT) {
     return Math.max(CANVAS_WIDTH / w, CANVAS_HEIGHT / h);
   }
   const pad = cameraPadding(); // (in an attack: the room the shop and HUD leave free)
@@ -1923,7 +2003,7 @@ async function saveToSlot(slot) {
 let pausedBeforeMenu = false;
 function openPauseMenu() {
   if (menu.isOpen() || gameEndShown) return;
-  if (!networked) {
+  if (!networked || isRtsGame()) {
     if (!started) return;
     pausedBeforeMenu = state.paused;
     state.paused = true;
@@ -1932,17 +2012,19 @@ function openPauseMenu() {
     postAction({ type: "pause", on: true });
   }
   menu.openPause();
+  resizeGame();
 }
 
 // After a finished game ("Jugar de nuevo", or R): pick how to play the next.
 function backToNewGame() {
   showGameEndOverlay(false);
   gameEndShown = false;
-  if (!networked) started = false;
+  if (!networked || isRtsGame()) started = false;
   menu.openNewGame();
+  resizeGame();
 }
 
-const menu = createMenu(document.getElementById("menu"), {
+menu = createMenu(document.getElementById("menu"), {
   get networked() {
     return networked;
   },
@@ -1959,14 +2041,20 @@ const menu = createMenu(document.getElementById("menu"), {
   onSave: saveToSlot,
   onRecords: openStatsModal,
   onQuitToMain: () => {
-    if (!networked || state?.mode === "rts") started = false;
+    if (!networked || isRtsGame()) started = false;
+    const bMenu = document.getElementById("build-menu");
+    if (bMenu) bMenu.classList.add("hidden");
+    const aShop = document.getElementById("attack-shop");
+    if (aShop) aShop.classList.add("hidden");
     if (cncSidebarEl) cncSidebarEl.classList.add("hidden");
     if (rtsContextPanelEl) rtsContextPanelEl.classList.add("hidden");
-    resizeGame();
+    const nav = document.getElementById("nav-controls");
+    if (nav) nav.style.display = "none";
     menu.openMain();
+    resizeGame();
   },
   onResume: () => {
-    if (!networked || state?.mode === "rts") state.paused = pausedBeforeMenu;
+    if (!networked || isRtsGame()) state.paused = pausedBeforeMenu;
     else if (versusGame() && net.you && !pausedBeforeMenu) postAction({ type: "pause", on: false });
   },
   onSettingsChange: (next) => {
@@ -2674,6 +2762,10 @@ const PAN_SPEED = 600; // world px/sec
 window.addEventListener("keydown", (evt) => {
   if (isTypingTarget(evt.target)) return; // a name being typed, not shortcuts
   const key = evt.key.toLowerCase();
+  if (key === "f") {
+    toggleFullscreen();
+    return;
+  }
   if (key === "escape") {
     // Esc first lets go of a tower or wall picked to build; otherwise it
     // opens the pause menu, or (in a menu) goes back a screen.
@@ -3868,7 +3960,7 @@ function drawRtsRadarMinimap(mapImg, now) {
 }
 
 function updateRtsPanels() {
-  if (!state.isRts) return;
+  if (!isRtsGame() || !state?.teams?.blue) return;
   if (selectedRtsBuilding && (selectedRtsBuilding.hp <= 0 || !state.rtsBuildings.some((b) => b.id === selectedRtsBuilding.id))) {
     selectedRtsBuilding = null;
     rtsUI.closeBuildingContext();
@@ -4008,7 +4100,7 @@ let prevSnapshot = null;
 let snapshotAt = 0;
 
 function receiveSnapshot(body) {
-  if (state?.mode === "rts") return;
+  if (isRtsGame()) return;
   const view = unpackView(body);
   const before = { you: net.you, kind: net.kind, over: state.gameOver };
   prevSnapshot = { state, at: snapshotAt };
@@ -4033,7 +4125,7 @@ function resetLocalView() {
 // uno contra otro en marcha»), over the game going on.
 let lastSeatInfo = null;
 function checkSeat() {
-  if (state?.mode === "rts") return;
+  if (isRtsGame()) return;
   if (!versusGame() || net.you) {
     if (menu.isSeatScreen()) menu.close();
     lastSeatInfo = null;
@@ -4059,7 +4151,7 @@ function checkSeat() {
 // behind, which nobody notices at this game's pace), and explosions and
 // beams keep ageing locally in between.
 function drawnView(now) {
-  if (!networked || state?.mode === "rts" || !prevSnapshot) return state;
+  if (!networked || isRtsGame() || !prevSnapshot) return state;
   const span = snapshotAt - prevSnapshot.at;
   const elapsed = now - snapshotAt;
   const k = span > 0 ? Math.min(1, elapsed / span) : 1;
@@ -4138,7 +4230,7 @@ function loop(now) {
   lastTime = now;
   frameNow = now / 1000;
 
-  if ((!networked || state?.mode === "rts") && started) {
+  if ((!networked || isRtsGame()) && started) {
     // Before stepping: a level's start is only between waves until its
     // first tick spawns the opening units.
     saveScheduler.tick(state, (slot, ok) => showToast(savedMessage(slot, ok)));
@@ -4320,6 +4412,7 @@ if (typeof window !== "undefined") {
   window.__handleClick = (x, y) => handleClick({ x, y });
   window.__camera = () => camera;
   window.__zoom = () => zoom;
+  window.__menu = menu;
 }
 
 boot();

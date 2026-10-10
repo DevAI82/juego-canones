@@ -46,6 +46,7 @@ export function createRtsSave(state, now = new Date()) {
 export function restoreRtsSave(save) {
   return {
     isRts: true,
+    mode: "rts",
     rtsSubmode: save.rtsSubmode || "campaign",
     survivalWave: save.survivalWave || 0,
     maxSurvivalWaves: 20,

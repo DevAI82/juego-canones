@@ -74,6 +74,7 @@ export function createMenu(root, handlers) {
     titleEl.textContent = ctx === "main" ? "TOWER DEFENSE" : "MENÚ";
     document.body.classList.add("menu-open");
     show(screen, false);
+    if (typeof window !== "undefined") window.dispatchEvent(new Event("resize"));
   }
 
   function close() {
@@ -81,6 +82,7 @@ export function createMenu(root, handlers) {
     root.classList.add("hidden");
     document.body.classList.remove("menu-open");
     settleConfirm(false);
+    if (typeof window !== "undefined") window.dispatchEvent(new Event("resize"));
   }
 
   function show(name, remember = true) {

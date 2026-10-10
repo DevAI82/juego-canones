@@ -11,3 +11,4 @@ venv/
 _browser/
 sharp-davinci/
 .DS_Store
+scratch_inspect/

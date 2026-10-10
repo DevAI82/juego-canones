@@ -19,6 +19,7 @@ body {
    phone screen. getBoundingClientRect() (which canvasPos() reads) already
    reflects the post-transform size, so click/tap accuracy is unaffected. */
 #game-viewport { position: relative; overflow: hidden; }
+#game-viewport.menu-open { z-index: 50; }
 #game-container {
   position: relative;
   width: 1200px;
@@ -190,6 +191,16 @@ body {
 #attack-shop.sidebar-mode {
   flex-direction: column;
   gap: 6px;
+  border-radius: 0;
+  border-left: none;
+  border-top: none;
+  border-bottom: none;
+  border-right: 2px solid rgba(79, 209, 197, 0.45);
+  background: rgba(10, 15, 22, 0.96);
+  box-shadow: 4px 0 20px rgba(0, 0, 0, 0.7);
+  z-index: 10;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 .build-towers-section {
   display: flex;
@@ -883,12 +894,14 @@ body {
 body.menu-open #top-controls,
 body.menu-open #build-menu,
 body.menu-open #attack-shop,
+body.menu-open #cnc-sidebar,
+body.menu-open #rts-context-panel,
 body.menu-open #nav-controls,
 body.stats-open #build-menu,
 body.stats-open #attack-shop,
 body.stats-open #nav-controls,
 body.gameend-open #build-menu,
-body.gameend-open #attack-shop { display: none; }
+body.gameend-open #attack-shop { display: none !important; }
 
 /* Short messages ("Partida guardada en el hueco 2"...). */
 #toast {

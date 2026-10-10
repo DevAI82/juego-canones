@@ -501,6 +501,7 @@ export function createRtsState(submode = "campaign") {
   const isSurvival = submode === "survival";
   const state = {
     isRts: true,
+    mode: "rts",
     rtsSubmode: submode, // "campaign" | "survival"
     level: 3,
     towers: [],
