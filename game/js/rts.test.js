@@ -33,6 +33,10 @@ import {
   repairRtsBuilding,
   sellRtsBuilding,
   separateRtsUnits,
+  checkCanBuildAtLocation,
+  assignControlGroup,
+  selectControlGroup,
+  getControlGroupCentroid,
 } from "./rts.js";
 
 test("RTS Config defines Map 3, 60 unit cap, bases and expanded mineral fields", () => {
@@ -512,6 +516,81 @@ test("Tech lab research turretArmor increases maxHp of existing and newly built 
   const newTurret = createRtsBuilding("turret_basic", 400, 400, "blue", 3, blue);
   assert.equal(newTurret.maxHp, 345);
   assert.equal(newTurret.hp, 345);
+});
+
+test("checkCanBuildAtLocation prevents walls from stacking or overlapping and enforces max cap", () => {
+  const base = RTS_CONFIG.blueBase;
+  const existingWall = createRtsBuilding("wall", base.x + 50, base.y + 50, "blue", 1);
+  const existingTurret = createRtsBuilding("turret_basic", base.x + 120, base.y + 120, "blue", 2);
+  const buildings = [existingWall, existingTurret];
+
+  // Trying to place a wall directly on top or overlapping with existingWall (distance < 28px)
+  const overlapCheck = checkCanBuildAtLocation(base.x + 50 + 10, base.y + 50 + 10, "wall", buildings, base, "blue");
+  assert.equal(overlapCheck.ok, false);
+  assert.equal(overlapCheck.reason, "occupied");
+  assert.equal(canBuildAtLocation(base.x + 50 + 10, base.y + 50 + 10, "wall", buildings, base, "blue"), false);
+
+  // Trying to place a wall inside a turret
+  const turretOverlap = checkCanBuildAtLocation(base.x + 120 + 10, base.y + 120 + 10, "wall", buildings, base, "blue");
+  assert.equal(turretOverlap.ok, false);
+  assert.equal(turretOverlap.reason, "occupied");
+
+  // Placing an adjacent wall with proper spacing (distance >= 28px) succeeds
+  const adjacentCheck = checkCanBuildAtLocation(base.x + 50 + 30, base.y + 50, "wall", buildings, base, "blue");
+  assert.equal(adjacentCheck.ok, true);
+  assert.equal(canBuildAtLocation(base.x + 50 + 30, base.y + 50, "wall", buildings, base, "blue"), true);
+
+  // Test max wall limit (40)
+  const fortyWalls = [];
+  for (let i = 0; i < 40; i++) {
+    fortyWalls.push({ id: 100 + i, type: "wall", team: "blue", x: 100 + i * 30, y: 100, hp: 150 });
+  }
+  const capCheck = checkCanBuildAtLocation(base.x + 60, base.y + 100, "wall", fortyWalls, base, "blue");
+  assert.equal(capCheck.ok, false);
+  assert.equal(capCheck.reason, "max-walls");
+});
+
+test("assignControlGroup, selectControlGroup, and getControlGroupCentroid handle C&C control groups", () => {
+  const state = createRtsState();
+  const tank1 = { id: 10, team: "blue", type: "tank", x: 200, y: 300, hp: 300, selected: false };
+  const tank2 = { id: 11, team: "blue", type: "tank", x: 240, y: 300, hp: 300, selected: false };
+  const rocket = { id: 12, team: "blue", type: "rocket", x: 280, y: 300, hp: 120, selected: false };
+  state.rtsUnits.push(tank1, tank2, rocket);
+
+  // Assign tank1 & tank2 to group 1
+  const resAssign = assignControlGroup(state, 1, [10, 11]);
+  assert.equal(resAssign.ok, true);
+  assert.equal(resAssign.count, 2);
+  assert.equal(tank1.group, 1);
+  assert.equal(tank2.group, 1);
+  assert.equal(rocket.group, undefined);
+
+  // Select group 1
+  rocket.selected = true; // Was previously selected
+  const resSelect = selectControlGroup(state, 1, false);
+  assert.equal(resSelect.ok, true);
+  assert.equal(resSelect.count, 2);
+  assert.equal(tank1.selected, true);
+  assert.equal(tank2.selected, true);
+  assert.equal(rocket.selected, false); // Deselected because not shift
+
+  // Shift-select: group 2 with rocket added to group 1
+  assignControlGroup(state, 2, [12]);
+  selectControlGroup(state, 2, true); // Add to selection
+  assert.equal(tank1.selected, true);
+  assert.equal(rocket.selected, true);
+
+  // Centroid calculation for camera centering
+  const centroid = getControlGroupCentroid(state, 1);
+  assert.ok(centroid);
+  assert.equal(centroid.x, 220); // (200 + 240) / 2
+  assert.equal(centroid.y, 300);
+
+  // Dead units automatically pruned
+  tank1.hp = 0;
+  const pruned = selectControlGroup(state, 1, false);
+  assert.equal(pruned.count, 1); // Only tank2 remains
+  assert.equal(pruned.units[0].id, 11);
 });
 
 

@@ -442,24 +442,70 @@ export function canTeamBuild(buildings, units, team) {
   return hasHq || hasMcv;
 }
 
-// Check whether a point (x,y) is within build radius of friendly base or buildings
-export function canBuildAtLocation(x, y, buildingType, buildings, basePos, team) {
+// Collision and placement radius for RTS structures
+export function getBuildingCollisionRadius(buildingOrType) {
+  const type = typeof buildingOrType === "string" ? buildingOrType : buildingOrType?.type;
+  if (type === "wall") return 14; // A 32x32 block: radius 14 ensures walls can be placed side-by-side without overlapping
+  const def = RTS_BUILDINGS[type];
+  if (!def) return 20;
+  return (def.footprint || 45) * 0.42;
+}
+
+// Detailed validation of RTS building/wall placement
+export function checkCanBuildAtLocation(x, y, buildingType, buildings, basePos, team) {
   const def = RTS_BUILDINGS[buildingType];
-  if (!def) return false;
-  // Wind turbine can be built ANYWHERE on the map!
-  if (def.freePlacement) return true;
+  if (!def) return { ok: false, reason: "unknown-building" };
+
+  const myRadius = getBuildingCollisionRadius(buildingType);
+
+  // 1. Off-map limits
+  const mapSize = RTS_CONFIG.worldSize || 2048;
+  if (x < myRadius || y < myRadius || x > mapSize - myRadius || y > mapSize - myRadius) {
+    return { ok: false, reason: "off-map" };
+  }
+
+  // 2. Maximum wall cap (max 40)
+  if (buildingType === "wall") {
+    const wallCount = (buildings || []).filter((b) => b.team === team && b.type === "wall" && b.hp > 0).length;
+    if (wallCount >= (RTS_CONFIG.maxWallsPerTeam || 40)) {
+      return { ok: false, reason: "max-walls" };
+    }
+  }
+
+  // 3. Collision / Overlap check: structures cannot overlap each other
+  if (buildings && buildings.length > 0) {
+    for (const b of buildings) {
+      if (b.hp <= 0) continue;
+      const otherRadius = getBuildingCollisionRadius(b.type);
+      const minDist = myRadius + otherRadius;
+      if (Math.hypot(x - b.x, y - b.y) < minDist) {
+        return { ok: false, reason: "occupied", blockingBuilding: b };
+      }
+    }
+  }
+
+  // 4. Build radius: must be near base or an existing friendly building (unless freePlacement)
+  if (def.freePlacement) return { ok: true };
 
   // Check distance to headquarters/base
   if (basePos && Math.hypot(x - basePos.x, y - basePos.y) <= RTS_CONFIG.buildRadius) {
-    return true;
+    return { ok: true };
   }
   // Check distance to any existing friendly building
-  for (const b of buildings) {
-    if (b.team === team && b.hp > 0 && Math.hypot(x - b.x, y - b.y) <= RTS_CONFIG.buildRadius) {
-      return true;
+  if (buildings) {
+    for (const b of buildings) {
+      if (b.team === team && b.hp > 0 && Math.hypot(x - b.x, y - b.y) <= RTS_CONFIG.buildRadius) {
+        return { ok: true };
+      }
     }
   }
-  return false;
+
+  return { ok: false, reason: "out-of-range" };
+}
+
+// Check whether a point (x,y) is within build radius and clear of other structures
+export function canBuildAtLocation(x, y, buildingType, buildings, basePos, team) {
+  return checkCanBuildAtLocation(x, y, buildingType, buildings, basePos, team).ok;
 }
 
 // Deploy an MCV into a Headquarters building
@@ -592,6 +638,7 @@ export function createRtsState(submode = "campaign") {
     ],
     nextId: 3000,
     winner: null,
+    rtsControlGroups: { 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [], 8: [], 9: [], 0: [] },
   };
 
   // In campaign mode, spawn red MCV as well
@@ -1139,6 +1186,77 @@ export function separateRtsUnits(units, dt, buildings) {
       }
     }
   }
+}
+
+// Assign currently selected unit IDs to control group (0-9)
+export function assignControlGroup(state, groupNum, unitIds) {
+  if (!state) return { ok: false, reason: "no-state" };
+  if (!state.rtsControlGroups) {
+    state.rtsControlGroups = { 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [], 8: [], 9: [], 0: [] };
+  }
+  const num = Number(groupNum);
+  if (isNaN(num) || num < 0 || num > 9) return { ok: false, reason: "invalid-group" };
+
+  // Remove previous group association from units
+  for (const u of state.rtsUnits || []) {
+    if (u.group === num) delete u.group;
+  }
+
+  const validIds = [];
+  for (const id of unitIds || []) {
+    const u = (state.rtsUnits || []).find((unit) => unit.id === id && unit.team === "blue" && unit.hp > 0);
+    if (u) {
+      u.group = num;
+      validIds.push(u.id);
+    }
+  }
+
+  state.rtsControlGroups[num] = validIds;
+  return { ok: true, group: num, count: validIds.length, unitIds: validIds };
+}
+
+// Select control group units (0-9)
+export function selectControlGroup(state, groupNum, addToSelection = false) {
+  if (!state) return { ok: false, reason: "no-state", count: 0 };
+  if (!state.rtsControlGroups) {
+    state.rtsControlGroups = { 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [], 8: [], 9: [], 0: [] };
+  }
+  const num = Number(groupNum);
+  const ids = state.rtsControlGroups[num] || [];
+  const aliveUnits = (state.rtsUnits || []).filter((u) => u.team === "blue" && u.hp > 0 && ids.includes(u.id));
+
+  // Prune dead units from group
+  state.rtsControlGroups[num] = aliveUnits.map((u) => u.id);
+
+  if (aliveUnits.length === 0) {
+    return { ok: true, group: num, count: 0, units: [] };
+  }
+
+  if (!addToSelection) {
+    for (const u of state.rtsUnits || []) {
+      if (u.team === "blue") u.selected = false;
+    }
+  }
+
+  for (const u of aliveUnits) {
+    u.selected = true;
+  }
+
+  return { ok: true, group: num, count: aliveUnits.length, units: aliveUnits };
+}
+
+// Calculate centroid of units in control group (for double-tap camera jump)
+export function getControlGroupCentroid(state, groupNum) {
+  const num = Number(groupNum);
+  const ids = state?.rtsControlGroups?.[num] || [];
+  const aliveUnits = (state?.rtsUnits || []).filter((u) => u.team === "blue" && u.hp > 0 && ids.includes(u.id));
+  if (aliveUnits.length === 0) return null;
+  let sumX = 0, sumY = 0;
+  for (const u of aliveUnits) {
+    sumX += u.x;
+    sumY += u.y;
+  }
+  return { x: sumX / aliveUnits.length, y: sumY / aliveUnits.length };
 }
 
 // Handle combat between opposing teams and survival waves

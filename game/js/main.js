@@ -69,6 +69,7 @@ import {
   completeMcvDeployment,
   createRtsBuilding,
   canBuildAtLocation,
+  checkCanBuildAtLocation,
   calculatePowerGrid,
   enqueueUnit,
   cancelQueueItem,
@@ -76,6 +77,9 @@ import {
   repairRtsBuilding,
   sellRtsBuilding,
   getRtsRepairCost,
+  assignControlGroup,
+  selectControlGroup,
+  getControlGroupCentroid,
 } from "./rts.js";
 import { createRts3DRenderer } from "./renderer3d.js";
 
@@ -2010,7 +2014,7 @@ function enterGame() {
   showGameEndOverlay(false);
   gameEndShown = false;
 
-  const isRts = Boolean(state && state.isRts);
+  const isRts = Boolean(state && (state.isRts || state.mode === "rts"));
   if (cncSidebarEl) cncSidebarEl.classList.toggle("hidden", !isRts);
   if (rtsContextPanelEl) rtsContextPanelEl.classList.add("hidden");
   // The 3D view only draws the RTS mode: its button only there.
@@ -2021,7 +2025,24 @@ function enterGame() {
     attackShopEl.classList.add("hidden");
     unitUpgradeEl.classList.add("hidden");
     skipWaveBtn.classList.add("hidden");
+  } else {
+    // Non-RTS modes: restore standard TD / Attack HUD controls!
+    if (state && state.mode === "attack") {
+      buildMenuEl.classList.add("hidden");
+      attackShopEl.classList.remove("hidden");
+      unitUpgradeEl.classList.remove("hidden");
+      skipWaveBtn.classList.add("hidden");
+    } else {
+      buildMenuEl.classList.remove("hidden");
+      attackShopEl.classList.add("hidden");
+      unitUpgradeEl.classList.add("hidden");
+      skipWaveBtn.classList.remove("hidden");
+    }
   }
+  rtsDragBox = null;
+  rtsRightPan = null;
+  isRtsRepairMode = false;
+  isRtsSellMode = false;
   resizeGame();
 }
 
@@ -2039,26 +2060,31 @@ async function startNewGame(level, { mode = "defense", difficulty = "normal", si
   if (networked && mode !== "rts") {
     const result = await askServer(mode === "versus" ? { type: "newVersus", level, side, money } : { type: "restart", level });
     if (!result.ok) return showToast(result.reason === "game-in-progress" ? GAME_IN_PROGRESS : "No se ha podido empezar la partida");
-  } else {
-    if (mode === "rts") {
-      state = createRtsState(submode);
-      state.level = 3;
-      state.onHarvesterSpawned = (harvester, refinery) => {
-        if (harvester.team === "blue") {
-          playSound("upgrade");
-          showToast("¡Cosechadora desplegada automáticamente en la Refinería!");
-        }
-      };
-    } else if (mode === "attack") {
-      state = createAttackState(level, difficulty);
-    } else {
-      state = createGameState(level);
-    }
-    saveScheduler.reset(state);
-    started = true;
-    window.__gameState = () => state;
-    window.__rtsUI = () => rtsUI;
   }
+
+  if (mode === "rts") {
+    state = createRtsState(submode);
+    state.level = 3;
+    state.onHarvesterSpawned = (harvester, refinery) => {
+      if (harvester.team === "blue") {
+        playSound("upgrade");
+        showToast("¡Cosechadora desplegada automáticamente en la Refinería!");
+      }
+    };
+  } else if (mode === "attack") {
+    state = createAttackState(level, difficulty);
+  } else if (mode === "versus") {
+    state = createAttackState(level, money, { defender: "player" });
+  } else {
+    // Mode "defense" (Tower Defense standard)
+    state = createGameState(level);
+  }
+
+  saveScheduler.reset(state);
+  started = true;
+  prevSnapshot = null;
+  window.__gameState = () => state;
+  window.__rtsUI = () => rtsUI;
   enterGame();
 }
 
@@ -2478,10 +2504,18 @@ function handleClick(pos) {
         selectedBuildType = null;
         return;
       }
-      const canBuild = canBuildAtLocation(pos.x, pos.y, selectedBuildType, state.rtsBuildings, state.teams.blue.hq, "blue");
-      if (!canBuild) {
+      const check = checkCanBuildAtLocation(pos.x, pos.y, selectedBuildType, state.rtsBuildings, state.teams.blue.hq, "blue");
+      if (!check.ok) {
         playSound("error");
-        showToast("Demasiado lejos de la base (construye cerca de tus edificios)");
+        if (check.reason === "occupied") {
+          showToast(selectedBuildType === "wall" ? "¡Espacio ocupado! Las murallas deben tener su espacio y no amontonarse" : "¡Espacio ocupado por otra estructura!");
+        } else if (check.reason === "max-walls") {
+          showToast("Límite de murallas alcanzado (máx. 40 bloques)");
+        } else if (check.reason === "off-map") {
+          showToast("Fuera de los límites del mapa");
+        } else {
+          showToast("Demasiado lejos de la base (construye cerca de tus edificios)");
+        }
         return;
       }
       if (state.teams.blue.credits < def.cost) {
@@ -3129,6 +3163,7 @@ const PAN_KEYS = new Set(["arrowup", "arrowdown", "arrowleft", "arrowright", "w"
 const WASD = new Set(["w", "a", "s", "d"]);
 const pressedPanKeys = new Set();
 const PAN_SPEED = 600; // world px/sec
+const lastRtsGroupTap = {};
 
 window.addEventListener("keydown", (evt) => {
   if (isTypingTarget(evt.target)) return; // a name being typed, not shortcuts
@@ -3195,6 +3230,46 @@ window.addEventListener("keydown", (evt) => {
     return;
   }
   if (state.isRts) {
+    // Command & Conquer Control Groups: Ctrl + [0-9] (or Alt + [0-9]) to assign, [0-9] to select, double tap to center camera
+    const digitMatch = /^(?:Digit|Numpad)([0-9])$/.exec(evt.code || "") || /^([0-9])$/.exec(evt.key || "");
+    if (digitMatch) {
+      const num = Number(digitMatch[1]);
+      if (evt.ctrlKey || evt.altKey) {
+        evt.preventDefault();
+        const selectedBlueUnits = state.rtsUnits.filter((u) => u.team === "blue" && u.hp > 0 && u.selected);
+        const res = assignControlGroup(state, num, selectedBlueUnits.map((u) => u.id));
+        if (res.ok) {
+          if (res.count > 0) {
+            playSound("upgrade");
+            showToast(`Grupo ${num} creado (${res.count} unidades)`);
+          } else {
+            playSound("click");
+            showToast(`Grupo ${num} vaciado`);
+          }
+        }
+        return;
+      } else if (!evt.metaKey) {
+        evt.preventDefault();
+        const res = selectControlGroup(state, num, evt.shiftKey);
+        if (res.ok && res.count > 0) {
+          playSound("click");
+          showToast(`Grupo ${num} (${res.count} unidades)`);
+          const now = performance.now();
+          const lastTap = lastRtsGroupTap[num] || 0;
+          if (now - lastTap < 400) {
+            const centroid = getControlGroupCentroid(state, num);
+            if (centroid) {
+              centerCameraOn(centroid);
+            }
+          }
+          lastRtsGroupTap[num] = now;
+        } else {
+          showToast(`Grupo ${num} vacío`);
+        }
+        return;
+      }
+    }
+
     if (evt.ctrlKey && key === "a") {
       evt.preventDefault();
       let count = 0;
@@ -4073,7 +4148,8 @@ function drawRtsUnit(u, now) {
 function drawRtsBuildPreview(x, y, bType) {
   const def = RTS_BUILDINGS[bType];
   if (!def) return;
-  const canBuild = canBuildAtLocation(x, y, bType, state.rtsBuildings, state.teams.blue.hq, "blue");
+  const check = checkCanBuildAtLocation(x, y, bType, state.rtsBuildings, state.teams.blue.hq, "blue");
+  const canBuild = check.ok;
   const fp = def.footprint || 45;
 
   ctx.save();
@@ -4088,18 +4164,29 @@ function drawRtsBuildPreview(x, y, bType) {
   ctx.fill();
   ctx.stroke();
 
-  // Floating cost & name badge
-  ctx.fillStyle = "rgba(10, 15, 25, 0.9)";
+  // Floating cost & name badge with status
+  ctx.fillStyle = "rgba(10, 15, 25, 0.92)";
   ctx.strokeStyle = canBuild ? "#22c55e" : "#ef4444";
   ctx.lineWidth = 1.5;
-  const badgeText = `${def.name} ($${def.cost})`;
+  let badgeText = `${def.name} ($${def.cost})`;
+  if (!canBuild) {
+    if (check.reason === "occupied") {
+      badgeText = `⛔ Ocupado (${def.name})`;
+    } else if (check.reason === "max-walls") {
+      badgeText = `⛔ Límite Murallas (40/40)`;
+    } else if (check.reason === "off-map") {
+      badgeText = `⛔ Fuera de Mapa`;
+    } else {
+      badgeText = `⛔ Lejos de la Base`;
+    }
+  }
   ctx.font = "bold 13px 'Trebuchet MS', sans-serif";
   const tw = ctx.measureText(badgeText).width;
   drawRtsRoundRect(ctx, -tw / 2 - 8, -fp - 26, tw + 16, 22, 4);
   ctx.fill();
   ctx.stroke();
 
-  ctx.fillStyle = "#ffffff";
+  ctx.fillStyle = canBuild ? "#ffffff" : "#fca5a5";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText(badgeText, 0, -fp - 15);
@@ -4148,6 +4235,27 @@ function drawRtsUnitOverlays(u) {
     ctx.beginPath();
     ctx.arc(0, 0, Math.max(w, h) * 0.75, 0, Math.PI * 2);
     ctx.stroke();
+  }
+
+  // Control group badge (e.g. [1])
+  if (u.group !== undefined && u.group !== null) {
+    ctx.save();
+    const radius = Math.max(w, h) * 0.72;
+    const bx = radius * 0.7;
+    const by = -radius * 0.7;
+    ctx.fillStyle = "rgba(15, 23, 42, 0.92)";
+    ctx.strokeStyle = isSelected ? "#38bdf8" : "#64748b";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(bx, by, 7.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = isSelected ? "#38bdf8" : "#cbd5e1";
+    ctx.font = "bold 9px monospace";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(String(u.group), bx, by);
+    ctx.restore();
   }
 
   if (u.type === "harvester") {
