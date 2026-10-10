@@ -263,6 +263,7 @@ function resizeGame() {
 let mode3D = false;
 let rts3DRenderer = null;
 const mode3DBtn = document.getElementById("mode-3d-btn");
+if (mode3DBtn) mode3DBtn.style.display = "none"; // until an RTS game starts (enterGame)
 
 function init3DRenderer() {
   if (rts3DRenderer) return;
@@ -1830,6 +1831,9 @@ function enterGame() {
   const isRts = Boolean(state && state.isRts);
   if (cncSidebarEl) cncSidebarEl.classList.toggle("hidden", !isRts);
   if (rtsContextPanelEl) rtsContextPanelEl.classList.add("hidden");
+  // The 3D view only draws the RTS mode: its button only there.
+  if (mode3DBtn) mode3DBtn.style.display = isRts ? "" : "none";
+  if (!isRts && mode3D) set3DMode(false);
   if (isRts) {
     buildMenuEl.classList.add("hidden");
     attackShopEl.classList.add("hidden");
@@ -4171,6 +4175,8 @@ function loop(now) {
   const { w: worldW, h: worldH } = worldSize(state.level);
   const currentMapImage = mapImages[state.level] || mapImages[1];
 
+  // What to draw: also what the minimap below shows, outside the RTS mode.
+  const view = drawnView(now);
   if (state.isRts && mode3D) {
     if (rts3DRenderer) rts3DRenderer.update(dt, now);
     drawRtsWorld(state, now, true); // Overlays only: 3D scene renders underneath on WebGL
@@ -4185,7 +4191,6 @@ function loop(now) {
     // player. PATH itself is untouched -- vehicles (buggy/tank/motorcycle/
     // rocket) still follow it exactly via simulate.js/enemy.js, this only
     // removes the visual debug overlay.
-    const view = drawnView(now);
     // Effects freeze with the game when it's paused.
     if (!state.paused) stepEffects(fx, view, dt);
     drawGroundEffects(fx, ctx, wreckSprite);
