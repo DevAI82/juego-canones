@@ -1854,7 +1854,7 @@ const GAME_IN_PROGRESS = "Hay una partida uno contra otro en marcha: solo sus do
 // at home -- this tab takes `side`, the other is left for the second player;
 // { mode: "rts", submode: "campaign"|"survival" } for RTS mode.
 async function startNewGame(level, { mode = "defense", difficulty = "normal", side = "defense", money = "normal", submode = "campaign" } = {}) {
-  if (networked) {
+  if (networked && mode !== "rts") {
     const result = await askServer(mode === "versus" ? { type: "newVersus", level, side, money } : { type: "restart", level });
     if (!result.ok) return showToast(result.reason === "game-in-progress" ? GAME_IN_PROGRESS : "No se ha podido empezar la partida");
   } else {
@@ -1959,14 +1959,14 @@ const menu = createMenu(document.getElementById("menu"), {
   onSave: saveToSlot,
   onRecords: openStatsModal,
   onQuitToMain: () => {
-    if (!networked) started = false;
+    if (!networked || state?.mode === "rts") started = false;
     if (cncSidebarEl) cncSidebarEl.classList.add("hidden");
     if (rtsContextPanelEl) rtsContextPanelEl.classList.add("hidden");
     resizeGame();
     menu.openMain();
   },
   onResume: () => {
-    if (!networked) state.paused = pausedBeforeMenu;
+    if (!networked || state?.mode === "rts") state.paused = pausedBeforeMenu;
     else if (versusGame() && net.you && !pausedBeforeMenu) postAction({ type: "pause", on: false });
   },
   onSettingsChange: (next) => {
@@ -4008,6 +4008,7 @@ let prevSnapshot = null;
 let snapshotAt = 0;
 
 function receiveSnapshot(body) {
+  if (state?.mode === "rts") return;
   const view = unpackView(body);
   const before = { you: net.you, kind: net.kind, over: state.gameOver };
   prevSnapshot = { state, at: snapshotAt };
@@ -4032,6 +4033,7 @@ function resetLocalView() {
 // uno contra otro en marcha»), over the game going on.
 let lastSeatInfo = null;
 function checkSeat() {
+  if (state?.mode === "rts") return;
   if (!versusGame() || net.you) {
     if (menu.isSeatScreen()) menu.close();
     lastSeatInfo = null;
@@ -4057,7 +4059,7 @@ function checkSeat() {
 // behind, which nobody notices at this game's pace), and explosions and
 // beams keep ageing locally in between.
 function drawnView(now) {
-  if (!networked || !prevSnapshot) return state;
+  if (!networked || state?.mode === "rts" || !prevSnapshot) return state;
   const span = snapshotAt - prevSnapshot.at;
   const elapsed = now - snapshotAt;
   const k = span > 0 ? Math.min(1, elapsed / span) : 1;
@@ -4136,7 +4138,7 @@ function loop(now) {
   lastTime = now;
   frameNow = now / 1000;
 
-  if (!networked && started) {
+  if ((!networked || state?.mode === "rts") && started) {
     // Before stepping: a level's start is only between waves until its
     // first tick spawns the opening units.
     saveScheduler.tick(state, (slot, ok) => showToast(savedMessage(slot, ok)));

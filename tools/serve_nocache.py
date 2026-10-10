@@ -11,7 +11,13 @@ class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         super().end_headers()
 
+    def handle(self):
+        try:
+            super().handle()
+        except (ConnectionResetError, BrokenPipeError):
+            pass
+
 if __name__ == "__main__":
     os.chdir(sys.argv[1])
     port = int(sys.argv[2])
-    http.server.ThreadingHTTPServer(("127.0.0.1", port), NoCacheHandler).serve_forever()
+    http.server.ThreadingHTTPServer(("0.0.0.0", port), NoCacheHandler).serve_forever()

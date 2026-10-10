@@ -45,6 +45,7 @@ const CONTENT_TYPES = {
   ".webp": "image/webp",
   ".woff2": "font/woff2",
   ".webmanifest": "application/manifest+json",
+  ".txt": "text/plain; charset=utf-8",
 };
 
 async function readBody(req) {
@@ -82,9 +83,10 @@ async function addLeaderboardEntry(file, name, score) {
 async function serveStatic(req, res) {
   let urlPath = decodeURIComponent(new URL(req.url, "http://x").pathname);
   if (urlPath === "/") urlPath = "/index.html";
-  const filePath = path.join(GAME_DIR, urlPath);
+  const filePath = path.resolve(path.join(GAME_DIR, urlPath));
+  const rel = path.relative(path.resolve(GAME_DIR), filePath);
   // Refuse to serve anything outside the game directory (e.g. "/../server.js").
-  if (!filePath.startsWith(GAME_DIR)) {
+  if (rel.startsWith("..") || path.isAbsolute(rel)) {
     res.writeHead(403).end("Forbidden");
     return;
   }
@@ -124,7 +126,7 @@ function sendJson(res, body) {
 // of starting over. Resolves once it's listening, with a way to stop it
 // (the tests run their own server on a spare port, away from the
 // family's on 8420).
-export async function startServer({ port = 8420, dataDir = path.join(GAME_DIR, "data"), log = console.log } = {}) {
+export async function startServer({ port = 8421, dataDir = path.join(GAME_DIR, "data"), log = console.log } = {}) {
   const savesPath = path.join(dataDir, "saves.json");
   const leaderboardPath = path.join(dataDir, "leaderboard.json");
   const store = {
@@ -229,7 +231,7 @@ function lanAddresses() {
 // `node server.js`: the family's server. PORT and DATA_DIR let a
 // throwaway test instance run without touching the real one on 8420.
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
-  const port = Number(process.env.PORT) || 8420;
+  const port = Number(process.argv[2]) || Number(process.env.PORT) || 8421;
   const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : undefined;
   await startServer({ port, dataDir });
   console.log(`Tower Defense multiplayer host running.`);
