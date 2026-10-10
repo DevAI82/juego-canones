@@ -42,7 +42,7 @@ import { createMenu } from "./menu.js";
 import { stepGame, canSaveGame, restoreGameSave } from "./modes.js";
 import { createAttackState, startAttack, buyUnits, upgradeUnitType, UNIT_ORDER } from "./attack.js";
 import { attackMapOf } from "./roadGraph.js";
-import { isVisible, fogFromWire } from "./fog.js";
+import { isVisible, isExplored, fogFromWire } from "./fog.js";
 import { createAttackControls } from "./attackControls.js";
 import {
   createFogLayer,
@@ -58,6 +58,23 @@ import { initShop, updateShop, initUnitUpgrades, updateUnitUpgrades, attackHudLi
 import { BUILDING_TYPES, BUILDING_ORDER, PHASE_COUNT, SHEET_COLS, buildingProgress, constructionFrame } from "./buildings.js";
 import { RTS_UNIT_TYPES, RTS_UNIT_ORDER } from "./rtsUnits.js";
 import { entrySafePoints, reachesEntryRoad } from "./entryRoads.js";
+import { createRtsUI } from "./rtsUI.js";
+import {
+  createRtsState,
+  RTS_CONFIG,
+  RTS_BUILDINGS,
+  RTS_UNITS,
+  RTS_RESEARCH_UPGRADES,
+  deployMcv,
+  completeMcvDeployment,
+  createRtsBuilding,
+  canBuildAtLocation,
+  calculatePowerGrid,
+  enqueueUnit,
+  cancelQueueItem,
+  startResearch,
+} from "./rts.js";
+import { createRts3DRenderer } from "./renderer3d.js";
 
 // Browsers refuse to start any audio (synthesized SFX or the background
 // music) before a real user gesture. Fire once, on whichever happens
@@ -165,7 +182,10 @@ function positionTopControls(scale) {
   const gameLeft = (window.innerWidth - scaledW) / 2;
   const gameTop = (window.innerHeight - scaledH) / 2;
   topControlsEl.style.top = `${Math.round(gameTop + 12)}px`;
-  topControlsEl.style.right = `${Math.round(window.innerWidth - (gameLeft + scaledW) + 12)}px`;
+  const baseRight = Math.round(window.innerWidth - (gameLeft + scaledW) + 12);
+  const sidebar = document.getElementById("cnc-sidebar");
+  const isRts = Boolean(sidebar && !sidebar.classList.contains("hidden"));
+  topControlsEl.style.right = isRts ? `${Math.max(baseRight, 285)}px` : `${baseRight}px`;
 }
 
 // The on-screen D-pad (see wireNavButton() below), pinned near the map's
@@ -176,25 +196,129 @@ function positionTopControls(scale) {
 // between three cells... i.e. 3*36 + 2*4).
 const NAV_CONTROLS_SIZE = 3 * 36 + 2 * 4;
 
-function positionNavControls(scale) {
+function positionNavControls() {
   const navControlsEl = document.getElementById("nav-controls");
-  const scaledW = CANVAS_WIDTH * scale;
-  const scaledH = CANVAS_HEIGHT * scale;
-  const gameLeft = (window.innerWidth - scaledW) / 2;
-  const gameTop = (window.innerHeight - scaledH) / 2;
-  navControlsEl.style.left = `${Math.round(gameLeft + scaledW - NAV_CONTROLS_SIZE - 16)}px`;
-  navControlsEl.style.top = `${Math.round(gameTop + scaledH - NAV_CONTROLS_SIZE - 16)}px`;
+  if (!navControlsEl) return;
+  const show = Boolean(state && (state.isRts || state.level === 3));
+  navControlsEl.style.display = show ? "grid" : "none";
 }
 
+let state = null;
+
 function resizeGame() {
+  const sidebar = document.getElementById("cnc-sidebar");
+  const isRts = Boolean(sidebar && !sidebar.classList.contains("hidden")) || Boolean(state && state.isRts);
+
+  if (isRts) {
+    const isSidebarVisible = Boolean(sidebar && !sidebar.classList.contains("hidden"));
+    const sidebarW = isSidebarVisible ? (sidebar.getBoundingClientRect().width || 270) : 0;
+    const availW = Math.max(300, window.innerWidth - sidebarW);
+    const availH = window.innerHeight;
+    const scaleX = availW / CANVAS_WIDTH;
+    const scaleY = availH / CANVAS_HEIGHT;
+
+    gameViewport.style.position = "fixed";
+    gameViewport.style.left = "0px";
+    gameViewport.style.top = "0px";
+    gameViewport.style.width = `${availW}px`;
+    gameViewport.style.height = `${availH}px`;
+    gameViewport.style.margin = "0";
+
+    gameContainer.style.transform = `scale(${scaleX}, ${scaleY})`;
+
+    const topControlsEl = document.getElementById("top-controls");
+    if (topControlsEl) {
+      topControlsEl.style.top = "12px";
+      topControlsEl.style.right = `${sidebarW + 12}px`;
+    }
+
+    const navControlsEl = document.getElementById("nav-controls");
+    if (navControlsEl) {
+      navControlsEl.style.display = "grid";
+    }
+
+    if (mode3D && rts3DRenderer) {
+      rts3DRenderer.resize(availW, availH);
+    }
+    return;
+  }
+
+  // Non-RTS modes: default centered proportional scaling
+  gameViewport.style.position = "relative";
+  gameViewport.style.left = "";
+  gameViewport.style.top = "";
+  gameViewport.style.margin = "";
   const scale = Math.min(window.innerWidth / CANVAS_WIDTH, window.innerHeight / CANVAS_HEIGHT);
   gameContainer.style.transform = `scale(${scale})`;
   gameViewport.style.width = `${CANVAS_WIDTH * scale}px`;
   gameViewport.style.height = `${CANVAS_HEIGHT * scale}px`;
   positionBuildMenu(scale);
   positionTopControls(scale);
-  positionNavControls(scale);
+  positionNavControls();
 }
+
+// ============================================================================
+// 3D GRAPHICS ENGINE (Three.js WebGL) INTEGRATION
+// ============================================================================
+let mode3D = false;
+let rts3DRenderer = null;
+const mode3DBtn = document.getElementById("mode-3d-btn");
+
+function init3DRenderer() {
+  if (rts3DRenderer) return;
+  rts3DRenderer = createRts3DRenderer({
+    container: gameViewport,
+    getState: () => state,
+    getCamera: () => camera,
+    getZoom: () => zoom,
+    onWorldClick: (pos) => {
+      handleClick(pos);
+    },
+    onWorldRightClick: (pos) => {
+      if (selectedBuildType) {
+        selectedBuildType = null;
+      }
+      if (state && state.isRts) {
+        selectedRtsBuilding = null;
+        if (rtsUI) rtsUI.closeBuildingContext();
+        for (const u of state.rtsUnits) u.selected = false;
+      }
+    },
+    canvasWidth: CANVAS_WIDTH,
+    canvasHeight: CANVAS_HEIGHT,
+  });
+  rts3DRenderer.init();
+}
+
+function set3DMode(active) {
+  mode3D = active;
+  if (!rts3DRenderer && active) {
+    init3DRenderer();
+  }
+  if (rts3DRenderer) {
+    if (active) {
+      rts3DRenderer.show();
+      const sidebar = document.getElementById("cnc-sidebar");
+      const sidebarW = (sidebar && !sidebar.classList.contains("hidden")) ? (sidebar.getBoundingClientRect().width || 270) : 0;
+      rts3DRenderer.resize(Math.max(300, window.innerWidth - sidebarW), window.innerHeight);
+    } else {
+      rts3DRenderer.hide();
+    }
+  }
+  canvas.style.background = active ? "transparent" : "#000";
+  if (mode3DBtn) {
+    mode3DBtn.classList.toggle("active", active);
+    mode3DBtn.textContent = active ? "🚀 3D ON" : "🎮 3D";
+  }
+  showToast(active ? "Modo 3D WebGL Activado" : "Modo 2D Canvas Activado");
+}
+
+if (mode3DBtn) {
+  mode3DBtn.addEventListener("click", () => {
+    set3DMode(!mode3D);
+  });
+}
+
 resizeGame();
 window.addEventListener("resize", resizeGame);
 window.addEventListener("orientationchange", resizeGame);
@@ -237,11 +361,30 @@ for (const key of BUILDING_ORDER) {
   sprites[`building_${key}`] = loadImage(BUILDING_TYPES[key].sprite);
   sprites[`building_${key}_build`] = loadImage(BUILDING_TYPES[key].sheet);
 }
+// Specific RTS buildings & MCV sprites
+sprites.bld_hq = loadImage("assets/bld_hq.jpg");
+sprites.bld_hq_build = loadImage("assets/bld_hq_build.jpg");
+sprites.unit_mcv = loadImage("assets/unit_mcv.jpg");
+sprites.unit_harvester = loadImage("assets/unit_harvester.png");
+sprites.bld_wall = loadImage("assets/bld_wall.jpg");
+sprites.bld_solar = loadImage("assets/bld_solar.jpg");
+sprites.bld_solar_build = loadImage("assets/bld_solar_build.jpg");
+sprites.bld_wind = loadImage("assets/bld_wind.jpg");
+sprites.bld_wind_build = loadImage("assets/bld_wind_build.jpg");
+sprites.bld_refinery = loadImage("assets/bld_refinery.jpg");
+sprites.bld_refinery_build = loadImage("assets/bld_refinery_build.jpg");
+sprites.bld_barracks = loadImage("assets/bld_barracks.jpg");
+sprites.bld_barracks_build = loadImage("assets/bld_barracks_build.jpg");
+sprites.bld_factory = loadImage("assets/bld_factory.jpg");
+sprites.bld_factory_build = loadImage("assets/bld_factory_build.jpg");
+sprites.bld_techlab = loadImage("assets/bld_techlab.jpg");
+sprites.bld_techlab_build = loadImage("assets/bld_techlab_build.jpg");
+
 // The RTS mode's vehicles (rtsUnits.js): seen from above, like the units.
 for (const key of RTS_UNIT_ORDER) sprites[`unit_${key}`] = loadImage(RTS_UNIT_TYPES[key].sprite);
 // A unit's picture: the defence's and the attack's units' (enemy_*), or an
 // RTS vehicle's (unit_*).
-const unitSprite = (type) => sprites[`enemy_${type}`] || sprites[`unit_${type}`];
+const unitSprite = (type) => sprites[`unit_${type}`] || sprites[`enemy_${type}`];
 
 // Build-animation sheets: 8x6 grids of 48 frames each, keyed from the 720p
 // 4-second build videos (tools/extract_all_turrets.py -- COLS/ROWS there
@@ -270,7 +413,7 @@ function ready(img) {
 // NETWORKED mode (see connectToServer() below) it's replaced wholesale
 // by whatever the server's last polled snapshot was -- this tab never
 // mutates it directly, only sends actions and waits for the next poll.
-let state = createGameState();
+state = createGameState();
 let networked = false; // set once, before the loop starts (see boot() below)
 // An attack (attack.js, docs/2026-10-09-modo-atacante-design.md) rather
 // than a defence game: what the rules and the state are.
@@ -345,6 +488,10 @@ function worldSize(level) {
 // overview with no scrolling needed. For Levels 1/2, minZoom is 1.0.
 function minZoomFor(level) {
   const { w, h } = worldSize(level);
+  if (state && state.isRts) {
+    // In RTS mode, minimum zoom guarantees the map covers 100% of the canvas with zero grey bars
+    return Math.max(CANVAS_WIDTH / w, CANVAS_HEIGHT / h);
+  }
   const pad = cameraPadding(); // (in an attack: the room the shop and HUD leave free)
   return Math.min((CANVAS_WIDTH - pad.right) / w, (CANVAS_HEIGHT - pad.top) / h);
 }
@@ -376,6 +523,16 @@ function clampCamera(level) {
 // has a complete tactical view of the battlefield right away.
 function recenterCamera(level) {
   const { w, h } = worldSize(level);
+  if (state && state.isRts) {
+    zoom = 1.0;
+    clampZoom(level);
+    const mcv = state.rtsUnits ? state.rtsUnits.find((u) => u.type === "mcv" && u.team === "blue") : null;
+    const anchor = mcv ? { x: mcv.x, y: mcv.y } : RTS_CONFIG.blueBase;
+    camera.x = anchor.x - (CANVAS_WIDTH / zoom) / 2;
+    camera.y = anchor.y - (CANVAS_HEIGHT / zoom) / 2;
+    clampCamera(level);
+    return;
+  }
   zoom = minZoomFor(level);
   clampZoom(level);
   const d = levelData(level);
@@ -442,12 +599,13 @@ function syncMusicToPause() {
 // simulate.js) all the way back at creation, so this never needs to know
 // *why* a shot happened, only that one just did.
 function playNewShotSounds() {
+  if (state.isRts || !state.projectiles) return;
   const nextSounded = new Set();
   for (const p of state.projectiles) {
     nextSounded.add(p.id);
     if (!soundedIds.has(p.id)) playSound(p.sound);
   }
-  for (const b of state.beams) {
+  for (const b of state.beams || []) {
     nextSounded.add(b.id);
     if (!soundedIds.has(b.id)) playSound("laser");
   }
@@ -1207,7 +1365,32 @@ function drawProjectile(p) {
   }
 }
 
+function drawRtsHud() {
+  ctx.save();
+  ctx.fillStyle = "#fff";
+  ctx.font = "bold 18px sans-serif";
+  const subname = state.rtsSubmode === "survival" ? "SUPERVIVENCIA" : "CAMPAÑA";
+  ctx.fillText(`MODO RTS — ${subname}`, 20, 30);
+  if (state.rtsSubmode === "survival") {
+    ctx.font = "14px sans-serif";
+    ctx.fillStyle = "#ffe27a";
+    ctx.fillText(`Oleada: ${state.survivalWave}/${state.maxSurvivalWaves} · Próxima en: ${Math.ceil(state.survivalWaveTimer)}s`, 20, 55);
+  }
+  if (state.winner) {
+    ctx.font = "bold 44px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillStyle = state.winner === "blue" || state.winner === "victory" ? "#4ade80" : "#ef4444";
+    const winMsg = state.winner === "blue" || state.winner === "victory" ? "¡VICTORIA!" : "DERROTA";
+    ctx.fillText(winMsg, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
+  }
+  ctx.restore();
+}
+
 function drawHud() {
+  if (state.isRts) {
+    drawRtsHud();
+    return;
+  }
   if (attacking()) {
     if (commanding()) drawAttackHud();
     else drawDefenderHud();
@@ -1430,6 +1613,95 @@ initUnitUpgrades(unitUpgradeEl, {
   },
 });
 
+// RTS mode's Command & Conquer sidebar and contextual building panel (rtsUI.js)
+const cncSidebarEl = document.getElementById("cnc-sidebar");
+const rtsContextPanelEl = document.getElementById("rts-context-panel");
+let selectedRtsBuilding = null;
+
+const rtsUI = createRtsUI(cncSidebarEl, rtsContextPanelEl, {
+  onSelectBuildType: (type) => {
+    if (!state.isRts || state.winner) return;
+    selectedBuildType = selectedBuildType === type ? null : type;
+    if (selectedBuildType) {
+      rtsUI.closeBuildingContext();
+      const def = RTS_BUILDINGS[selectedBuildType];
+      showToast(def ? `Colocando ${def.name}: Haz clic en el terreno cerca de tu base` : "Toca en el mapa para situar la construcción");
+    }
+  },
+  onEnqueueSoldier: (uType, building) => {
+    if (!state.isRts || state.winner) return;
+    const b = building || (state.rtsBuildings || []).find((bld) => bld.team === "blue" && bld.type === "barracks" && bld.hp > 0 && bld.buildTimeRemaining <= 0);
+    if (!b) return showToast("Necesitas un Barracón Militar completado");
+    const res = enqueueUnit(b, uType, state.teams.blue);
+    if (!res.ok) {
+      if (res.reason === "insufficient-credits") showToast("Créditos insuficientes ($" + RTS_UNITS[uType].cost + ")");
+      else showToast("No se puede reclutar en este momento");
+    } else {
+      playSound("upgrade");
+    }
+  },
+  onEnqueueVehicle: (uType, building) => {
+    if (!state.isRts || state.winner) return;
+    const b = building || (state.rtsBuildings || []).find((bld) => bld.team === "blue" && bld.type === "factory" && bld.hp > 0 && bld.buildTimeRemaining <= 0);
+    if (!b) return showToast("Necesitas una Fábrica de Blindados completada");
+    const res = enqueueUnit(b, uType, state.teams.blue);
+    if (!res.ok) {
+      if (res.reason === "insufficient-credits") showToast("Créditos insuficientes ($" + RTS_UNITS[uType].cost + ")");
+      else showToast("No se puede fabricar en este momento");
+    } else {
+      playSound("upgrade");
+    }
+  },
+  onCancelQueue: (building, index) => {
+    if (!state.isRts || state.winner) return;
+    const ok = cancelQueueItem(building, index, state.teams.blue);
+    if (ok) {
+      playSound("sell");
+      showToast("Producción cancelada. Créditos reembolsados.");
+    }
+  },
+  onStartResearch: (techLab, upgradeKey) => {
+    if (!state.isRts || state.winner) return;
+    const res = startResearch(techLab, upgradeKey, state.teams.blue);
+    if (!res.ok) {
+      if (res.reason === "insufficient-credits") showToast("Créditos insuficientes para investigar");
+      else showToast("No se puede investigar en este momento");
+    } else {
+      playSound("upgrade");
+      showToast("Investigando: " + RTS_RESEARCH_UPGRADES[upgradeKey].name);
+    }
+  },
+  onDeselectBuilding: () => {
+    selectedRtsBuilding = null;
+  },
+});
+
+// Radar canvas setup inside #cnc-radar-mount
+const radarMountEl = document.getElementById("cnc-radar-mount");
+let radarCanvas = null;
+let radarCtx = null;
+if (radarMountEl) {
+  radarCanvas = document.createElement("canvas");
+  radarCanvas.width = 200;
+  radarCanvas.height = 200;
+  radarMountEl.appendChild(radarCanvas);
+  radarCtx = radarCanvas.getContext("2d");
+
+  radarCanvas.addEventListener("pointerdown", (evt) => {
+    if (!state.isRts) return;
+    const rect = radarCanvas.getBoundingClientRect();
+    const rx = evt.clientX - rect.left;
+    const ry = evt.clientY - rect.top;
+    const worldW = 2048;
+    const worldH = 2048;
+    const targetX = (rx / 200) * worldW;
+    const targetY = (ry / 200) * worldH;
+    camera.x = targetX - (CANVAS_WIDTH / zoom) / 2;
+    camera.y = targetY - (CANVAS_HEIGHT / zoom) / 2;
+    clampCamera(state.level);
+  });
+}
+
 const skipWaveBtn = document.getElementById("skip-wave-btn");
 skipWaveBtn.addEventListener("click", () => {
   if (state.gameOver || state.win || state.levelComplete) return;
@@ -1544,6 +1816,7 @@ function enterGame() {
   menu.close();
   selectedId = null;
   selectedBuildType = null;
+  selectedRtsBuilding = null;
   attackControls.reset();
   autoArmy.reset();
   unitUpgradeType = null;
@@ -1553,6 +1826,17 @@ function enterGame() {
   lastCameraLevel = null;
   showGameEndOverlay(false);
   gameEndShown = false;
+
+  const isRts = Boolean(state && state.isRts);
+  if (cncSidebarEl) cncSidebarEl.classList.toggle("hidden", !isRts);
+  if (rtsContextPanelEl) rtsContextPanelEl.classList.add("hidden");
+  if (isRts) {
+    buildMenuEl.classList.add("hidden");
+    attackShopEl.classList.add("hidden");
+    unitUpgradeEl.classList.add("hidden");
+    skipWaveBtn.classList.add("hidden");
+  }
+  resizeGame();
 }
 
 // A tower (or its range) refused over the army's entries (entryRoads.js).
@@ -1563,15 +1847,31 @@ const GAME_IN_PROGRESS = "Hay una partida uno contra otro en marcha: solo sus do
 
 // options (menu.js): { mode: "attack", difficulty } for an attack against
 // the computer; { mode: "versus", side, money } for one against the other
-// at home -- this tab takes `side`, the other is left for the second player.
-async function startNewGame(level, { mode = "defense", difficulty = "normal", side = "defense", money = "normal" } = {}) {
+// at home -- this tab takes `side`, the other is left for the second player;
+// { mode: "rts", submode: "campaign"|"survival" } for RTS mode.
+async function startNewGame(level, { mode = "defense", difficulty = "normal", side = "defense", money = "normal", submode = "campaign" } = {}) {
   if (networked) {
     const result = await askServer(mode === "versus" ? { type: "newVersus", level, side, money } : { type: "restart", level });
     if (!result.ok) return showToast(result.reason === "game-in-progress" ? GAME_IN_PROGRESS : "No se ha podido empezar la partida");
   } else {
-    state = mode === "attack" ? createAttackState(level, difficulty) : createGameState(level);
+    if (mode === "rts") {
+      state = createRtsState(submode);
+      state.level = 3;
+      state.onHarvesterSpawned = (harvester, refinery) => {
+        if (harvester.team === "blue") {
+          playSound("upgrade");
+          showToast("¡Cosechadora desplegada automáticamente en la Refinería!");
+        }
+      };
+    } else if (mode === "attack") {
+      state = createAttackState(level, difficulty);
+    } else {
+      state = createGameState(level);
+    }
     saveScheduler.reset(state);
     started = true;
+    window.__gameState = () => state;
+    window.__rtsUI = () => rtsUI;
   }
   enterGame();
 }
@@ -1656,6 +1956,9 @@ const menu = createMenu(document.getElementById("menu"), {
   onRecords: openStatsModal,
   onQuitToMain: () => {
     if (!networked) started = false;
+    if (cncSidebarEl) cncSidebarEl.classList.add("hidden");
+    if (rtsContextPanelEl) rtsContextPanelEl.classList.add("hidden");
+    resizeGame();
     menu.openMain();
   },
   onResume: () => {
@@ -1748,6 +2051,30 @@ let gameEndShown = false;
 
 async function showGameEndScreen() {
   gameEndRematchBtn.classList.add("hidden");
+  if (state.isRts) {
+    const isWin = state.winner === "blue" || state.winner === "victory";
+    const sub = state.rtsSubmode === "survival" ? "Supervivencia" : "Campaña";
+    const title = isWin ? "¡VICTORIA TÁCTICA!" : "BASE DESTRUIDA - DERROTA";
+    const subtitle = isWin
+      ? (state.rtsSubmode === "survival" ? "Has repelido las 20 oleadas y defendido la base con éxito." : "Has aniquilado la base y tropas enemigas.")
+      : "Tu base o unidades han sido destruidas.";
+    const blueUnits = state.rtsUnits.filter((u) => u.team === "blue").length;
+    const blueBlds = state.rtsBuildings.filter((b) => b.team === "blue").length;
+    renderAttackEndScreen(gameEndOverlay, {
+      title,
+      subtitle,
+      rows: [
+        ["Modo de juego", `RTS (${sub})`],
+        ["Créditos finales", `$${state.teams.blue ? state.teams.blue.credits : 0}`],
+        ["Edificios en pie", `${blueBlds}`],
+        ["Unidades activas", `${blueUnits}`],
+        ...(state.rtsSubmode === "survival" ? [["Oleada alcanzada", `${state.survivalWave} / ${state.maxSurvivalWaves}`]] : []),
+      ],
+    });
+    gameEndCloseBtn.textContent = "Volver al Menú";
+    showGameEndOverlay(true);
+    return;
+  }
   if (attacking()) {
     // An attack's end: who won and how it went -- no score or ranking. One
     // against the other, each player reads their own result and may ask
@@ -1846,6 +2173,131 @@ function worldPos(evt) {
 
 function handleClick(pos) {
   if (state.gameOver || state.win || state.levelComplete) return;
+
+  if (state.isRts) {
+    if (state.winner) return;
+
+    // 1. Placing building or wall
+    if (selectedBuildType) {
+      const def = RTS_BUILDINGS[selectedBuildType];
+      if (!def) {
+        selectedBuildType = null;
+        return;
+      }
+      const canBuild = canBuildAtLocation(pos.x, pos.y, selectedBuildType, state.rtsBuildings, state.teams.blue.hq, "blue");
+      if (!canBuild) {
+        playSound("error");
+        showToast("Demasiado lejos de la base (construye cerca de tus edificios)");
+        return;
+      }
+      if (state.teams.blue.credits < def.cost) {
+        playSound("error");
+        showToast("Créditos insuficientes ($" + def.cost + ")");
+        return;
+      }
+      state.teams.blue.credits -= def.cost;
+      const bld = createRtsBuilding(selectedBuildType, pos.x, pos.y, "blue", state.nextId++);
+      state.rtsBuildings.push(bld);
+      playSound("upgrade");
+      showToast(def.name + (def.buildDuration === 0 ? " colocado" : " en construcción"));
+      if (selectedBuildType !== "wall") selectedBuildType = null;
+      rtsUI.refreshSidebar();
+      return;
+    }
+
+    // 2. Check MCV double click or click
+    const clickedMcv = state.rtsUnits.find((u) => u.team === "blue" && u.type === "mcv" && Math.hypot(u.x - pos.x, u.y - pos.y) <= 45);
+    if (clickedMcv) {
+      deployMcv(clickedMcv, state);
+      playSound("upgrade");
+      showToast("¡Desplegando Centro de Mando!");
+      return;
+    }
+
+    // 3. Clicked on friendly building -> open building contextual panel!
+    const clickedBld = state.rtsBuildings.find((b) => b.team === "blue" && Math.hypot(b.x - pos.x, b.y - pos.y) <= (b.footprint || 45));
+    if (clickedBld) {
+      selectedRtsBuilding = clickedBld;
+      rtsUI.openBuildingContext(clickedBld, state);
+      for (const u of state.rtsUnits) u.selected = false;
+      playSound("click");
+      return;
+    }
+
+    // 4. Clicked on friendly unit -> select unit!
+    const clickedFriendlyUnit = state.rtsUnits.find((u) => u.team === "blue" && Math.hypot(u.x - pos.x, u.y - pos.y) <= 32);
+    if (clickedFriendlyUnit) {
+      selectedRtsBuilding = null;
+      rtsUI.closeBuildingContext();
+      for (const u of state.rtsUnits) {
+        if (u.team === "blue") u.selected = false;
+      }
+      clickedFriendlyUnit.selected = true;
+      playSound("click");
+      showToast(RTS_UNITS[clickedFriendlyUnit.type].name + " seleccionado");
+      return;
+    }
+
+    // 5. If we have friendly units selected, issue orders:
+    const selectedBlueUnits = state.rtsUnits.filter((u) => u.team === "blue" && u.selected);
+    if (selectedBlueUnits.length > 0) {
+      // Check if clicked on enemy unit or enemy building -> attack order!
+      const clickedEnemy = state.rtsUnits.find((u) => u.team !== "blue" && Math.hypot(u.x - pos.x, u.y - pos.y) <= 35) ||
+                           state.rtsBuildings.find((b) => b.team !== "blue" && Math.hypot(b.x - pos.x, b.y - pos.y) <= (b.footprint || 45));
+      if (clickedEnemy) {
+        for (const u of selectedBlueUnits) {
+          if (u.damage > 0) {
+            u.targetEnemyId = clickedEnemy.id;
+            u.targetX = undefined;
+            u.targetY = undefined;
+            u.state = "ATTACKING";
+          }
+        }
+        playSound("click");
+        showToast("¡Atacando objetivo!");
+        return;
+      }
+
+      // Check if clicked on mineral field -> order harvesters!
+      const clickedField = state.mineralFields && state.mineralFields.find((f) => Math.hypot(f.x - pos.x, f.y - pos.y) <= f.radius);
+      if (clickedField) {
+        let sentHarvester = false;
+        for (const u of selectedBlueUnits) {
+          if (u.type === "harvester") {
+            u.targetFieldId = clickedField.id;
+            u.state = "TO_FIELD";
+            sentHarvester = true;
+          }
+        }
+        if (sentHarvester) {
+          playSound("click");
+          showToast("Cosechadora enviada a " + clickedField.name);
+          return;
+        }
+      }
+
+      // Ground click -> Move selected units with tactical formation spread!
+      const N = selectedBlueUnits.length;
+      for (let i = 0; i < N; i++) {
+        const u = selectedBlueUnits[i];
+        const ox = (i % 4 - 1.5) * 26;
+        const oy = (Math.floor(i / 4) - 0.5) * 26;
+        u.targetX = pos.x + ox;
+        u.targetY = pos.y + oy;
+        u.targetEnemyId = null;
+        u.state = "MOVING";
+      }
+      playSound("click");
+      return;
+    }
+
+    // 6. Clicked elsewhere -> close contextual panel and deselect
+    selectedRtsBuilding = null;
+    rtsUI.closeBuildingContext();
+    for (const u of state.rtsUnits) u.selected = false;
+    return;
+  }
+
   if (selectedBuildType === "wall") return; // placed on press/drag instead (paintWall)
   if (selectedBuildType) {
     // Checked locally first (same check the ghost preview already used
@@ -2072,6 +2524,11 @@ canvas.addEventListener("pointerdown", (evt) => {
     // Right-click cancels build selection
     if (selectedBuildType) {
       selectedBuildType = null;
+    }
+    if (state.isRts) {
+      selectedRtsBuilding = null;
+      rtsUI.closeBuildingContext();
+      for (const u of state.rtsUnits) u.selected = false;
     }
     return;
   }
@@ -2363,6 +2820,1058 @@ function drawAttackWorld(view, now) {
   const hover = attackControls.hoverWorld();
   const hovered = hover && known.towers.find((t) => Math.hypot(t.x - hover.x, t.y - hover.y) < 38);
   if (hovered) drawRange(ctx, hovered.x, hovered.y, towerRange(hovered));
+}
+
+function drawRtsRoundRect(c, x, y, w, h, r) {
+  if (typeof c.roundRect === "function") {
+    c.beginPath();
+    c.roundRect(x, y, w, h, r);
+  } else {
+    c.beginPath();
+    c.rect(x, y, w, h);
+  }
+}
+
+function drawMineralField(field, now) {
+  const pct = Math.max(0, Math.min(1, field.reserves / field.maxReserves));
+  ctx.save();
+
+  // 1. Ambient Ley-line Energy Aura on Ground
+  const pulse = Math.sin(now / 450) * 0.12 + 0.88;
+  const grad = ctx.createRadialGradient(field.x, field.y, field.radius * 0.05, field.x, field.y, field.radius);
+  grad.addColorStop(0, `rgba(245, 158, 11, ${0.45 * pulse})`);
+  grad.addColorStop(0.4, `rgba(217, 119, 6, ${0.25 * pulse})`);
+  grad.addColorStop(0.75, `rgba(56, 189, 248, ${0.08 * pulse})`);
+  grad.addColorStop(1, "rgba(217, 119, 6, 0)");
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(field.x, field.y, field.radius, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 2. Luminous Subterranean Energy Veins / Fractures
+  const veinCount = 6;
+  ctx.save();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = `rgba(251, 191, 36, ${0.35 * pulse})`;
+  for (let v = 0; v < veinCount; v++) {
+    const vAngle = (v * (Math.PI * 2 / veinCount)) + 0.3;
+    const vLen = field.radius * (0.6 + ((v * 17) % 30) * 0.01);
+    ctx.beginPath();
+    ctx.moveTo(field.x, field.y);
+    const midX = field.x + Math.cos(vAngle - 0.2) * (vLen * 0.5);
+    const midY = field.y + Math.sin(vAngle - 0.2) * (vLen * 0.5);
+    const endX = field.x + Math.cos(vAngle) * vLen;
+    const endY = field.y + Math.sin(vAngle) * vLen;
+    ctx.quadraticCurveTo(midX, midY, endX, endY);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // 3. Multi-Faceted 3D Isometric Crystal Spires
+  // Determine crystal clusters based on reserves percentage
+  const clusterCount = Math.max(4, Math.round(5 + pct * 11));
+  for (let i = 0; i < clusterCount; i++) {
+    // Deterministic distribution seeded by field ID and index
+    const angle = (i * 2.399963) + (field.id === "ore_center" ? 0.4 : 1.15);
+    const dist = (field.radius * 0.15) + ((i * 47) % Math.round(field.radius * 0.68));
+    const cx = field.x + Math.cos(angle) * dist;
+    const cy = field.y + Math.sin(angle) * dist;
+    const baseH = (14 + (i % 5) * 5) * (0.65 + pct * 0.35); // Height grows with reserves
+    const baseW = (6 + (i % 3) * 2.5);
+    const isCyanSpire = i % 3 === 2; // Mixed rare cyan Tiberium crystals with amber
+    const shimmer = Math.sin(now / 350 + i * 1.7) * 0.25 + 0.75;
+
+    ctx.save();
+    ctx.translate(cx, cy);
+
+    // 3a. Cast Ground Shadow (projected to the bottom-right in isometric perspective)
+    ctx.fillStyle = "rgba(0, 0, 0, 0.45)";
+    ctx.beginPath();
+    ctx.moveTo(-baseW * 0.6, 0);
+    ctx.lineTo(baseH * 0.65, baseH * 0.32);
+    ctx.lineTo(baseH * 0.75 + baseW * 0.3, baseH * 0.36);
+    ctx.lineTo(baseW * 0.6, 0);
+    ctx.closePath();
+    ctx.fill();
+
+    // 3b. Ground Occlusion Base
+    ctx.fillStyle = "rgba(0, 0, 0, 0.35)";
+    ctx.beginPath();
+    ctx.ellipse(0, 0, baseW * 0.9, baseW * 0.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 3c. Left Facet (Ambient / Shadowed face)
+    ctx.beginPath();
+    ctx.moveTo(0, -baseH);
+    ctx.lineTo(-baseW * 0.7, -baseH * 0.15);
+    ctx.lineTo(0, baseW * 0.25);
+    ctx.closePath();
+    ctx.fillStyle = isCyanSpire
+      ? `rgba(3, 105, 161, ${shimmer})`
+      : `rgba(180, 83, 9, ${shimmer})`;
+    ctx.fill();
+
+    // 3d. Right Facet (Sunlit face - brightly illuminated)
+    ctx.beginPath();
+    ctx.moveTo(0, -baseH);
+    ctx.lineTo(0, baseW * 0.25);
+    ctx.lineTo(baseW * 0.75, -baseH * 0.12);
+    ctx.closePath();
+    ctx.fillStyle = isCyanSpire
+      ? `rgba(56, 189, 248, ${shimmer})`
+      : `rgba(251, 191, 36, ${shimmer})`;
+    ctx.fill();
+
+    // 3e. Center Specular Ridge Line & Apex Glint
+    ctx.strokeStyle = isCyanSpire ? "#e0f2fe" : "#fef08a";
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(0, -baseH);
+    ctx.lineTo(0, baseW * 0.25);
+    ctx.stroke();
+
+    // 3f. Occasional Apex Light Glint (twinkling star)
+    if (Math.sin(now / 200 + i * 2.3) > 0.85) {
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.arc(0, -baseH, 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.restore();
+  }
+
+  // 4. Floating Luminous Ion Particles
+  const partCount = 8;
+  for (let p = 0; p < partCount; p++) {
+    const pSeed = (p * 53) % 100;
+    const pAge = ((now * 0.05 + pSeed * 10) % 100) / 100; // 0 to 1
+    const pAng = (p * 1.25) + (pAge * 0.4);
+    const pDist = (field.radius * 0.1) + ((p * 29) % Math.round(field.radius * 0.6));
+    const px = field.x + Math.cos(pAng) * pDist;
+    const py = field.y + Math.sin(pAng) * pDist - (pAge * 28);
+    const pAlpha = Math.sin(pAge * Math.PI) * 0.7;
+    ctx.fillStyle = p % 2 === 0 ? `rgba(251, 191, 36, ${pAlpha})` : `rgba(56, 189, 248, ${pAlpha})`;
+    ctx.beginPath();
+    ctx.arc(px, py, 1.8, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // 5. Tactical Command & Conquer Holographic Badge
+  ctx.save();
+  const labelY = field.y - field.radius - 14;
+  const labelText = `${field.name}: ${Math.round(field.reserves)} kg`;
+  ctx.font = "bold 12px 'Trebuchet MS', sans-serif";
+  const tw = ctx.measureText(labelText).width;
+  ctx.fillStyle = "rgba(10, 15, 20, 0.88)";
+  ctx.strokeStyle = pct > 0.25 ? "#f59e0b" : "#ef4444";
+  ctx.lineWidth = 1.5;
+  drawRtsRoundRect(ctx, field.x - tw / 2 - 8, labelY - 14, tw + 16, 20, 4);
+  ctx.fill();
+  ctx.stroke();
+
+  // Small reserve bar
+  ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
+  ctx.fillRect(field.x - tw / 2 - 4, labelY + 7, tw + 8, 4);
+  ctx.fillStyle = pct > 0.3 ? "#f59e0b" : "#ef4444";
+  ctx.fillRect(field.x - tw / 2 - 4, labelY + 7, (tw + 8) * pct, 4);
+
+  ctx.fillStyle = "#ffffff";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(labelText, field.x, labelY - 3);
+  ctx.restore();
+
+  ctx.restore();
+}
+
+function drawRtsSelectionBrackets(c, r) {
+  c.save();
+  c.strokeStyle = "#38bdf8";
+  c.lineWidth = 2.5;
+  const arm = r * 0.35;
+  // Top-left
+  c.beginPath();
+  c.moveTo(-r, -r + arm);
+  c.lineTo(-r, -r);
+  c.lineTo(-r + arm, -r);
+  c.stroke();
+  // Top-right
+  c.beginPath();
+  c.moveTo(r - arm, -r);
+  c.lineTo(r, -r);
+  c.lineTo(r, -r + arm);
+  c.stroke();
+  // Bottom-left
+  c.beginPath();
+  c.moveTo(-r, r - arm);
+  c.lineTo(-r, r);
+  c.lineTo(-r + arm, r);
+  c.stroke();
+  // Bottom-right
+  c.beginPath();
+  c.moveTo(r - arm, r);
+  c.lineTo(r, r);
+  c.lineTo(r, r - arm);
+  c.stroke();
+  c.restore();
+}
+
+function drawWeldingSparks(c, x, y, time) {
+  c.save();
+  const pulse = Math.sin(time / 45);
+  if (pulse > -0.2) {
+    const grad = c.createRadialGradient(x, y, 1, x, y, 14);
+    grad.addColorStop(0, "rgba(255, 255, 255, 0.95)");
+    grad.addColorStop(0.35, "rgba(56, 189, 248, 0.85)");
+    grad.addColorStop(1, "rgba(56, 189, 248, 0)");
+    c.fillStyle = grad;
+    c.beginPath();
+    c.arc(x, y, 14, 0, Math.PI * 2);
+    c.fill();
+
+    for (let i = 0; i < 4; i++) {
+      const angle = (time * 0.015 + i * 1.57) % (Math.PI * 2);
+      const dist = 4 + ((time * 0.08 + i * 9) % 18);
+      const sx = x + Math.cos(angle) * dist;
+      const sy = y + Math.sin(angle) * dist + dist * 0.25;
+      c.fillStyle = i % 2 === 0 ? "#fef08a" : "#67e8f9";
+      c.fillRect(sx - 1, sy - 1, 2, 2);
+    }
+  }
+  c.restore();
+}
+
+function drawRtsBuildProgressBar(c, x, y, prog, label) {
+  const barW = 76;
+  const barH = 7;
+  c.save();
+  // Outer frame
+  c.fillStyle = "rgba(10, 15, 20, 0.92)";
+  c.fillRect(x - barW / 2 - 2, y - 2, barW + 4, barH + 4);
+  c.strokeStyle = "#38bdf8";
+  c.lineWidth = 1;
+  c.strokeRect(x - barW / 2 - 2, y - 2, barW + 4, barH + 4);
+
+  // Background slot
+  c.fillStyle = "#0f172a";
+  c.fillRect(x - barW / 2, y, barW, barH);
+
+  // Cyan progress gradient
+  const grad = c.createLinearGradient(x - barW / 2, y, x + barW / 2, y);
+  grad.addColorStop(0, "#0284c7");
+  grad.addColorStop(0.6, "#38bdf8");
+  grad.addColorStop(1, "#7dd3fc");
+  c.fillStyle = grad;
+  c.fillRect(x - barW / 2, y, barW * Math.max(0, Math.min(1, prog)), barH);
+
+  // Text
+  c.fillStyle = "#f8fafc";
+  c.font = "bold 9px monospace";
+  c.textAlign = "center";
+  c.shadowColor = "#000";
+  c.shadowBlur = 4;
+  c.fillText(`${Math.round(prog * 100)}%`, x, y - 3);
+  c.restore();
+}
+
+function drawRtsBuilding(b, now) {
+  const isSelected = selectedRtsBuilding && selectedRtsBuilding.id === b.id;
+  const fp = b.footprint || 45;
+  const def = RTS_BUILDINGS[b.type] || {};
+
+  ctx.save();
+  ctx.translate(b.x, b.y);
+
+  // 1. Team foundation outline / shadow
+  ctx.save();
+  ctx.fillStyle = "rgba(0, 0, 0, 0.4)";
+  ctx.beginPath();
+  ctx.ellipse(3, 5, fp * 0.75, fp * 0.55, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = b.team === "blue" ? "rgba(56, 189, 248, 0.6)" : "rgba(239, 68, 68, 0.6)";
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, fp * 0.7, fp * 0.5, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+
+  // 2. Building Body
+  const imgKey = `bld_${b.type}`;
+  const img = sprites[imgKey] || sprites[b.type] || (def.sprite ? sprites[def.sprite] : null);
+
+  if (b.buildTimeRemaining > 0) {
+    const totalTime = b.totalBuildTime || def.buildDuration || 4.0;
+    const prog = Math.max(0, Math.min(0.999, 1 - (b.buildTimeRemaining / totalTime)));
+
+    if (b.type.startsWith("turret_")) {
+      // 48-frame turret construction animation
+      const tType = b.type.replace("turret_", "");
+      const sheet = sprites[`tower_${tType}_build`];
+      const finished = sprites[b.type];
+      const s = fp * 1.5;
+      if (sheet && ready(sheet)) {
+        const frameIndex = Math.min(BUILD_ANIM_FRAME_COUNT - 1, Math.floor(prog * BUILD_ANIM_FRAME_COUNT));
+        const col = frameIndex % BUILD_ANIM_COLS;
+        const row = Math.floor(frameIndex / BUILD_ANIM_COLS);
+        const fw = sheet.naturalWidth / BUILD_ANIM_COLS;
+        const fh = sheet.naturalHeight / BUILD_ANIM_ROWS;
+        ctx.drawImage(sheet, col * fw, row * fh, fw, fh, -s / 2, -s / 2, s, s);
+      } else if (ready(finished)) {
+        ctx.globalAlpha = 0.35 + prog * 0.65;
+        ctx.drawImage(finished, -s / 2, -s / 2, s, s);
+      }
+      if (prog > 0.1 && prog < 0.95) {
+        drawWeldingSparks(ctx, 0, -fp * 0.2, now);
+      }
+    } else {
+      // 4-Phase military building construction animation (2x2 sheet)
+      const sheet = sprites[`bld_${b.type}_build`] || sprites[`building_${b.type}_build`];
+      const finished = sprites[`bld_${b.type}`] || sprites[b.type] || (def.sprite ? sprites[def.sprite] : null);
+      const sz = fp * 1.65;
+      const frame = constructionFrame(prog);
+
+      ctx.save();
+      const drawPhase = (phase, alpha) => {
+        if (alpha <= 0) return;
+        ctx.globalAlpha = alpha;
+        if (phase < 4 && sheet && ready(sheet)) {
+          const cw = sheet.naturalWidth / 2;
+          const ch = sheet.naturalHeight / 2;
+          const sx = (phase % 2) * cw;
+          const sy = Math.floor(phase / 2) * ch;
+          ctx.drawImage(sheet, sx, sy, cw, ch, -sz / 2, -sz / 2, sz, sz);
+        } else if (ready(finished)) {
+          ctx.drawImage(finished, -sz / 2, -sz / 2, sz, sz);
+        }
+      };
+
+      drawPhase(frame.from, 1);
+      if (frame.to !== frame.from) drawPhase(frame.to, frame.mix);
+
+      // Active construction effects: holographic grid + sparks
+      ctx.strokeStyle = "rgba(56, 189, 248, 0.75)";
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 4]);
+      ctx.strokeRect(-fp * 0.7, -fp * 0.7, fp * 1.4, fp * 1.4);
+
+      if (prog > 0.1 && prog < 0.95) {
+        drawWeldingSparks(ctx, -sz * 0.18, -sz * 0.1, now);
+        drawWeldingSparks(ctx, sz * 0.18, sz * 0.05, now + 90);
+      }
+      ctx.restore();
+    }
+
+    // Tactical C&C Progress Bar
+    drawRtsBuildProgressBar(ctx, 0, -fp * 0.85 - 14, prog, def.name);
+  } else {
+    // Finished building:
+    if (b.type === "wall") {
+      const sz = 32;
+      if (ready(sprites.bld_wall)) {
+        ctx.drawImage(sprites.bld_wall, -sz / 2, -sz / 2, sz, sz);
+      } else {
+        ctx.fillStyle = "#64748b";
+        ctx.fillRect(-sz / 2, -sz / 2, sz, sz);
+        ctx.strokeStyle = "#334155";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(-sz / 2, -sz / 2, sz, sz);
+      }
+    } else if (b.type.startsWith("turret_")) {
+      const sz = fp * 1.35;
+      const turretImg = sprites[b.type];
+      if (ready(turretImg)) {
+        ctx.save();
+        ctx.rotate(b.turretAngle || 0);
+        ctx.drawImage(turretImg, -sz / 2, -sz / 2, sz, sz);
+        ctx.restore();
+      } else {
+        ctx.fillStyle = b.team === "blue" ? "#1e3a8a" : "#7f1d1d";
+        ctx.beginPath();
+        ctx.arc(0, 0, fp * 0.45, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.save();
+        ctx.rotate(b.turretAngle || 0);
+        ctx.fillStyle = "#94a3b8";
+        ctx.fillRect(0, -3, fp * 0.6, 6);
+        ctx.restore();
+      }
+      if (b.type === "turret_laser" && calculatePowerGrid(state.rtsBuildings, b.team).isLowPower) {
+        ctx.fillStyle = "#ef4444";
+        ctx.font = "bold 11px sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("⚡ OFF", 0, -fp * 0.6);
+      }
+    } else {
+      const sz = fp * 1.5;
+      if (ready(img)) {
+        ctx.drawImage(img, -sz / 2, -sz / 2, sz, sz);
+      } else {
+        ctx.fillStyle = b.team === "blue" ? "#1e293b" : "#450a0a";
+        ctx.fillRect(-sz / 2, -sz / 2, sz, sz);
+        ctx.strokeStyle = b.team === "blue" ? "#38bdf8" : "#f87171";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(-sz / 2, -sz / 2, sz, sz);
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 11px sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText(def.name || b.type, 0, 4);
+      }
+    }
+  }
+
+  // 3. Health bar
+  const barW = Math.max(40, fp * 1.1);
+  const barH = 5;
+  const barY = -fp * 0.85 - 6;
+  const hpPct = Math.max(0, Math.min(1, b.hp / b.maxHp));
+  ctx.fillStyle = "rgba(0, 0, 0, 0.8)";
+  ctx.fillRect(-barW / 2 - 1, barY - 1, barW + 2, barH + 2);
+  ctx.fillStyle = b.team === "blue" ? "#22c55e" : "#ef4444";
+  ctx.fillRect(-barW / 2, barY, barW * hpPct, barH);
+
+  // 4. Production Queue or Research active badge
+  if (b.queue && (b.queue.current || (b.queue.pending && b.queue.pending.length > 0))) {
+    const qCount = (b.queue.current ? 1 : 0) + (b.queue.pending ? b.queue.pending.length : 0);
+    const qPct = b.queue.current ? (b.queue.current.progress / b.queue.current.totalTime) : 0;
+    ctx.save();
+    ctx.fillStyle = "rgba(15, 23, 42, 0.9)";
+    ctx.strokeStyle = "#38bdf8";
+    ctx.lineWidth = 1;
+    drawRtsRoundRect(ctx, -25, barY - 16, 50, 14, 3);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#38bdf8";
+    ctx.fillRect(-23, barY - 5, 46 * Math.max(0, Math.min(1, qPct)), 2);
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 9px monospace";
+    ctx.textAlign = "center";
+    ctx.fillText(`COLA x${qCount}`, 0, barY - 7);
+    ctx.restore();
+  } else if (b.research) {
+    const rPct = b.research.progress / b.research.totalTime;
+    ctx.save();
+    ctx.fillStyle = "rgba(15, 23, 42, 0.9)";
+    ctx.strokeStyle = "#a855f7";
+    ctx.lineWidth = 1;
+    drawRtsRoundRect(ctx, -25, barY - 16, 50, 14, 3);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#a855f7";
+    ctx.fillRect(-23, barY - 5, 46 * Math.max(0, Math.min(1, rPct)), 2);
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 9px monospace";
+    ctx.textAlign = "center";
+    ctx.fillText(`I+D ${Math.round(rPct * 100)}%`, 0, barY - 7);
+    ctx.restore();
+  }
+
+  // 5. Selection brackets if selected
+  if (isSelected) {
+    drawRtsSelectionBrackets(ctx, fp * 0.85);
+  }
+
+  ctx.restore();
+}
+
+function drawRtsUnit(u, now) {
+  // 0. MCV Active Deployment Animation (4 Phases from bld_hq_build.jpg)
+  if (u.type === "mcv" && u.isDeploying) {
+    const prog = Math.max(0, Math.min(0.999, (u.deployProgress || 0) / (u.deployDuration || 3.5)));
+    const sheet = sprites.bld_hq_build;
+    const finished = sprites.bld_hq;
+    const sz = 110;
+    const frame = constructionFrame(prog);
+
+    ctx.save();
+    ctx.translate(u.x, u.y);
+
+    // Foundation shadow
+    ctx.fillStyle = "rgba(0, 0, 0, 0.4)";
+    ctx.beginPath();
+    ctx.ellipse(0, 10, sz * 0.45, sz * 0.3, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    const drawHqPhase = (phase, alpha) => {
+      if (alpha <= 0) return;
+      ctx.globalAlpha = alpha;
+      if (phase < 4 && sheet && ready(sheet)) {
+        const cw = sheet.naturalWidth / 2;
+        const ch = sheet.naturalHeight / 2;
+        const sx = (phase % 2) * cw;
+        const sy = Math.floor(phase / 2) * ch;
+        ctx.drawImage(sheet, sx, sy, cw, ch, -sz / 2, -sz / 2, sz, sz);
+      } else if (ready(finished)) {
+        ctx.drawImage(finished, -sz / 2, -sz / 2, sz, sz);
+      }
+    };
+
+    drawHqPhase(frame.from, 1);
+    if (frame.to !== frame.from) drawHqPhase(frame.to, frame.mix);
+
+    // Welding sparks and deploy holographic beacon
+    if (prog > 0.2 && prog < 0.95) {
+      drawWeldingSparks(ctx, -sz * 0.12, -sz * 0.18, now);
+      drawWeldingSparks(ctx, sz * 0.16, sz * 0.05, now + 80);
+    }
+
+    ctx.strokeStyle = "rgba(56, 189, 248, 0.8)";
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 4]);
+    ctx.strokeRect(-sz * 0.45, -sz * 0.45, sz * 0.9, sz * 0.9);
+    ctx.restore();
+
+    drawRtsBuildProgressBar(ctx, u.x, u.y - sz * 0.5 - 14, prog, "DESPLEGANDO BASE");
+    return;
+  }
+
+  const isSelected = Boolean(u.selected);
+  const img = unitSprite(u.type);
+  const sizeDef = ENEMY_DRAW_SIZES[u.type] || { h: 28, shadowRx: 20, shadowRy: 12 };
+  const h = sizeDef.h || 32;
+  const w = ready(img) ? h * (img.naturalWidth / img.naturalHeight) : h * 1.4;
+
+  ctx.save();
+  ctx.translate(u.x, u.y);
+
+  // 1. Team ground halo
+  ctx.save();
+  ctx.fillStyle = u.team === "blue" ? "rgba(59, 130, 246, 0.28)" : "rgba(239, 68, 68, 0.28)";
+  ctx.beginPath();
+  ctx.ellipse(0, 0, w * 0.65, h * 0.65, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  // 2. Unit Sprite (rotated by u.angle)
+  ctx.save();
+  ctx.rotate(u.angle || 0);
+
+  // Shadow
+  ctx.fillStyle = "rgba(0, 0, 0, 0.35)";
+  ctx.beginPath();
+  ctx.ellipse(2, 3, sizeDef.shadowRx || 16, sizeDef.shadowRy || 10, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  if (ready(img)) {
+    ctx.drawImage(img, -w / 2, -h / 2, w, h);
+  } else {
+    ctx.fillStyle = u.team === "blue" ? "#3b82f6" : "#ef4444";
+    ctx.beginPath();
+    ctx.arc(0, 0, h / 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Harvester Local Specialized Visuals (Rotated with vehicle)
+  if (u.type === "harvester") {
+    const loadPct = Math.max(0, Math.min(1, (u.load || u.cargo || 0) / (u.capacity || 300)));
+
+    // 2a. Rear Cargo Hopper with Physical Glowing Tiberium/Ore Crystals
+    if (loadPct > 0) {
+      const hopX = -w * 0.32;
+      const hopW = w * 0.38;
+      const hopH = h * 0.55;
+      ctx.fillStyle = "rgba(10, 15, 20, 0.9)";
+      ctx.fillRect(hopX - hopW / 2, -hopH / 2, hopW, hopH);
+      ctx.strokeStyle = loadPct >= 0.95 ? "#f59e0b" : "#0284c7";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(hopX - hopW / 2, -hopH / 2, hopW, hopH);
+
+      // Filled crystal ore inside hopper
+      const fillW = hopW * loadPct;
+      const oreGrad = ctx.createLinearGradient(hopX - hopW / 2, 0, hopX - hopW / 2 + fillW, 0);
+      oreGrad.addColorStop(0, "#d97706");
+      oreGrad.addColorStop(0.7, "#fbbf24");
+      oreGrad.addColorStop(1, "#fef08a");
+      ctx.fillStyle = oreGrad;
+      ctx.fillRect(hopX - hopW / 2 + 1, -hopH / 2 + 1, fillW - 2, hopH - 2);
+
+      // Shimmer lines across loaded ore
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.6)";
+      ctx.lineWidth = 1;
+      for (let s = 0; s < Math.floor(loadPct * 4); s++) {
+        const sx = hopX - hopW / 2 + 3 + s * 6;
+        ctx.beginPath();
+        ctx.moveTo(sx, -hopH * 0.35);
+        ctx.lineTo(sx + 3, hopH * 0.35);
+        ctx.stroke();
+      }
+    }
+
+    // 2b. Active Dual Mining Cutting Lasers (state: HARVESTING)
+    if (u.state === "HARVESTING") {
+      const targetDist = 38 + Math.sin(now / 110) * 3;
+      const jitterY = Math.cos(now / 90) * 4;
+      const hitX = w * 0.45 + targetDist;
+      const hitY = jitterY;
+
+      // Dual laser emitters at harvester front mandibles
+      const emitters = [-6, 6];
+      emitters.forEach((ey) => {
+        // Outer glow
+        ctx.save();
+        ctx.strokeStyle = "rgba(56, 189, 248, 0.4)";
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(w * 0.4, ey);
+        ctx.lineTo(hitX, hitY);
+        ctx.stroke();
+
+        // Inner piercing cutting beam
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.moveTo(w * 0.4, ey);
+        ctx.lineTo(hitX, hitY);
+        ctx.stroke();
+
+        // Amber plasma harmonic beam
+        ctx.strokeStyle = "rgba(251, 191, 36, 0.75)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(w * 0.4, ey);
+        ctx.lineTo(hitX, hitY);
+        ctx.stroke();
+        ctx.restore();
+      });
+
+      // Impact cutting flare
+      ctx.save();
+      const flareGrad = ctx.createRadialGradient(hitX, hitY, 1, hitX, hitY, 14);
+      flareGrad.addColorStop(0, "rgba(255, 255, 255, 1)");
+      flareGrad.addColorStop(0.3, "rgba(56, 189, 248, 0.9)");
+      flareGrad.addColorStop(0.7, "rgba(245, 158, 11, 0.6)");
+      flareGrad.addColorStop(1, "rgba(245, 158, 11, 0)");
+      ctx.fillStyle = flareGrad;
+      ctx.beginPath();
+      ctx.arc(hitX, hitY, 14, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Welding & crystal sparks flying off rock
+      drawWeldingSparks(ctx, hitX, hitY, now);
+
+      // Ore suction drift particles towards harvester intake
+      for (let p = 0; p < 4; p++) {
+        const pProg = ((now * 0.08 + p * 25) % 100) / 100; // 0 (rock) to 1 (harvester)
+        const px = hitX - (targetDist * pProg);
+        const py = hitY * (1 - pProg) + (Math.sin(now / 100 + p) * 3);
+        ctx.fillStyle = p % 2 === 0 ? "#fbbf24" : "#38bdf8";
+        ctx.beginPath();
+        ctx.arc(px, py, 1.4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    // 2c. Unloading Magnetic Conduit (state: UNLOADING)
+    if (u.state === "UNLOADING") {
+      ctx.save();
+      // Glowing discharge arcs from rear hopper
+      const pulse = Math.sin(now / 120) * 0.3 + 0.7;
+      ctx.strokeStyle = `rgba(251, 191, 36, ${pulse})`;
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.moveTo(-w * 0.35, 0);
+      ctx.lineTo(-w * 0.85, 0);
+      ctx.stroke();
+      drawWeldingSparks(ctx, -w * 0.45, 0, now);
+      ctx.restore();
+    }
+  }
+  ctx.restore();
+
+  // 3. Selection ring / brackets if selected
+  if (isSelected) {
+    ctx.save();
+    ctx.strokeStyle = "#38bdf8";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, Math.max(w, h) * 0.75, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // 5. Harvester Tactical Cargo Badge
+  if (u.type === "harvester") {
+    const cargoVal = Math.round(u.load || u.cargo || 0);
+    const cap = u.capacity || 300;
+    const loadPct = Math.max(0, Math.min(1, cargoVal / cap));
+    const cBarW = 34;
+    const cBarH = 5;
+    const cBarY = -h * 0.65 - 13;
+
+    ctx.save();
+    ctx.fillStyle = "rgba(10, 15, 20, 0.9)";
+    ctx.fillRect(-cBarW / 2 - 1, cBarY - 1, cBarW + 2, cBarH + 2);
+    ctx.strokeStyle = loadPct >= 0.9 ? "#f59e0b" : "#0284c7";
+    ctx.lineWidth = 0.8;
+    ctx.strokeRect(-cBarW / 2 - 1, cBarY - 1, cBarW + 2, cBarH + 2);
+
+    ctx.fillStyle = loadPct >= 0.9 ? "#fbbf24" : "#38bdf8";
+    ctx.fillRect(-cBarW / 2, cBarY, cBarW * loadPct, cBarH);
+
+    // State text indicator above harvester
+    const stateTag = u.state === "HARVESTING" ? "⛏ EXTRACCIÓN" :
+                     u.state === "TO_REFINERY" ? "🚚 A REFINERÍA" :
+                     u.state === "UNLOADING" ? "⚡ DESCARGANDO" :
+                     u.state === "TO_FIELD" ? "🧭 A MINERAL" : null;
+    if (stateTag) {
+      ctx.font = "bold 9px monospace";
+      ctx.fillStyle = u.state === "HARVESTING" ? "#fbbf24" : "#38bdf8";
+      ctx.textAlign = "center";
+      ctx.fillText(stateTag, 0, cBarY - 4);
+    }
+    ctx.restore();
+  }
+
+  // 6. Health bar
+  const barW = Math.max(24, Math.min(42, w * 0.8));
+  const barH = 4;
+  const barY = -h * 0.65 - 6;
+  const pct = Math.max(0, Math.min(1, u.hp / u.maxHp));
+  ctx.fillStyle = "rgba(0, 0, 0, 0.8)";
+  ctx.fillRect(-barW / 2 - 1, barY - 1, barW + 2, barH + 2);
+  ctx.fillStyle = u.team === "blue" ? "#22c55e" : "#ef4444";
+  ctx.fillRect(-barW / 2, barY, barW * pct, barH);
+
+  ctx.restore();
+}
+
+function drawRtsBuildPreview(x, y, bType) {
+  const def = RTS_BUILDINGS[bType];
+  if (!def) return;
+  const canBuild = canBuildAtLocation(x, y, bType, state.rtsBuildings, state.teams.blue.hq, "blue");
+  const fp = def.footprint || 45;
+
+  ctx.save();
+  ctx.translate(x, y);
+
+  // Footprint ring
+  ctx.fillStyle = canBuild ? "rgba(34, 197, 94, 0.35)" : "rgba(239, 68, 68, 0.35)";
+  ctx.strokeStyle = canBuild ? "#22c55e" : "#ef4444";
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.arc(0, 0, fp, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+
+  // Floating cost & name badge
+  ctx.fillStyle = "rgba(10, 15, 25, 0.9)";
+  ctx.strokeStyle = canBuild ? "#22c55e" : "#ef4444";
+  ctx.lineWidth = 1.5;
+  const badgeText = `${def.name} ($${def.cost})`;
+  ctx.font = "bold 13px 'Trebuchet MS', sans-serif";
+  const tw = ctx.measureText(badgeText).width;
+  drawRtsRoundRect(ctx, -tw / 2 - 8, -fp - 26, tw + 16, 22, 4);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.fillStyle = "#ffffff";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(badgeText, 0, -fp - 15);
+
+  ctx.restore();
+}
+
+function drawMineralFieldBadge(field) {
+  const pct = Math.max(0, Math.min(1, field.reserves / field.maxReserves));
+  ctx.save();
+  const labelY = field.y - field.radius - 14;
+  const labelText = `${field.name}: ${Math.round(field.reserves)} kg`;
+  ctx.font = "bold 12px 'Trebuchet MS', sans-serif";
+  const tw = ctx.measureText(labelText).width;
+  ctx.fillStyle = "rgba(10, 15, 20, 0.88)";
+  ctx.strokeStyle = pct > 0.25 ? "#f59e0b" : "#ef4444";
+  ctx.lineWidth = 1.5;
+  drawRtsRoundRect(ctx, field.x - tw / 2 - 8, labelY - 14, tw + 16, 20, 4);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
+  ctx.fillRect(field.x - tw / 2 - 4, labelY + 7, tw + 8, 4);
+  ctx.fillStyle = pct > 0.3 ? "#f59e0b" : "#ef4444";
+  ctx.fillRect(field.x - tw / 2 - 4, labelY + 7, (tw + 8) * pct, 4);
+
+  ctx.fillStyle = "#ffffff";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(labelText, field.x, labelY - 3);
+  ctx.restore();
+}
+
+function drawRtsUnitOverlays(u) {
+  const isSelected = Boolean(u.selected);
+  const sizeDef = ENEMY_DRAW_SIZES[u.type] || { h: 28 };
+  const h = sizeDef.h || 32;
+  const w = h * 1.4;
+
+  ctx.save();
+  ctx.translate(u.x, u.y);
+
+  if (isSelected) {
+    ctx.strokeStyle = "#38bdf8";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, Math.max(w, h) * 0.75, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  if (u.type === "harvester") {
+    const cargoVal = Math.round(u.load || u.cargo || 0);
+    const cap = u.capacity || 300;
+    const loadPct = Math.max(0, Math.min(1, cargoVal / cap));
+    const cBarW = 34;
+    const cBarH = 5;
+    const cBarY = -h * 0.65 - 13;
+
+    ctx.fillStyle = "rgba(10, 15, 20, 0.9)";
+    ctx.fillRect(-cBarW / 2 - 1, cBarY - 1, cBarW + 2, cBarH + 2);
+    ctx.strokeStyle = loadPct >= 0.9 ? "#f59e0b" : "#0284c7";
+    ctx.lineWidth = 0.8;
+    ctx.strokeRect(-cBarW / 2 - 1, cBarY - 1, cBarW + 2, cBarH + 2);
+
+    ctx.fillStyle = loadPct >= 0.9 ? "#fbbf24" : "#38bdf8";
+    ctx.fillRect(-cBarW / 2, cBarY, cBarW * loadPct, cBarH);
+
+    const stateTag = u.state === "HARVESTING" ? "⛏ EXTRACCIÓN" :
+                     u.state === "TO_REFINERY" ? "🚚 A REFINERÍA" :
+                     u.state === "UNLOADING" ? "⚡ DESCARGANDO" :
+                     u.state === "TO_FIELD" ? "🧭 A MINERAL" : null;
+    if (stateTag) {
+      ctx.font = "bold 9px monospace";
+      ctx.fillStyle = u.state === "HARVESTING" ? "#fbbf24" : "#38bdf8";
+      ctx.textAlign = "center";
+      ctx.fillText(stateTag, 0, cBarY - 4);
+    }
+  }
+
+  // Health bar
+  const barW = Math.max(24, Math.min(42, w * 0.8));
+  const barH = 4;
+  const barY = -h * 0.65 - 6;
+  const pct = Math.max(0, Math.min(1, u.hp / u.maxHp));
+  ctx.fillStyle = "rgba(0, 0, 0, 0.8)";
+  ctx.fillRect(-barW / 2 - 1, barY - 1, barW + 2, barH + 2);
+  ctx.fillStyle = u.team === "blue" ? "#22c55e" : "#ef4444";
+  ctx.fillRect(-barW / 2, barY, barW * pct, barH);
+
+  ctx.restore();
+}
+
+function drawRtsWorld(state, now, overlaysOnly = false) {
+  const fog = state.fog;
+
+  // 1. Mineral Fields: only draw if explored!
+  if (state.mineralFields) {
+    for (const field of state.mineralFields) {
+      if (!fog || isExplored(fog, field.x, field.y)) {
+        if (!overlaysOnly) {
+          drawMineralField(field, now);
+        } else {
+          drawMineralFieldBadge(field);
+        }
+      }
+    }
+  }
+
+  // 2. Build radius rings if placing a building
+  if (selectedBuildType) {
+    const isWind = selectedBuildType === "wind";
+    const isWall = selectedBuildType === "wall";
+    if (!isWind && !isWall) {
+      ctx.save();
+      ctx.strokeStyle = "rgba(56, 189, 248, 0.45)";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([8, 8]);
+      if (state.teams.blue && state.teams.blue.hq) {
+        ctx.beginPath();
+        ctx.arc(state.teams.blue.hq.x, state.teams.blue.hq.y, RTS_CONFIG.buildRadius, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      for (const b of state.rtsBuildings) {
+        if (b.team === "blue" && b.hp > 0) {
+          ctx.beginPath();
+          ctx.arc(b.x, b.y, RTS_CONFIG.buildRadius, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+      }
+      ctx.restore();
+    }
+  }
+
+  // 3. RTS Buildings
+  for (const b of state.rtsBuildings) {
+    if (b.team === "blue" || !fog || isExplored(fog, b.x, b.y)) {
+      if (!overlaysOnly) {
+        drawRtsBuilding(b, now);
+      } else if (b.buildTimeRemaining > 0) {
+        const def = RTS_BUILDINGS[b.type] || {};
+        const totalTime = b.totalBuildTime || def.buildDuration || 4.0;
+        const prog = Math.max(0, Math.min(0.999, 1 - (b.buildTimeRemaining / totalTime)));
+        drawRtsBuildProgressBar(ctx, b.x, b.y - (b.footprint || 45) * 0.85 - 14, prog, def.name || "");
+      }
+    }
+  }
+
+  // 4. RTS Units
+  for (const u of state.rtsUnits) {
+    if (u.team === "blue" || !fog || isVisible(fog, u.x, u.y)) {
+      if (!overlaysOnly) {
+        drawRtsUnit(u, now);
+      } else {
+        drawRtsUnitOverlays(u);
+      }
+    }
+  }
+
+  // 5. Active combat tracers / lasers (only if in sight)
+  if (state.rtsTracers) {
+    for (const tr of state.rtsTracers) {
+      if (!fog || isVisible(fog, tr.x1, tr.y1) || isVisible(fog, tr.x2, tr.y2)) {
+        ctx.save();
+        ctx.strokeStyle = tr.color || "#60a5fa";
+        ctx.lineWidth = tr.width || 2;
+        ctx.globalAlpha = Math.min(1, tr.life * 4);
+        ctx.beginPath();
+        ctx.moveTo(tr.x1, tr.y1);
+        ctx.lineTo(tr.x2, tr.y2);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+  }
+
+  // 6. Draw Fog of War layer over the entire 2048x2048 map!
+  if (fog) {
+    fogLayer.draw(ctx, fog);
+  }
+
+  // 7. Ghost building placement preview (drawn on top of the fog)
+  if (selectedBuildType) {
+    drawRtsBuildPreview(mouseX, mouseY, selectedBuildType);
+  }
+}
+
+function drawRtsRadarMinimap(mapImg, now) {
+  if (!radarCtx) return;
+  const w = 200;
+  const h = 200;
+  const scale = w / 2048;
+
+  radarCtx.clearRect(0, 0, w, h);
+
+  // Tactical background
+  radarCtx.fillStyle = "#05130b";
+  radarCtx.fillRect(0, 0, w, h);
+
+  if (ready(mapImg)) {
+    radarCtx.save();
+    radarCtx.globalAlpha = 0.45;
+    radarCtx.drawImage(mapImg, 0, 0, w, h);
+    radarCtx.restore();
+  }
+
+  // Circular radar grid lines
+  radarCtx.save();
+  radarCtx.strokeStyle = "rgba(34, 197, 94, 0.25)";
+  radarCtx.lineWidth = 1;
+  for (const r of [35, 68, 95]) {
+    radarCtx.beginPath();
+    radarCtx.arc(100, 100, r, 0, Math.PI * 2);
+    radarCtx.stroke();
+  }
+  radarCtx.beginPath();
+  radarCtx.moveTo(100, 5); radarCtx.lineTo(100, 195);
+  radarCtx.moveTo(5, 100); radarCtx.lineTo(195, 100);
+  radarCtx.stroke();
+  radarCtx.restore();
+
+  // Rotating Radar sweep
+  radarCtx.save();
+  const sweepAngle = (now / 2000) % (Math.PI * 2);
+  const grad = radarCtx.createRadialGradient(100, 100, 5, 100, 100, 98);
+  grad.addColorStop(0, "rgba(34, 197, 94, 0.35)");
+  grad.addColorStop(1, "rgba(34, 197, 94, 0)");
+  radarCtx.fillStyle = grad;
+  radarCtx.beginPath();
+  radarCtx.moveTo(100, 100);
+  radarCtx.arc(100, 100, 96, sweepAngle - 0.5, sweepAngle);
+  radarCtx.closePath();
+  radarCtx.fill();
+
+  radarCtx.strokeStyle = "rgba(74, 222, 128, 0.85)";
+  radarCtx.lineWidth = 1.5;
+  radarCtx.beginPath();
+  radarCtx.moveTo(100, 100);
+  radarCtx.lineTo(100 + Math.cos(sweepAngle) * 96, 100 + Math.sin(sweepAngle) * 96);
+  radarCtx.stroke();
+  radarCtx.restore();
+
+  // Mineral fields (glowing amber) - ONLY IF EXPLORED
+  if (state.mineralFields) {
+    radarCtx.fillStyle = "#fbbf24";
+    for (const f of state.mineralFields) {
+      if (f.reserves > 0 && (!state.fog || isExplored(state.fog, f.x, f.y))) {
+        radarCtx.beginPath();
+        radarCtx.arc(f.x * scale, f.y * scale, 4.5, 0, Math.PI * 2);
+        radarCtx.fill();
+      }
+    }
+  }
+
+  // Buildings (blue vs red squares) - enemy buildings only if explored
+  for (const b of state.rtsBuildings) {
+    if (b.hp <= 0) continue;
+    if (b.team !== "blue" && state.fog && !isExplored(state.fog, b.x, b.y)) continue;
+    radarCtx.fillStyle = b.team === "blue" ? "#38bdf8" : "#ef4444";
+    const sz = b.type === "hq" ? 6 : 4;
+    radarCtx.fillRect(b.x * scale - sz / 2, b.y * scale - sz / 2, sz, sz);
+  }
+
+  // Units (blue vs red dots) - enemy units ONLY if currently in sight!
+  for (const u of state.rtsUnits) {
+    if (u.hp <= 0) continue;
+    if (u.team !== "blue" && state.fog && !isVisible(state.fog, u.x, u.y)) continue;
+    radarCtx.fillStyle = u.team === "blue" ? "#60a5fa" : "#f87171";
+    radarCtx.beginPath();
+    radarCtx.arc(u.x * scale, u.y * scale, 2.5, 0, Math.PI * 2);
+    radarCtx.fill();
+  }
+
+  // Radar Fog overlay (blacks out unexplored, dims explored-out-of-sight)
+  if (state.fog && fogLayer.canvas()) {
+    radarCtx.save();
+    radarCtx.imageSmoothingEnabled = true;
+    radarCtx.drawImage(fogLayer.canvas(), 0, 0, w, h);
+    radarCtx.restore();
+  }
+
+  // Viewport camera window
+  const vx = camera.x * scale;
+  const vy = camera.y * scale;
+  const vw = (CANVAS_WIDTH / zoom) * scale;
+  const vh = (CANVAS_HEIGHT / zoom) * scale;
+  radarCtx.strokeStyle = "rgba(255, 255, 255, 0.85)";
+  radarCtx.lineWidth = 1.5;
+  radarCtx.strokeRect(vx, vy, vw, vh);
+
+  // Outer bezel border
+  radarCtx.strokeStyle = "rgba(34, 197, 94, 0.75)";
+  radarCtx.lineWidth = 2;
+  radarCtx.strokeRect(1, 1, w - 2, h - 2);
+}
+
+function updateRtsPanels() {
+  if (!state.isRts) return;
+  if (selectedRtsBuilding && (selectedRtsBuilding.hp <= 0 || !state.rtsBuildings.some((b) => b.id === selectedRtsBuilding.id))) {
+    selectedRtsBuilding = null;
+    rtsUI.closeBuildingContext();
+  }
+  rtsUI.update(state);
+  const currentMapImage = mapImages[state.level] || mapImages[3] || mapImages[1];
+  drawRtsRadarMinimap(currentMapImage, performance.now());
 }
 
 // The minimap of an attack: fogged, with the defence the attacker knows
@@ -2661,39 +4170,47 @@ function loop(now) {
 
   const { w: worldW, h: worldH } = worldSize(state.level);
   const currentMapImage = mapImages[state.level] || mapImages[1];
-  if (ready(currentMapImage)) {
-    drawMap(ctx, currentMapImage, worldW, worldH);
+
+  if (state.isRts && mode3D) {
+    if (rts3DRenderer) rts3DRenderer.update(dt, now);
+    drawRtsWorld(state, now, true); // Overlays only: 3D scene renders underneath on WebGL
   } else {
-    ctx.fillStyle = "#3a4a2f";
-    ctx.fillRect(0, 0, worldW, worldH);
-  }
-  // Per user request: the red route line is no longer drawn for the
-  // player. PATH itself is untouched -- vehicles (buggy/tank/motorcycle/
-  // rocket) still follow it exactly via simulate.js/enemy.js, this only
-  // removes the visual debug overlay.
-  const view = drawnView(now);
-  // Effects freeze with the game when it's paused.
-  if (!state.paused) stepEffects(fx, view, dt);
-  drawGroundEffects(fx, ctx, wreckSprite);
-  if (commanding()) {
-    drawAttackWorld(view, now);
-  } else {
-    drawWalls(view.walls || []);
-    // The support buildings (buildings.js) -- none in any mode yet.
-    drawBuildings(state.buildings || []);
-    for (const t of view.towers) drawTower(t);
-    for (const e of view.enemies) drawEnemy(e);
-    drawForeground(state.level);
-    // Over the foreground: a rocket truck shelling from behind a skyscraper
-    // still shows where it's firing from.
-    for (const e of view.enemies) if (e.holding) drawSiegeDesignator(e);
-    for (const p of view.projectiles) drawProjectile(p);
-    for (const bm of view.beams) drawBeam(bm);
-    for (const ex of view.explosions) drawExplosion(ex);
-    drawAirEffects(fx, ctx);
+    if (ready(currentMapImage)) {
+      drawMap(ctx, currentMapImage, worldW, worldH);
+    } else {
+      ctx.fillStyle = "#3a4a2f";
+      ctx.fillRect(0, 0, worldW, worldH);
+    }
+    // Per user request: the red route line is no longer drawn for the
+    // player. PATH itself is untouched -- vehicles (buggy/tank/motorcycle/
+    // rocket) still follow it exactly via simulate.js/enemy.js, this only
+    // removes the visual debug overlay.
+    const view = drawnView(now);
+    // Effects freeze with the game when it's paused.
+    if (!state.paused) stepEffects(fx, view, dt);
+    drawGroundEffects(fx, ctx, wreckSprite);
+    if (state.isRts) {
+      drawRtsWorld(state, now, false);
+    } else if (commanding()) {
+      drawAttackWorld(view, now);
+    } else {
+      drawWalls(view.walls || []);
+      // The support buildings (buildings.js) -- none in any mode yet.
+      drawBuildings(state.buildings || []);
+      for (const t of view.towers) drawTower(t);
+      for (const e of view.enemies) drawEnemy(e);
+      drawForeground(state.level);
+      // Over the foreground: a rocket truck shelling from behind a skyscraper
+      // still shows where it's firing from.
+      for (const e of view.enemies) if (e.holding) drawSiegeDesignator(e);
+      for (const p of view.projectiles) drawProjectile(p);
+      for (const bm of view.beams) drawBeam(bm);
+      for (const ex of view.explosions) drawExplosion(ex);
+      drawAirEffects(fx, ctx);
+    }
   }
 
-  if (selectedBuildType) {
+  if (selectedBuildType && !state.isRts) {
     // A slot-based level (levels.js's buildSlots) only allows building at
     // fixed points -- show every unoccupied one faintly while placing so
     // it's clear where those are at a glance, not just wherever the mouse
@@ -2762,21 +4279,24 @@ function loop(now) {
   if (dragBox) drawSelectionBox(ctx, dragBox);
 
   const mini = currentMinimap();
-  if (mini && commanding()) {
-    drawMinimap(ctx, mini, attackMinimap(view, currentMapImage));
-  } else if (mini) {
-    drawMinimap(ctx, mini, {
-      mapImage: ready(currentMapImage) ? currentMapImage : null,
-      enemies: view.enemies,
-      towers: view.towers,
-      walls: view.walls || [],
-      base: attacking() ? attackMapOf(levelData(state.level)).base : levelData(state.level).soldierExit,
-      view: { camera, w: CANVAS_WIDTH / zoom, h: CANVAS_HEIGHT / zoom },
-    });
+  if (!state.isRts) {
+    if (mini && commanding()) {
+      drawMinimap(ctx, mini, attackMinimap(view, currentMapImage));
+    } else if (mini) {
+      drawMinimap(ctx, mini, {
+        mapImage: ready(currentMapImage) ? currentMapImage : null,
+        enemies: view.enemies,
+        towers: view.towers,
+        walls: view.walls || [],
+        base: attacking() ? attackMapOf(levelData(state.level)).base : levelData(state.level).soldierExit,
+        view: { camera, w: CANVAS_WIDTH / zoom, h: CANVAS_HEIGHT / zoom },
+      });
+    }
   }
 
   drawHud();
-  if (commanding()) updateAttackPanels();
+  if (state.isRts) updateRtsPanels();
+  else if (commanding()) updateAttackPanels();
   else updateDefencePanels();
 
   pauseBtn.textContent = state.paused ? "▶" : "⏸";
@@ -2784,6 +4304,15 @@ function loop(now) {
   pauseBtn.classList.toggle("active", state.paused);
 
   requestAnimationFrame(loop);
+}
+
+if (typeof window !== "undefined") {
+  window.__gameState = () => state;
+  window.__rtsUI = () => rtsUI;
+  window.__startNewGame = (lvl, opts) => startNewGame(lvl, opts);
+  window.__handleClick = (x, y) => handleClick({ x, y });
+  window.__camera = () => camera;
+  window.__zoom = () => zoom;
 }
 
 boot();

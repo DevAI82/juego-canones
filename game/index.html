@@ -73,10 +73,28 @@
                 <span class="menu-choice-name">Atacar</span>
                 <span class="menu-choice-desc">Forma un ejército y rompe la base</span>
               </button>
+              <button class="menu-choice" data-mode="rts">
+                <span class="menu-choice-name">⭐ RTS (Estrategia C&C)</span>
+                <span class="menu-choice-desc">Base viva, VCM, cosechadoras, energía y ejército</span>
+              </button>
               <!-- At home (server.js) only: one computer defends, another attacks. -->
               <button class="menu-choice hidden" data-mode="versus">
                 <span class="menu-choice-name">Uno contra otro</span>
                 <span class="menu-choice-desc">Un ordenador defiende y otro ataca</span>
+              </button>
+            </div>
+            <button class="menu-back">Volver</button>
+          </div>
+          <div class="menu-screen hidden" data-screen="rts-mode">
+            <div class="menu-subtitle">Elige modalidad RTS</div>
+            <div class="menu-choices">
+              <button class="menu-choice" data-rts-submode="campaign">
+                <span class="menu-choice-name">⚔️ Campaña / Escaramuza (PC)</span>
+                <span class="menu-choice-desc">Base vs Base. Microgestión con ratón. Aniquila al rival.</span>
+              </button>
+              <button class="menu-choice" data-rts-submode="survival">
+                <span class="menu-choice-name">🛡️ Supervivencia (Móvil)</span>
+                <span class="menu-choice-desc">Resiste 20 oleadas. Defensa autónoma y zoom táctil.</span>
               </button>
             </div>
             <button class="menu-back">Volver</button>
@@ -265,22 +283,53 @@
         </div>
       </div>
     </div>
+    <!-- On-screen D-pad directly over the map -->
+    <div id="nav-controls">
+      <button id="nav-up" class="nav-btn nav-up" title="Desplazar arriba">▲</button>
+      <button id="nav-left" class="nav-btn nav-left" title="Desplazar a la izquierda">◀</button>
+      <button id="nav-right" class="nav-btn nav-right" title="Desplazar a la derecha">▶</button>
+      <button id="nav-down" class="nav-btn nav-down" title="Desplazar abajo">▼</button>
+    </div>
   </div>
   <!-- Outside #game-viewport so position:fixed is relative to window viewport -->
   <div id="build-menu"></div>
   <div id="attack-shop" class="hidden"></div>
+  <aside id="cnc-sidebar" class="hidden">
+    <header class="cnc-header">
+      <div class="cnc-credits-box">
+        <span class="cnc-label">CRÉDITOS</span>
+        <span id="cnc-credits-val" class="cnc-digital">$ 1,200</span>
+      </div>
+      <div class="cnc-power-container" title="Balance de Energía">
+        <div class="cnc-power-header">
+          <span class="cnc-power-label">ENERGÍA</span>
+          <span id="cnc-power-status" class="cnc-power-text">0 / 0</span>
+        </div>
+        <div class="cnc-power-bar-track">
+          <div id="cnc-power-fill" class="cnc-power-bar-fill"></div>
+        </div>
+      </div>
+    </header>
+    <nav class="cnc-tabs">
+      <button class="cnc-tab-btn active" data-tab="base" title="Edificios de Base">🏗️ Base</button>
+      <button class="cnc-tab-btn" data-tab="defenses" title="Defensas">🛡️ Defensas</button>
+      <button class="cnc-tab-btn" data-tab="infantry" title="Infantería">🎖️ Soldados</button>
+      <button class="cnc-tab-btn" data-tab="vehicles" title="Blindados">🚜 Vehículos</button>
+    </nav>
+    <section id="cnc-production-grid" class="cnc-grid"></section>
+    <footer class="cnc-minimap-wrapper">
+      <div class="cnc-radar-header">RADAR TÁCTICO</div>
+      <div id="cnc-radar-mount"></div>
+    </footer>
+  </aside>
+  <!-- RTS Contextual Panel when clicking Base, Barracks, Factory, or Tech Lab -->
+  <section id="rts-context-panel" class="hidden"></section>
   <div id="top-controls">
+    <button id="mode-3d-btn" class="top-control-btn" title="Alternar entre Gráficos 3D (WebGL) y 2D">🎮 3D</button>
     <button id="stats-btn" title="Ranking y Estadísticas">🏆</button>
     <button id="mute-btn" title="Silenciar sonido">🔊</button>
     <button id="pause-btn" title="Pausar">⏸</button>
     <button id="menu-btn" title="Menú (Esc)">☰</button>
-  </div>
-  <!-- On-screen D-pad -->
-  <div id="nav-controls">
-    <button id="nav-up" class="nav-btn nav-up" title="Desplazar arriba">▲</button>
-    <button id="nav-left" class="nav-btn nav-left" title="Desplazar a la izquierda">◀</button>
-    <button id="nav-right" class="nav-btn nav-right" title="Desplazar a la derecha">▶</button>
-    <button id="nav-down" class="nav-btn nav-down" title="Desplazar abajo">▼</button>
   </div>
   <script type="module" src="js/main.js"></script>
 </body>

@@ -42,6 +42,10 @@ export function describeSave(summary) {
     const difficulty = DIFFICULTY_NAMES[summary.difficulty] || DIFFICULTY_NAMES.normal;
     return `Ataque · Nivel ${summary.level} · Ronda ${summary.round} · ${difficulty} · ❤ ${summary.lives} · $${summary.money}${date}`;
   }
+  if (summary.mode === "rts") {
+    const submodeName = summary.submode === "survival" ? "Supervivencia" : "Campaña";
+    return `RTS · ${submodeName} · Mapa ${summary.level} · $${summary.credits || 0}${date}`;
+  }
   return `Defensa · Nivel ${summary.level} · Oleada ${summary.wave} · ❤ ${summary.lives} · $${summary.money}${date}`;
 }
 
@@ -293,7 +297,15 @@ export function createMenu(root, handlers) {
     const modeBtn = target.closest("[data-mode]");
     if (modeBtn) {
       chosenMode = modeBtn.dataset.mode;
+      if (chosenMode === "rts") {
+        return show("rts-mode");
+      }
       return show("levels");
+    }
+    const rtsSubmodeBtn = target.closest("[data-rts-submode]");
+    if (rtsSubmodeBtn) {
+      const submode = rtsSubmodeBtn.dataset.rtsSubmode;
+      return chooseLevel(3, { mode: "rts", submode });
     }
     const levelBtn = target.closest(".start-level-btn");
     if (levelBtn) {
