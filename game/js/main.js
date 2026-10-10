@@ -73,6 +73,9 @@ import {
   enqueueUnit,
   cancelQueueItem,
   startResearch,
+  repairRtsBuilding,
+  sellRtsBuilding,
+  getRtsRepairCost,
 } from "./rts.js";
 import { createRts3DRenderer } from "./renderer3d.js";
 
@@ -1746,16 +1749,115 @@ const rtsUI = createRtsUI(cncSidebarEl, rtsContextPanelEl, {
     const res = startResearch(techLab, upgradeKey, state.teams.blue);
     if (!res.ok) {
       if (res.reason === "insufficient-credits") showToast("Créditos insuficientes para investigar");
+      else if (res.reason === "already-researching") showToast("Ya hay una investigación en curso en este laboratorio");
       else showToast("No se puede investigar en este momento");
     } else {
       playSound("upgrade");
       showToast("Investigando: " + RTS_RESEARCH_UPGRADES[upgradeKey].name);
+      rtsUI.refreshTechLab(techLab, state);
+    }
+  },
+  onRepairBuilding: (building) => {
+    if (!state.isRts || state.winner) return;
+    const res = repairRtsBuilding(building, state.teams.blue);
+    if (!res.ok) {
+      if (res.reason === "already-full") showToast("El edificio ya está reparado al 100%");
+      else if (res.reason === "insufficient-credits") showToast("Créditos insuficientes para reparar ($" + res.cost + ")");
+      else showToast("No se puede reparar");
+    } else {
+      playSound("upgrade");
+      const name = RTS_BUILDINGS[building.type] ? RTS_BUILDINGS[building.type].name : "Edificio";
+      showToast(name + " reparado al 100% (-$" + res.cost + ")");
+      rtsUI.refreshCurrentPanel();
+    }
+  },
+  onSellBuilding: (building) => {
+    if (!state.isRts || state.winner) return;
+    const name = RTS_BUILDINGS[building.type] ? RTS_BUILDINGS[building.type].name : "Edificio";
+    const res = sellRtsBuilding(building, state, state.teams.blue);
+    if (res.ok) {
+      playSound("sell");
+      showToast(name + " desmantelado (+$" + res.refund + " créditos)");
+      selectedRtsBuilding = null;
+      rtsUI.closeBuildingContext();
     }
   },
   onDeselectBuilding: () => {
     selectedRtsBuilding = null;
   },
 });
+
+// Setup RTS global research completion listener
+state.onRtsResearchComplete = (team, key, lvl) => {
+  if (team === "blue") {
+    playSound("upgrade");
+    const uDef = RTS_RESEARCH_UPGRADES[key];
+    showToast(`¡Investigación completada! ${uDef ? uDef.name : key} (Nivel ${lvl}/5)`);
+    if (selectedRtsBuilding && selectedRtsBuilding.type === "techlab") {
+      rtsUI.refreshTechLab(selectedRtsBuilding, state);
+    }
+  }
+};
+
+// Tactical Repair & Sell tools in CNC Sidebar
+let isRtsRepairMode = false;
+let isRtsSellMode = false;
+const cncRepairBtn = document.getElementById("cnc-repair-tool-btn");
+const cncSellBtn = document.getElementById("cnc-sell-tool-btn");
+
+function setRtsRepairMode(active) {
+  isRtsRepairMode = active;
+  if (isRtsRepairMode) isRtsSellMode = false;
+  if (cncRepairBtn) cncRepairBtn.classList.toggle("active", isRtsRepairMode);
+  if (cncSellBtn) cncSellBtn.classList.toggle("active", isRtsSellMode);
+  if (isRtsRepairMode) showToast("MODO REPARACIÓN: Haz clic en una torreta o edificio dañado");
+}
+
+function setRtsSellMode(active) {
+  isRtsSellMode = active;
+  if (isRtsSellMode) isRtsRepairMode = false;
+  if (cncSellBtn) cncSellBtn.classList.toggle("active", isRtsSellMode);
+  if (cncRepairBtn) cncRepairBtn.classList.toggle("active", isRtsRepairMode);
+  if (isRtsSellMode) showToast("MODO VENDER: Haz clic en un edificio para desmantelarlo (50% reembolso)");
+}
+
+if (cncRepairBtn) {
+  cncRepairBtn.addEventListener("click", () => {
+    if (!state.isRts) return;
+    if (selectedRtsBuilding && selectedRtsBuilding.hp < selectedRtsBuilding.maxHp) {
+      const res = repairRtsBuilding(selectedRtsBuilding, state.teams.blue);
+      if (res.ok) {
+        playSound("upgrade");
+        const name = RTS_BUILDINGS[selectedRtsBuilding.type] ? RTS_BUILDINGS[selectedRtsBuilding.type].name : "Edificio";
+        showToast(name + " reparado al 100% (-$" + res.cost + ")");
+        rtsUI.refreshCurrentPanel();
+      } else {
+        playSound("error");
+        showToast("Créditos insuficientes para reparar");
+      }
+    } else {
+      setRtsRepairMode(!isRtsRepairMode);
+    }
+  });
+}
+
+if (cncSellBtn) {
+  cncSellBtn.addEventListener("click", () => {
+    if (!state.isRts) return;
+    if (selectedRtsBuilding) {
+      const name = RTS_BUILDINGS[selectedRtsBuilding.type] ? RTS_BUILDINGS[selectedRtsBuilding.type].name : "Edificio";
+      const res = sellRtsBuilding(selectedRtsBuilding, state, state.teams.blue);
+      if (res.ok) {
+        playSound("sell");
+        showToast(name + " desmantelado (+$" + res.refund + " créditos)");
+        selectedRtsBuilding = null;
+        rtsUI.closeBuildingContext();
+      }
+    } else {
+      setRtsSellMode(!isRtsSellMode);
+    }
+  });
+}
 
 // Radar canvas setup inside #cnc-radar-mount
 const radarMountEl = document.getElementById("cnc-radar-mount");
@@ -2263,6 +2365,106 @@ function worldPos(evt) {
   };
 }
 
+let rtsDragBox = null;
+let rtsRightPan = null;
+let lastUnitClickTime = 0;
+let lastUnitClickId = null;
+
+function handleRtsRightClick(pos) {
+  const selectedBlueUnits = state.rtsUnits.filter((u) => u.team === "blue" && u.selected && u.hp > 0);
+  if (selectedBlueUnits.length === 0) return;
+
+  // Check if clicked on enemy unit or enemy building -> attack order!
+  const clickedEnemy = state.rtsUnits.find((u) => u.team !== "blue" && u.hp > 0 && Math.hypot(u.x - pos.x, u.y - pos.y) <= 35) ||
+                       state.rtsBuildings.find((b) => b.team !== "blue" && b.hp > 0 && Math.hypot(b.x - pos.x, b.y - pos.y) <= (b.footprint || 45));
+  if (clickedEnemy) {
+    for (const u of selectedBlueUnits) {
+      if (u.damage > 0) {
+        u.targetEnemyId = clickedEnemy.id;
+        u.targetX = undefined;
+        u.targetY = undefined;
+        u.state = "ATTACKING";
+      }
+    }
+    playSound("click");
+    showToast("¡Atacando objetivo enemigo!");
+    return;
+  }
+
+  // Check if clicked on mineral field with harvesters
+  const clickedField = state.mineralFields && state.mineralFields.find((f) => Math.hypot(f.x - pos.x, f.y - pos.y) <= f.radius);
+  if (clickedField) {
+    let sentHarvester = false;
+    for (const u of selectedBlueUnits) {
+      if (u.type === "harvester") {
+        u.targetFieldId = clickedField.id;
+        u.state = "TO_FIELD";
+        sentHarvester = true;
+      }
+    }
+    if (sentHarvester) {
+      playSound("click");
+      showToast("Cosechadora enviada a " + clickedField.name);
+      return;
+    }
+  }
+
+  // Right-click ground -> Move units in clean formation (36px grid spacing)
+  const count = selectedBlueUnits.length;
+  const cols = Math.ceil(Math.sqrt(count * 1.5));
+  for (let i = 0; i < count; i++) {
+    const u = selectedBlueUnits[i];
+    u.order = "move";
+    u.orderTarget = null;
+    u.targetEnemyId = null;
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const offsetX = (col - (cols - 1) / 2) * 36;
+    const offsetY = (row - Math.floor(count / cols) / 2) * 36;
+    u.targetX = Math.round(pos.x + offsetX);
+    u.targetY = Math.round(pos.y + offsetY);
+    u.state = "MOVING";
+  }
+  playSound("click");
+  showToast("Moviendo unidades...");
+}
+
+function handleRtsRepairClick(pos) {
+  const clickedBld = state.rtsBuildings.find(
+    (b) => b.team === "blue" && Math.hypot(b.x - pos.x, b.y - pos.y) <= (b.footprint || 45)
+  );
+  if (!clickedBld) return;
+  const res = repairRtsBuilding(clickedBld, state.teams.blue);
+  if (res.ok) {
+    playSound("upgrade");
+    const name = RTS_BUILDINGS[clickedBld.type] ? RTS_BUILDINGS[clickedBld.type].name : "Edificio";
+    showToast(name + " reparado al 100% (-$" + res.cost + ")");
+    rtsUI.refreshCurrentPanel();
+  } else if (res.reason === "already-full") {
+    showToast("Esta estructura ya está al 100% de integridad");
+  } else if (res.reason === "insufficient-credits") {
+    playSound("error");
+    showToast("Créditos insuficientes para reparar ($" + res.cost + ")");
+  }
+}
+
+function handleRtsSellClick(pos) {
+  const clickedBld = state.rtsBuildings.find(
+    (b) => b.team === "blue" && Math.hypot(b.x - pos.x, b.y - pos.y) <= (b.footprint || 45)
+  );
+  if (!clickedBld) return;
+  const name = RTS_BUILDINGS[clickedBld.type] ? RTS_BUILDINGS[clickedBld.type].name : "Edificio";
+  const res = sellRtsBuilding(clickedBld, state, state.teams.blue);
+  if (res.ok) {
+    playSound("sell");
+    showToast(name + " desmantelado (+$" + res.refund + " créditos)");
+    if (selectedRtsBuilding && selectedRtsBuilding.id === clickedBld.id) {
+      selectedRtsBuilding = null;
+      rtsUI.closeBuildingContext();
+    }
+  }
+}
+
 function handleClick(pos) {
   if (state.gameOver || state.win || state.levelComplete) return;
 
@@ -2288,7 +2490,7 @@ function handleClick(pos) {
         return;
       }
       state.teams.blue.credits -= def.cost;
-      const bld = createRtsBuilding(selectedBuildType, pos.x, pos.y, "blue", state.nextId++);
+      const bld = createRtsBuilding(selectedBuildType, pos.x, pos.y, "blue", state.nextId++, state.teams.blue);
       state.rtsBuildings.push(bld);
       playSound("upgrade");
       showToast(def.name + (def.buildDuration === 0 ? " colocado" : " en construcción"));
@@ -2316,17 +2518,32 @@ function handleClick(pos) {
       return;
     }
 
-    // 4. Clicked on friendly unit -> select unit!
-    const clickedFriendlyUnit = state.rtsUnits.find((u) => u.team === "blue" && Math.hypot(u.x - pos.x, u.y - pos.y) <= 32);
+    // 4. Clicked on friendly unit -> select unit! (Double click selects all of same type)
+    const clickedFriendlyUnit = state.rtsUnits.find((u) => u.team === "blue" && u.hp > 0 && Math.hypot(u.x - pos.x, u.y - pos.y) <= 32);
     if (clickedFriendlyUnit) {
       selectedRtsBuilding = null;
       rtsUI.closeBuildingContext();
-      for (const u of state.rtsUnits) {
-        if (u.team === "blue") u.selected = false;
+      const now = performance.now();
+      if (lastUnitClickId === clickedFriendlyUnit.id && now - lastUnitClickTime < 350) {
+        let count = 0;
+        for (const u of state.rtsUnits) {
+          if (u.team === "blue" && u.type === clickedFriendlyUnit.type && u.hp > 0) {
+            u.selected = true;
+            count++;
+          }
+        }
+        playSound("click");
+        showToast(`Todos los ${RTS_UNITS[clickedFriendlyUnit.type].name} seleccionados (${count})`);
+      } else {
+        lastUnitClickId = clickedFriendlyUnit.id;
+        lastUnitClickTime = now;
+        for (const u of state.rtsUnits) {
+          if (u.team === "blue") u.selected = false;
+        }
+        clickedFriendlyUnit.selected = true;
+        playSound("click");
+        showToast(RTS_UNITS[clickedFriendlyUnit.type].name + " seleccionado");
       }
-      clickedFriendlyUnit.selected = true;
-      playSound("click");
-      showToast(RTS_UNITS[clickedFriendlyUnit.type].name + " seleccionado");
       return;
     }
 
@@ -2334,8 +2551,8 @@ function handleClick(pos) {
     const selectedBlueUnits = state.rtsUnits.filter((u) => u.team === "blue" && u.selected);
     if (selectedBlueUnits.length > 0) {
       // Check if clicked on enemy unit or enemy building -> attack order!
-      const clickedEnemy = state.rtsUnits.find((u) => u.team !== "blue" && Math.hypot(u.x - pos.x, u.y - pos.y) <= 35) ||
-                           state.rtsBuildings.find((b) => b.team !== "blue" && Math.hypot(b.x - pos.x, b.y - pos.y) <= (b.footprint || 45));
+      const clickedEnemy = state.rtsUnits.find((u) => u.team !== "blue" && u.hp > 0 && Math.hypot(u.x - pos.x, u.y - pos.y) <= 35) ||
+                           state.rtsBuildings.find((b) => b.team !== "blue" && b.hp > 0 && Math.hypot(b.x - pos.x, b.y - pos.y) <= (b.footprint || 45));
       if (clickedEnemy) {
         for (const u of selectedBlueUnits) {
           if (u.damage > 0) {
@@ -2369,21 +2586,26 @@ function handleClick(pos) {
       }
 
       // Ground click -> Move selected units with tactical formation spread!
-      const N = selectedBlueUnits.length;
-      for (let i = 0; i < N; i++) {
+      const count = selectedBlueUnits.length;
+      const cols = Math.ceil(Math.sqrt(count * 1.5));
+      for (let i = 0; i < count; i++) {
         const u = selectedBlueUnits[i];
-        const ox = (i % 4 - 1.5) * 26;
-        const oy = (Math.floor(i / 4) - 0.5) * 26;
-        u.targetX = pos.x + ox;
-        u.targetY = pos.y + oy;
+        u.order = "move";
+        u.orderTarget = null;
         u.targetEnemyId = null;
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        const offsetX = (col - (cols - 1) / 2) * 36;
+        const offsetY = (row - Math.floor(count / cols) / 2) * 36;
+        u.targetX = Math.round(pos.x + offsetX);
+        u.targetY = Math.round(pos.y + offsetY);
         u.state = "MOVING";
       }
       playSound("click");
       return;
     }
 
-    // 6. Clicked elsewhere -> close contextual panel and deselect
+    // 6. Clicked elsewhere on ground with NO units selected -> close contextual panel and deselect
     selectedRtsBuilding = null;
     rtsUI.closeBuildingContext();
     for (const u of state.rtsUnits) u.selected = false;
@@ -2498,6 +2720,13 @@ const attackControls = createAttackControls({
 // would pick, a crosshair where a click would attack or go into the base.
 let mapCursor = "";
 function updateMapCursor() {
+  if (state.isRts) {
+    const cursor = isRtsRepairMode ? "crosshair" : isRtsSellMode ? "pointer" : "";
+    if (cursor === mapCursor) return;
+    mapCursor = cursor;
+    canvas.style.cursor = cursor;
+    return;
+  }
   const look = commanding() && started && !state.gameOver && !menu.isOpen() ? attackControls.hoverOrder() : null;
   const cursor = look === "pick" ? "pointer" : look === "attack" || look === "enter" ? "crosshair" : "";
   if (cursor === mapCursor) return;
@@ -2612,15 +2841,81 @@ canvas.addEventListener("pointerdown", (evt) => {
     attackControls.pointerDown(evt);
     return;
   }
+  if (state.isRts) {
+    if (evt.button === 2) {
+      // Right-click in RTS
+      if (selectedBuildType) {
+        selectedBuildType = null;
+        playSound("click");
+        return;
+      }
+      if (isRtsRepairMode || isRtsSellMode) {
+        setRtsRepairMode(false);
+        setRtsSellMode(false);
+        playSound("click");
+        return;
+      }
+      const hasSelectedUnits = state.rtsUnits.some((u) => u.team === "blue" && u.selected && u.hp > 0);
+      if (hasSelectedUnits) {
+        handleRtsRightClick(worldPos(evt));
+        return;
+      }
+      // Right-click with NO units selected: start right-drag pan or deselect on release
+      rtsRightPan = {
+        startClientX: evt.clientX,
+        startClientY: evt.clientY,
+        startCamX: camera.x,
+        startCamY: camera.y,
+        moved: false,
+      };
+      return;
+    }
+    if (evt.button === 1) {
+      // Middle click: pan camera
+      rtsRightPan = {
+        startClientX: evt.clientX,
+        startClientY: evt.clientY,
+        startCamX: camera.x,
+        startCamY: camera.y,
+        moved: false,
+      };
+      return;
+    }
+    if (evt.button === 0) {
+      if (selectedBuildType) {
+        handleClick(worldPos(evt));
+        return;
+      }
+      if (isRtsRepairMode) {
+        handleRtsRepairClick(worldPos(evt));
+        return;
+      }
+      if (isRtsSellMode) {
+        handleRtsSellClick(worldPos(evt));
+        return;
+      }
+      const cp = canvasPoint(evt);
+      const wp = worldPos(evt);
+      rtsDragBox = {
+        startX: cp.x,
+        startY: cp.y,
+        curX: cp.x,
+        curY: cp.y,
+        startWorldX: wp.x,
+        startWorldY: wp.y,
+        startClientX: evt.clientX,
+        startClientY: evt.clientY,
+        startCamX: camera.x,
+        startCamY: camera.y,
+        moved: false,
+      };
+      return;
+    }
+  }
   if (evt.button === 2) {
     // Right-click cancels build selection
     if (selectedBuildType) {
       selectedBuildType = null;
-    }
-    if (state.isRts) {
-      selectedRtsBuilding = null;
-      rtsUI.closeBuildingContext();
-      for (const u of state.rtsUnits) u.selected = false;
     }
     return;
   }
@@ -2654,6 +2949,31 @@ canvas.addEventListener("pointermove", (evt) => {
   const pos = worldPos(evt);
   mouseX = pos.x;
   mouseY = pos.y;
+  if (state.isRts) {
+    if (rtsRightPan) {
+      const dxScreen = evt.clientX - rtsRightPan.startClientX;
+      const dyScreen = evt.clientY - rtsRightPan.startClientY;
+      if (!rtsRightPan.moved && Math.hypot(dxScreen, dyScreen) < 6) return;
+      rtsRightPan.moved = true;
+      const rect = canvas.getBoundingClientRect();
+      const scale = CANVAS_WIDTH / rect.width / zoom;
+      camera.x = rtsRightPan.startCamX - dxScreen * scale;
+      camera.y = rtsRightPan.startCamY - dyScreen * scale;
+      clampCamera(state.level);
+      return;
+    }
+    if (rtsDragBox) {
+      const cp = canvasPoint(evt);
+      rtsDragBox.curX = cp.x;
+      rtsDragBox.curY = cp.y;
+      const dx = evt.clientX - rtsDragBox.startClientX;
+      const dy = evt.clientY - rtsDragBox.startClientY;
+      if (!rtsDragBox.moved && Math.hypot(dx, dy) >= 6) {
+        rtsDragBox.moved = true;
+      }
+      return;
+    }
+  }
   if (commanding() && !minimapDragging) {
     attackControls.pointerMove(evt);
     return;
@@ -2685,11 +3005,62 @@ window.addEventListener("pointerup", (evt) => {
     minimapDragging = false;
     wallPaint = null;
     dragState = null;
+    rtsDragBox = null;
+    rtsRightPan = null;
     return;
   }
   const wasOnMinimap = minimapDragging;
   minimapDragging = false;
   wallPaint = null;
+  if (state.isRts) {
+    if (rtsRightPan) {
+      const wasMoved = rtsRightPan.moved;
+      rtsRightPan = null;
+      if (!wasMoved) {
+        selectedRtsBuilding = null;
+        rtsUI.closeBuildingContext();
+        for (const u of state.rtsUnits) {
+          if (u.team === "blue") u.selected = false;
+        }
+      }
+      return;
+    }
+    if (rtsDragBox) {
+      const box = rtsDragBox;
+      rtsDragBox = null;
+      if (box.moved) {
+        // Multi-unit Drag-box selection!
+        const endWp = worldPos(evt);
+        const minX = Math.min(box.startWorldX, endWp.x);
+        const maxX = Math.max(box.startWorldX, endWp.x);
+        const minY = Math.min(box.startWorldY, endWp.y);
+        const maxY = Math.max(box.startWorldY, endWp.y);
+
+        const inside = state.rtsUnits.filter(
+          (u) => u.team === "blue" && u.hp > 0 && u.x >= minX && u.x <= maxX && u.y >= minY && u.y <= maxY
+        );
+        if (!evt.shiftKey) {
+          for (const u of state.rtsUnits) {
+            if (u.team === "blue") u.selected = false;
+          }
+        }
+        for (const u of inside) {
+          u.selected = true;
+        }
+        if (inside.length > 0) {
+          selectedRtsBuilding = null;
+          rtsUI.closeBuildingContext();
+          playSound("click");
+          showToast(`${inside.length} unidades seleccionadas`);
+        }
+        return;
+      } else {
+        // Single left-click without drag
+        handleClick(worldPos(evt));
+        return;
+      }
+    }
+  }
   if (commanding()) {
     if (!wasOnMinimap) attackControls.pointerUp(evt);
     return;
@@ -2767,10 +3138,30 @@ window.addEventListener("keydown", (evt) => {
     return;
   }
   if (key === "escape") {
-    // Esc first lets go of a tower or wall picked to build; otherwise it
-    // opens the pause menu, or (in a menu) goes back a screen.
+    // Esc first lets go of repair/sell mode, build selection, or army selection
+    if (isRtsRepairMode || isRtsSellMode) {
+      setRtsRepairMode(false);
+      setRtsSellMode(false);
+      return;
+    }
     if (selectedBuildType) {
       selectedBuildType = null;
+    } else if (state.isRts) {
+      if (selectedRtsBuilding) {
+        selectedRtsBuilding = null;
+        rtsUI.closeBuildingContext();
+      } else {
+        const hasSelected = state.rtsUnits.some((u) => u.team === "blue" && u.selected);
+        if (hasSelected) {
+          for (const u of state.rtsUnits) {
+            if (u.team === "blue") u.selected = false;
+          }
+        } else if (menu.isOpen()) {
+          menu.back();
+        } else {
+          openPauseMenu();
+        }
+      }
     } else if (!menu.isOpen() && commanding() && attackControls.escape()) {
       // Esc in an attack first lets go of the selected units.
     } else if (menu.isOpen()) {
@@ -2782,13 +3173,57 @@ window.addEventListener("keydown", (evt) => {
   }
   if (menu.isOpen()) return; // no panning or R under a menu
   if (key === "r") {
+    if (state.isRts && !state.gameOver && !state.winner) {
+      if (selectedRtsBuilding && selectedRtsBuilding.hp < selectedRtsBuilding.maxHp) {
+        const res = repairRtsBuilding(selectedRtsBuilding, state.teams.blue);
+        if (res.ok) {
+          playSound("upgrade");
+          const name = RTS_BUILDINGS[selectedRtsBuilding.type] ? RTS_BUILDINGS[selectedRtsBuilding.type].name : "Edificio";
+          showToast(name + " reparado al 100% (-$" + res.cost + ")");
+          rtsUI.refreshCurrentPanel();
+        } else {
+          playSound("error");
+          showToast("Créditos insuficientes para reparar");
+        }
+      } else {
+        setRtsRepairMode(!isRtsRepairMode);
+      }
+      return;
+    }
     if (!state.gameOver && !state.win) return;
-    // Same as the game-end screen's "Jugar de nuevo" -- on to choosing
-    // the next game on the menu rather than silently defaulting to level 1
-    // (or, in networked mode, re-fetching the same still-ended shared
-    // state instead of actually resetting it).
     backToNewGame();
     return;
+  }
+  if (state.isRts) {
+    if (evt.ctrlKey && key === "a") {
+      evt.preventDefault();
+      let count = 0;
+      for (const u of state.rtsUnits) {
+        if (u.team === "blue" && u.hp > 0 && u.type !== "harvester") {
+          u.selected = true;
+          count++;
+        }
+      }
+      if (count > 0) {
+        playSound("click");
+        showToast(`Todo el ejército seleccionado (${count} unidades)`);
+      }
+      return;
+    }
+    if (key === "s") {
+      const selectedBlueUnits = state.rtsUnits.filter((u) => u.team === "blue" && u.selected);
+      if (selectedBlueUnits.length > 0) {
+        for (const u of selectedBlueUnits) {
+          u.targetX = undefined;
+          u.targetY = undefined;
+          u.targetEnemyId = null;
+          u.state = "DEFENDING";
+        }
+        playSound("click");
+        showToast("Unidades detenidas");
+        return;
+      }
+    }
   }
   if (commanding()) {
     if (started && !state.gameOver && attackControls.keyDown(evt)) return;
@@ -4375,7 +4810,11 @@ function loop(now) {
   ctx.restore();
 
   // The box being dragged to select units, over the map in screen space.
-  const dragBox = commanding() ? attackControls.box() : null;
+  const dragBox = commanding()
+    ? attackControls.box()
+    : rtsDragBox && rtsDragBox.moved
+    ? { x0: rtsDragBox.startX, y0: rtsDragBox.startY, x1: rtsDragBox.curX, y1: rtsDragBox.curY }
+    : null;
   if (dragBox) drawSelectionBox(ctx, dragBox);
 
   const mini = currentMinimap();

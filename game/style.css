@@ -2206,6 +2206,233 @@ body.gameend-open #attack-shop { display: none !important; }
   transition: width 0.2s linear;
 }
 
+/* --- RTS Repair & Sell Tactical Controls --- */
+.cnc-actions-bar {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 4px 8px;
+  background: #080d14;
+  border-bottom: 1px solid #1e293b;
+}
+
+.cnc-action-tool-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 4px;
+  background: #111a26;
+  border: 1px solid #334155;
+  border-radius: 4px;
+  color: #cbd5e1;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.cnc-action-tool-btn:hover {
+  background: #1e293b;
+  color: #ffffff;
+  border-color: #38bdf8;
+}
+
+.cnc-action-tool-btn.active {
+  background: #d97706;
+  color: #ffffff;
+  border-color: #fbbf24;
+  box-shadow: 0 0 10px rgba(251, 191, 36, 0.7);
+  animation: pulse-repair 1.5s infinite;
+}
+
+@keyframes pulse-repair {
+  0%, 100% { box-shadow: 0 0 8px rgba(251, 191, 36, 0.6); }
+  50% { box-shadow: 0 0 16px rgba(251, 191, 36, 0.95); }
+}
+
+.rts-context-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rts-action-pill {
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: bold;
+  border-radius: 4px;
+  cursor: pointer;
+  border: 1px solid;
+  transition: all 0.15s ease;
+  font-family: inherit;
+}
+
+.rts-action-pill.repair.active {
+  background: linear-gradient(135deg, #15803d, #166534);
+  border-color: #22c55e;
+  color: #f0fdf4;
+}
+
+.rts-action-pill.repair.active:hover {
+  box-shadow: 0 0 8px rgba(34, 197, 94, 0.7);
+}
+
+.rts-action-pill.repair.disabled {
+  background: #1e293b;
+  border-color: #334155;
+  color: #64748b;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.rts-action-pill.sell {
+  background: linear-gradient(135deg, #b45309, #92400e);
+  border-color: #f59e0b;
+  color: #fffbeb;
+}
+
+.rts-action-pill.sell:hover {
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.7);
+}
+
+.rts-defense-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+}
+
+.rts-def-preview-row {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+
+.rts-def-thumb {
+  width: 64px;
+  height: 64px;
+  background: #090e17;
+  border: 1.5px solid #334155;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.rts-def-details {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rts-hp-bar-box {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rts-hp-text-line {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: bold;
+  color: #94a3b8;
+}
+
+.rts-hp-val {
+  color: #f8fafc;
+}
+
+.rts-hp-bar-track {
+  width: 100%;
+  height: 8px;
+  background: #1e293b;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.rts-hp-bar-fill {
+  height: 100%;
+  transition: width 0.3s ease, background 0.3s ease;
+}
+
+.rts-def-stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 12px;
+  font-size: 11px;
+}
+
+.rts-stat-cell .lbl {
+  color: #94a3b8;
+}
+
+.rts-stat-cell .val {
+  color: #38bdf8;
+  font-weight: bold;
+}
+
+.rts-def-meta-desc {
+  font-size: 11px;
+  color: #94a3b8;
+  line-height: 1.35;
+}
+
+.rts-def-actions-row {
+  display: flex;
+  gap: 10px;
+}
+
+.rts-big-repair-btn, .rts-big-sell-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 12px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: bold;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.rts-big-repair-btn.available {
+  background: linear-gradient(135deg, #15803d, #166534);
+  border: 1.5px solid #22c55e;
+  color: #ffffff;
+}
+
+.rts-big-repair-btn.available:hover {
+  box-shadow: 0 0 12px rgba(34, 197, 94, 0.7);
+  transform: translateY(-1px);
+}
+
+.rts-big-repair-btn.disabled {
+  background: #1e293b;
+  border: 1.5px solid #334155;
+  color: #64748b;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.rts-big-sell-btn {
+  background: linear-gradient(135deg, #9a3412, #7c2d12);
+  border: 1.5px solid #ea580c;
+  color: #ffffff;
+}
+
+.rts-big-sell-btn:hover {
+  box-shadow: 0 0 12px rgba(234, 88, 12, 0.7);
+  transform: translateY(-1px);
+}
+
 /* ==========================================================================
    MOBILE & RESPONSIVE ADAPTATIONS (NO BLACK BARS, MAXIMUM SIZE)
    ========================================================================== */

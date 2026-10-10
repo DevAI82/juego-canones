@@ -9,6 +9,7 @@ import {
   calculatePowerGrid,
   getUnitStatMultipliers,
   getTurretStatMultipliers,
+  getRtsRepairCost,
 } from "./rts.js";
 
 export const SPRITE_ASSETS = {
@@ -59,6 +60,7 @@ export function createRtsUI(sidebarEl, contextPanelEl, handlers) {
   let renderedPanelBuildingId = null;
   let renderedPanelType = null;
   let lastQueueSig = "";
+  let lastTechSig = "";
 
   // 1. Setup Sidebar Tabs
   const tabBtns = sidebarEl ? sidebarEl.querySelectorAll(".cnc-tab-btn") : [];
@@ -330,6 +332,20 @@ export function createRtsUI(sidebarEl, contextPanelEl, handlers) {
         if (handlers.onStartResearch) handlers.onStartResearch(selectedBuilding, uKey);
         return;
       }
+
+      // H. Repair building clicked
+      const repairBtn = evt.target.closest("[data-action='repair-building']");
+      if (repairBtn && selectedBuilding) {
+        if (handlers.onRepairBuilding) handlers.onRepairBuilding(selectedBuilding);
+        return;
+      }
+
+      // I. Sell building clicked
+      const sellBtn = evt.target.closest("[data-action='sell-building']");
+      if (sellBtn && selectedBuilding) {
+        if (handlers.onSellBuilding) handlers.onSellBuilding(selectedBuilding);
+        return;
+      }
     });
   }
 
@@ -339,6 +355,7 @@ export function createRtsUI(sidebarEl, contextPanelEl, handlers) {
     renderedPanelBuildingId = null;
     renderedPanelType = null;
     lastQueueSig = "";
+    lastTechSig = "";
   }
 
   // 4. Render Context Panel Structure (called on open or selection change)
@@ -352,7 +369,13 @@ export function createRtsUI(sidebarEl, contextPanelEl, handlers) {
     contextPanelEl.classList.remove("hidden");
 
     let title = RTS_BUILDINGS[building.type] ? RTS_BUILDINGS[building.type].name : "Edificio";
+    const def = RTS_BUILDINGS[building.type] || {};
+    const team = state && state.teams && state.teams.blue ? state.teams.blue : { credits: 0 };
     const isUnderConstruction = building.buildTimeRemaining > 0;
+    const rCost = getRtsRepairCost(building);
+    const canRepair = rCost > 0 && team.credits >= rCost && !isUnderConstruction;
+    const refund = Math.floor((def.cost || 100) * 0.5);
+
     const statusText = isUnderConstruction
       ? `Construyendo... (${Math.ceil(building.buildTimeRemaining)}s)`
       : `Operativo · ${building.hp}/${building.maxHp} HP`;
@@ -362,6 +385,14 @@ export function createRtsUI(sidebarEl, contextPanelEl, handlers) {
         <div class="rts-context-title-box">
           <span class="rts-context-name">${title}</span>
           <span class="rts-context-status ${isUnderConstruction ? "building" : "ready"}">${statusText}</span>
+        </div>
+        <div class="rts-context-header-actions">
+          <button class="rts-action-pill repair ${canRepair ? "active" : "disabled"}" data-action="repair-building" ${!canRepair ? "disabled" : ""} title="Reparar estructura al 100%">
+            🔧 ${rCost > 0 ? `Reparar ($${rCost})` : `✔ 100%`}
+          </button>
+          <button class="rts-action-pill sell" data-action="sell-building" title="Vender estructura por $${refund} créditos">
+            💲 +$${refund}
+          </button>
         </div>
         <button class="rts-context-close-btn" title="Cerrar panel táctico">✕</button>
       </div>
@@ -463,6 +494,71 @@ export function createRtsUI(sidebarEl, contextPanelEl, handlers) {
           <button class="rts-tech-tab ${activeTechCategory === "turrets" ? "active" : ""}" data-tech-cat="turrets">🛡️ Torretas (5 Niveles)</button>
         </div>
         <div class="rts-context-body rts-tech-body"></div>
+      `;
+    }
+    // 5. DEFENSAS Y EDIFICIOS DE APOYO (Torretas, Murallas, Solar, Molino, Refinería)
+    else {
+      const isTurret = building.type.startsWith("turret_");
+      const isWall = building.type === "wall";
+      const isPower = building.type === "solar" || building.type === "wind";
+      const isRefinery = building.type === "refinery";
+
+      const mults = team.upgrades ? getTurretStatMultipliers(team.upgrades) : { damageMult: 1, rangeMult: 1, fireRateMult: 1 };
+      const baseDmg = building.type === "turret_laser" ? 18 : building.type === "turret_double" ? 22 : 14;
+      const baseRng = building.type === "turret_laser" ? 220 : 180;
+      const baseFr = building.type === "turret_laser" ? 0.3 : building.type === "turret_double" ? 0.6 : 0.9;
+
+      const curDmg = Math.round(baseDmg * mults.damageMult);
+      const curRng = Math.round(baseRng * mults.rangeMult);
+      const curCad = (1 / (baseFr / mults.fireRateMult)).toFixed(1);
+
+      const assetUrl = SPRITE_ASSETS[def.sprite] || "";
+      const hpPct = Math.round((building.hp / building.maxHp) * 100);
+
+      html += `
+        <div class="rts-context-body rts-defense-body">
+          <div class="rts-def-preview-row">
+            <div class="rts-def-thumb">
+              ${assetUrl ? `<img src="${assetUrl}" class="cnc-thumb-img" alt="${def.name}" />` : ""}
+            </div>
+            <div class="rts-def-details">
+              <div class="rts-hp-bar-box">
+                <div class="rts-hp-text-line">
+                  <span>ESTADO DE ESTRUCTURA</span>
+                  <span class="rts-hp-val">${building.hp} / ${building.maxHp} HP (${hpPct}%)</span>
+                </div>
+                <div class="rts-hp-bar-track">
+                  <div class="rts-hp-bar-fill" style="width: ${hpPct}%; background: ${hpPct < 35 ? "#ef4444" : hpPct < 70 ? "#eab308" : "#22c55e"}"></div>
+                </div>
+              </div>
+              ${isTurret ? `
+                <div class="rts-def-stats-grid">
+                  <div class="rts-stat-cell"><span class="lbl">Daño:</span> <span class="val">${curDmg}</span></div>
+                  <div class="rts-stat-cell"><span class="lbl">Alcance:</span> <span class="val">${curRng}m</span></div>
+                  <div class="rts-stat-cell"><span class="lbl">Cadencia:</span> <span class="val">${curCad}/s</span></div>
+                  <div class="rts-stat-cell"><span class="lbl">Munición:</span> <span class="val">Ilimitada</span></div>
+                </div>
+              ` : isPower ? `
+                <div class="rts-def-meta-desc">Genera energía constante para alimentar tu base y defensas láser.</div>
+              ` : isRefinery ? `
+                <div class="rts-def-meta-desc">Procesa mineral traído por cosechadoras (+ $250 por descarga).</div>
+              ` : isWall ? `
+                <div class="rts-def-meta-desc">Barrera física blindada que bloquea el paso de vehículos enemigos.</div>
+              ` : ""}
+            </div>
+          </div>
+
+          <div class="rts-def-actions-row">
+            <button class="rts-big-repair-btn ${canRepair ? "available" : "disabled"}" data-action="repair-building" ${!canRepair ? "disabled" : ""}>
+              <span class="btn-icon">🔧</span>
+              <span class="btn-text">${rCost > 0 ? `REPARAR AHORA ($${rCost})` : "100% SALUD (REPARADO)"}</span>
+            </button>
+            <button class="rts-big-sell-btn" data-action="sell-building">
+              <span class="btn-icon">💲</span>
+              <span class="btn-text">VENDER ($${refund})</span>
+            </button>
+          </div>
+        </div>
       `;
     }
 
@@ -641,14 +737,51 @@ export function createRtsUI(sidebarEl, contextPanelEl, handlers) {
     }
 
     // Tech Lab research progress
-    if (building.type === "techlab" && building.research) {
-      const activeFill = contextPanelEl.querySelector(".rts-research-fill");
-      const activePct = contextPanelEl.querySelector(".rts-research-pct");
-      if (activeFill && activePct) {
-        const pct = Math.min(100, Math.round((building.research.elapsed / building.research.totalTime) * 100));
-        activeFill.style.width = `${pct}%`;
-        activePct.textContent = `${pct}%`;
+    if (building.type === "techlab") {
+      const researchKey = building.research ? building.research.upgradeKey : "idle";
+      const team = state.teams && state.teams.blue ? state.teams.blue : { credits: 0, upgrades: {} };
+      const sig = `${researchKey}|${JSON.stringify(team.upgrades || {})}|${Math.floor(team.credits / 10)}`;
+      if (sig !== lastTechSig) {
+        lastTechSig = sig;
+        renderTechListContent(building, state);
+      } else if (building.research) {
+        const activeFill = contextPanelEl.querySelector(".rts-research-fill");
+        const activePct = contextPanelEl.querySelector(".rts-research-pct");
+        if (activeFill && activePct) {
+          const pct = Math.min(100, Math.round((building.research.elapsed / building.research.totalTime) * 100));
+          activeFill.style.width = `${pct}%`;
+          activePct.textContent = `${pct}%`;
+        }
       }
+    }
+
+    // Dynamic update of Repair buttons & HP bar
+    const team = state.teams && state.teams.blue ? state.teams.blue : { credits: 0 };
+    const rCost = getRtsRepairCost(building);
+    const canRepair = rCost > 0 && team.credits >= rCost && building.buildTimeRemaining <= 0;
+
+    const repairPill = contextPanelEl.querySelector(".rts-action-pill.repair");
+    if (repairPill) {
+      repairPill.textContent = rCost > 0 ? `🔧 Reparar ($${rCost})` : `✔ 100%`;
+      repairPill.disabled = !canRepair;
+      repairPill.className = `rts-action-pill repair ${canRepair ? "active" : "disabled"}`;
+    }
+
+    const bigRepairBtn = contextPanelEl.querySelector(".rts-big-repair-btn");
+    if (bigRepairBtn) {
+      const btnText = bigRepairBtn.querySelector(".btn-text");
+      if (btnText) btnText.textContent = rCost > 0 ? `REPARAR AHORA ($${rCost})` : "100% SALUD (REPARADO)";
+      bigRepairBtn.disabled = !canRepair;
+      bigRepairBtn.className = `rts-big-repair-btn ${canRepair ? "available" : "disabled"}`;
+    }
+
+    const hpValEl = contextPanelEl.querySelector(".rts-hp-val");
+    const hpBarFill = contextPanelEl.querySelector(".rts-hp-bar-fill");
+    if (hpValEl && hpBarFill) {
+      const hpPct = Math.round((building.hp / building.maxHp) * 100);
+      hpValEl.textContent = `${building.hp} / ${building.maxHp} HP (${hpPct}%)`;
+      hpBarFill.style.width = `${hpPct}%`;
+      hpBarFill.style.background = hpPct < 35 ? "#ef4444" : hpPct < 70 ? "#eab308" : "#22c55e";
     }
   }
 
@@ -754,5 +887,16 @@ export function createRtsUI(sidebarEl, contextPanelEl, handlers) {
     closeBuildingContext,
     setTab,
     refreshSidebar: () => renderProductionGrid(lastState),
+    refreshTechLab: (building, state) => {
+      lastTechSig = "";
+      if (selectedBuilding && selectedBuilding.id === building.id && building.type === "techlab") {
+        renderTechListContent(building, state);
+      }
+    },
+    refreshCurrentPanel: () => {
+      if (selectedBuilding && lastState) {
+        renderContextPanelStructure(selectedBuilding, lastState);
+      }
+    },
   };
 }

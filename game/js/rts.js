@@ -824,24 +824,63 @@ export function stepHarvester(h, dt, mineralFields, buildings, teamState) {
 }
 
 // Create an RTS building instance
-export function createRtsBuilding(type, x, y, team, id) {
+export function createRtsBuilding(type, x, y, team, id, teamState) {
   const def = RTS_BUILDINGS[type];
   if (!def) return null;
   const isImmediate = def.buildDuration === 0;
+  let maxHp = def.hp;
+  if (type.startsWith("turret_") && teamState && teamState.upgrades && teamState.upgrades.turretArmor) {
+    maxHp = Math.round(def.hp * (1 + teamState.upgrades.turretArmor * RTS_RESEARCH_UPGRADES.turretArmor.bonusPerLevel));
+  }
   return {
     id,
     team,
     type,
     x,
     y,
-    hp: def.hp,
-    maxHp: def.hp,
+    hp: maxHp,
+    maxHp,
     buildTimeRemaining: isImmediate ? 0 : def.buildDuration,
     totalBuildTime: def.buildDuration,
     harvesterSpawned: false,
     queue: type === "barracks" || type === "factory" ? { current: null, pending: [] } : null,
     research: type === "techlab" ? null : undefined,
   };
+}
+
+// Calculate repair cost for an RTS building or turret
+export function getRtsRepairCost(building) {
+  if (!building || building.hp <= 0 || building.hp >= building.maxHp) return 0;
+  const def = RTS_BUILDINGS[building.type];
+  if (!def) return 0;
+  const missingRatio = (building.maxHp - building.hp) / building.maxHp;
+  return Math.max(1, Math.ceil(def.cost * 0.5 * missingRatio));
+}
+
+// Repair an RTS building or turret to 100% HP
+export function repairRtsBuilding(building, teamState) {
+  if (!building || building.hp <= 0) return { ok: false, reason: "destroyed" };
+  if (building.hp >= building.maxHp) return { ok: false, reason: "already-full" };
+  const cost = getRtsRepairCost(building);
+  if (teamState.credits < cost) return { ok: false, reason: "insufficient-credits", cost };
+  teamState.credits -= cost;
+  building.hp = building.maxHp;
+  return { ok: true, cost, hp: building.hp, credits: teamState.credits };
+}
+
+// Sell / recycle an RTS building or turret (50% refund)
+export function sellRtsBuilding(building, state, teamState) {
+  if (!building || building.hp <= 0) return { ok: false, reason: "destroyed" };
+  const def = RTS_BUILDINGS[building.type];
+  if (!def) return { ok: false, reason: "unknown-building" };
+  const refund = Math.floor(def.cost * 0.5);
+  teamState.credits += refund;
+  state.rtsBuildings = state.rtsBuildings.filter((b) => b.id !== building.id);
+  if (building.type === "hq") {
+    teamState.hasHq = false;
+    teamState.hq = null;
+  }
+  return { ok: true, refund, credits: teamState.credits };
 }
 
 // Production Queue for Barracks (Infantry) & Factory (Vehicles)
@@ -995,7 +1034,7 @@ export function getTurretStatMultipliers(upgrades) {
   };
 }
 
-// Spawn a freshly produced unit from a building
+// Spawn a freshly produced unit from a building with exit spread
 export function spawnRtsUnit(unitType, building, state) {
   const def = RTS_UNITS[unitType];
   if (!def) return null;
@@ -1003,12 +1042,17 @@ export function spawnRtsUnit(unitType, building, state) {
   const teamState = state.teams[team];
   const mults = teamState && teamState.upgrades ? getUnitStatMultipliers(teamState.upgrades) : { hpMult: 1, damageMult: 1, speedMult: 1 };
 
+  const exitDist = (building.footprint || 50) * 0.75 + 20;
+  const angle = Math.PI / 2 + (Math.random() - 0.5) * 1.2;
+  const spawnX = Math.round(building.x + Math.cos(angle) * exitDist);
+  const spawnY = Math.round(building.y + Math.sin(angle) * exitDist);
+
   const unit = {
     id: state.nextId++,
     team,
     type: unitType,
-    x: building.x + (Math.random() - 0.5) * 50,
-    y: building.y + 55,
+    x: spawnX,
+    y: spawnY,
     hp: Math.round(def.hp * mults.hpMult),
     maxHp: Math.round(def.hp * mults.hpMult),
     speed: def.speed * mults.speedMult,
@@ -1025,6 +1069,76 @@ export function spawnRtsUnit(unitType, building, state) {
   };
   state.rtsUnits.push(unit);
   return unit;
+}
+
+// Soft separation physics to prevent units from stacking/overlapping
+export function separateRtsUnits(units, dt, buildings) {
+  const getRadius = (u) => {
+    if (u.type === "soldier") return 12;
+    if (u.type === "motorcycle" || u.type === "buggy") return 18;
+    if (u.type === "tank" || u.type === "rocket") return 26;
+    if (u.type === "harvester" || u.type === "mcv") return 30;
+    return 20;
+  };
+
+  const maxPush = 160 * dt; // Separation speed (px/sec)
+
+  for (let i = 0; i < units.length; i++) {
+    const a = units[i];
+    if (a.hp <= 0) continue;
+    const rA = getRadius(a);
+
+    for (let j = i + 1; j < units.length; j++) {
+      const b = units[j];
+      if (b.hp <= 0) continue;
+      const rB = getRadius(b);
+      const minDist = rA + rB;
+
+      let dx = b.x - a.x;
+      let dy = b.y - a.y;
+      const distSq = dx * dx + dy * dy;
+
+      if (distSq < minDist * minDist) {
+        if (distSq > 0.001) {
+          const dist = Math.sqrt(distSq);
+          const overlap = minDist - dist;
+          const push = Math.min(overlap, maxPush) / 2;
+          const nx = dx / dist;
+          const ny = dy / dist;
+          a.x -= nx * push;
+          a.y -= ny * push;
+          b.x += nx * push;
+          b.y += ny * push;
+        } else {
+          // Exact same point
+          const angle = Math.random() * Math.PI * 2;
+          const push = Math.min(minDist, maxPush) / 2;
+          a.x -= Math.cos(angle) * push;
+          a.y -= Math.sin(angle) * push;
+          b.x += Math.cos(angle) * push;
+          b.y += Math.sin(angle) * push;
+        }
+      }
+    }
+
+    // Push away from buildings if overlapping footprint
+    if (buildings) {
+      for (const bld of buildings) {
+        if (bld.hp <= 0) continue;
+        const bRadius = (bld.footprint || 45) * 0.75;
+        const dx = a.x - bld.x;
+        const dy = a.y - bld.y;
+        const dSq = dx * dx + dy * dy;
+        const reqDist = rA + bRadius;
+        if (dSq < reqDist * reqDist && dSq > 0.001) {
+          const d = Math.sqrt(dSq);
+          const push = Math.min(reqDist - d, maxPush);
+          a.x += (dx / d) * push;
+          a.y += (dy / d) * push;
+        }
+      }
+    }
+  }
 }
 
 // Handle combat between opposing teams and survival waves
@@ -1301,12 +1415,30 @@ export function stepRts(state, dt) {
   for (const b of state.rtsBuildings) {
     if (b.type === "techlab" && b.hp > 0 && b.buildTimeRemaining <= 0 && b.research) {
       const isLowPower = calculatePowerGrid(state.rtsBuildings, b.team).isLowPower;
-      stepResearch(b, dt, isLowPower, state.teams[b.team]);
+      stepResearch(b, dt, isLowPower, state.teams[b.team], (key, lvl) => {
+        if (key === "turretArmor") {
+          const mult = 1 + lvl * RTS_RESEARCH_UPGRADES.turretArmor.bonusPerLevel;
+          for (const tb of state.rtsBuildings) {
+            if (tb.team === b.team && tb.type.startsWith("turret_")) {
+              const baseHp = RTS_BUILDINGS[tb.type].hp;
+              const oldMax = tb.maxHp;
+              tb.maxHp = Math.round(baseHp * mult);
+              tb.hp = Math.min(tb.maxHp, tb.hp + (tb.maxHp - oldMax));
+            }
+          }
+        }
+        if (typeof state.onRtsResearchComplete === "function") {
+          state.onRtsResearchComplete(b.team, key, lvl);
+        }
+      });
     }
   }
 
   // 6. Combat / Unit combat between Blue and Red, or Survival Waves
   stepRtsCombat(state, dt);
+
+  // 6b. Unit collision and separation physics (prevents stacking/pile-ups)
+  separateRtsUnits(state.rtsUnits, dt, state.rtsBuildings);
 
   // 7. Campaign Mode Red AI
   if (state.rtsSubmode === "campaign") {

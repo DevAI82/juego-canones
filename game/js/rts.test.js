@@ -29,6 +29,10 @@ import {
   stepRtsCombat,
   stepRtsCampaignAi,
   stepRts,
+  getRtsRepairCost,
+  repairRtsBuilding,
+  sellRtsBuilding,
+  separateRtsUnits,
 } from "./rts.js";
 
 test("RTS Config defines Map 3, 60 unit cap, bases and expanded mineral fields", () => {
@@ -411,6 +415,103 @@ test("checkRtsVictory sets win and gameOver state flags", () => {
   checkRtsVictory(survState);
   assert.equal(survState.winner, "defeat");
   assert.equal(survState.gameOver, true);
+});
+
+test("separateRtsUnits pushes apart overlapping units so they do not stack on the same space", () => {
+  const tankA = { id: 1, type: "tank", hp: 350, maxHp: 350, x: 500, y: 500 };
+  const tankB = { id: 2, type: "tank", hp: 350, maxHp: 350, x: 500, y: 500 };
+  const units = [tankA, tankB];
+
+  separateRtsUnits(units, 0.5, []);
+  const dist = Math.hypot(tankA.x - tankB.x, tankA.y - tankB.y);
+  assert.ok(dist > 0, "two units spawned at the exact same location are separated");
+  assert.ok(dist >= 20, "units are pushed apart by separation speed");
+});
+
+test("getRtsRepairCost and repairRtsBuilding heal damaged structures for credits", () => {
+  const teamState = { credits: 500 };
+  const turret = createRtsBuilding("turret_basic", 300, 300, "blue", 1);
+  assert.equal(turret.hp, 300);
+  assert.equal(turret.maxHp, 300);
+
+  // Full health -> 0 cost, already-full
+  assert.equal(getRtsRepairCost(turret), 0);
+  const rFull = repairRtsBuilding(turret, teamState);
+  assert.equal(rFull.ok, false);
+  assert.equal(rFull.reason, "already-full");
+
+  // Damaged by 50% (hp = 150/300)
+  turret.hp = 150;
+  const cost = getRtsRepairCost(turret);
+  // Cost = Math.ceil(100 * 0.5 * (150/300)) = 25
+  assert.equal(cost, 25);
+
+  // Successful repair
+  const rOk = repairRtsBuilding(turret, teamState);
+  assert.equal(rOk.ok, true);
+  assert.equal(rOk.cost, 25);
+  assert.equal(turret.hp, 300);
+  assert.equal(teamState.credits, 475);
+
+  // Cannot afford repair if credits too low
+  turret.hp = 50;
+  teamState.credits = 5;
+  const rPoor = repairRtsBuilding(turret, teamState);
+  assert.equal(rPoor.ok, false);
+  assert.equal(rPoor.reason, "insufficient-credits");
+});
+
+test("sellRtsBuilding refunds 50% credits and removes building from state", () => {
+  const state = createRtsState();
+  const teamState = state.teams.blue;
+  const initCredits = teamState.credits;
+  const factory = createRtsBuilding("factory", 400, 400, "blue", 99);
+  state.rtsBuildings.push(factory);
+
+  const res = sellRtsBuilding(factory, state, teamState);
+  assert.equal(res.ok, true);
+  // Factory cost: 500 -> refund: 250
+  assert.equal(res.refund, 250);
+  assert.equal(teamState.credits, initCredits + 250);
+  assert.ok(!state.rtsBuildings.some((b) => b.id === 99));
+});
+
+test("Tech lab research turretArmor increases maxHp of existing and newly built turrets", () => {
+  const state = createRtsState();
+  const blue = state.teams.blue;
+  blue.credits = 2000;
+  const techlab = createRtsBuilding("techlab", 300, 300, "blue", 1);
+  techlab.buildTimeRemaining = 0;
+  const solar = createRtsBuilding("solar", 250, 250, "blue", 9);
+  solar.buildTimeRemaining = 0;
+  const turret = createRtsBuilding("turret_basic", 350, 350, "blue", 2);
+  state.rtsBuildings.push(solar, techlab, turret);
+  assert.equal(turret.maxHp, 300);
+  assert.equal(turret.hp, 300);
+
+  // Start turretArmor research
+  const rStart = startResearch(techlab, "turretArmor", blue);
+  assert.equal(rStart.ok, true);
+  assert.ok(techlab.research);
+
+  // Step research to completion
+  let notified = false;
+  state.onRtsResearchComplete = (team, key, lvl) => {
+    if (team === "blue" && key === "turretArmor") notified = true;
+  };
+  stepRts(state, 5.0);
+
+  assert.equal(techlab.research, null);
+  assert.equal(blue.upgrades.turretArmor, 1);
+  assert.equal(notified, true);
+  // +15% HP: 300 * 1.15 = 345
+  assert.equal(turret.maxHp, 345);
+  assert.equal(turret.hp, 345);
+
+  // Newly built turret also starts with boosted HP
+  const newTurret = createRtsBuilding("turret_basic", 400, 400, "blue", 3, blue);
+  assert.equal(newTurret.maxHp, 345);
+  assert.equal(newTurret.hp, 345);
 });
 
 
