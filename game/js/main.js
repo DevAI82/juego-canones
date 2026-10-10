@@ -487,7 +487,7 @@ const BUILD_CROSSFADE_FRACTION = 0.15;
 const TOWER_DRAW_SIZE = 76;
 
 function ready(img) {
-  return img.complete && img.naturalWidth > 0;
+  return Boolean(img && img.complete && img.naturalWidth > 0);
 }
 
 // --- Game state -------------------------------------------------------
@@ -3205,7 +3205,7 @@ function drawRtsBuilding(b, now) {
       // 48-frame turret construction animation
       const tType = b.type.replace("turret_", "");
       const sheet = sprites[`tower_${tType}_build`];
-      const finished = sprites[b.type];
+      const finished = sprites[b.type] || sprites[`tower_${tType}`];
       const s = fp * 1.5;
       if (sheet && ready(sheet)) {
         const frameIndex = Math.min(BUILD_ANIM_FRAME_COUNT - 1, Math.floor(prog * BUILD_ANIM_FRAME_COUNT));
@@ -3276,7 +3276,8 @@ function drawRtsBuilding(b, now) {
       }
     } else if (b.type.startsWith("turret_")) {
       const sz = fp * 1.35;
-      const turretImg = sprites[b.type];
+      const tType = b.type.replace("turret_", "");
+      const turretImg = sprites[b.type] || sprites[`tower_${tType}`];
       if (ready(turretImg)) {
         ctx.save();
         ctx.rotate(b.turretAngle || 0);
