@@ -82,6 +82,7 @@ import {
   getControlGroupCentroid,
 } from "./rts.js";
 import { createRts3DRenderer } from "./renderer3d.js";
+import { SPRITE_UNITS, directionFrame, hullFrame, frameRect, drawSize, muzzleOffset, createUnitVisuals } from "./unitSprites.js";
 
 // Browsers refuse to start any audio (synthesized SFX or the background
 // music) before a real user gesture. Fire once, on whichever happens
@@ -475,6 +476,13 @@ for (const key of RTS_UNIT_ORDER) sprites[`unit_${key}`] = loadImage(RTS_UNIT_TY
 // A unit's picture: the defence's and the attack's units' (enemy_*), or an
 // RTS vehicle's (unit_*).
 const unitSprite = (type) => sprites[`unit_${type}`] || sprites[`enemy_${type}`];
+// The units rendered off 3D models (unitSprites.js): a sheet of hull frames
+// and one of turret frames each.
+const unitSheets = {};
+for (const [type, def] of Object.entries(SPRITE_UNITS)) unitSheets[type] = { hull: loadImage(def.hull), turret: loadImage(def.turret) };
+const unitVisuals = createUnitVisuals();
+let frameDt = 0; // seconds since the last frame drawn
+let visualsSweep = 0; // seconds since the looks of units gone were last cleared out
 
 // Build-animation sheets: 8x6 grids of 48 frames each, keyed from the 720p
 // 4-second build videos (tools/extract_all_turrets.py -- COLS/ROWS there
@@ -830,12 +838,71 @@ const ENEMY_DRAW_SIZES = {
   harvester: { h: RTS_UNIT_TYPES.harvester.footprint[1], shadowRx: 50, shadowRy: 24 },
 };
 
+// A unit with sheets rendered off its 3D model: the hull's frame for its
+// heading and its wheels' turn, and over it the turret's, turned to
+// `target` ({x, y}, or null for straight ahead). Each frame is turned by
+// what its heading is off the rendered direction, so it turns smoothly.
+// Returns false, drawing nothing, for a unit without sheets (or while they
+// load).
+function drawSpriteUnit(u, target) {
+  const def = SPRITE_UNITS[u.type];
+  const sheet = unitSheets[u.type];
+  if (!def || !ready(sheet.hull) || !ready(sheet.turret)) return false;
+  const v = unitVisuals.update(u, frameDt, target);
+  const size = drawSize(def);
+  const hull = directionFrame(v.heading, def.directions);
+  const turret = directionFrame(v.turret, def.directions);
+  const kick = v.recoil * 2.4; // px the gun jumps back
+  const turretUp = def.turretUp * def.pxPerMetre * def.heightOnScreen;
+  const flash = hitFlash(fx, u.id);
+  const layer = (img, r, rest, pivotY, dx, dy) => {
+    ctx.save();
+    ctx.translate(dx, dy - pivotY);
+    ctx.rotate(rest);
+    ctx.translate(0, pivotY);
+    ctx.drawImage(img, r.sx, r.sy, r.size, r.size, -size / 2, -size / 2, size, size);
+    if (flash > 0) {
+      ctx.globalCompositeOperation = "lighter";
+      ctx.globalAlpha = 0.65 * flash;
+      ctx.drawImage(img, r.sx, r.sy, r.size, r.size, -size / 2, -size / 2, size, size);
+    }
+    ctx.restore();
+  };
+  ctx.save();
+  ctx.translate(u.x, u.y);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  layer(sheet.hull, frameRect(hullFrame(def, hull.index, v.roll), def.hullColumns, def.framePx), hull.rest, 0, 0, 0);
+  layer(sheet.turret, frameRect(turret.index, def.turretColumns, def.framePx), turret.rest, turretUp,
+    -Math.cos(v.turret) * kick, -Math.sin(v.turret) * kick * def.depthOnScreen);
+  ctx.restore();
+  return true;
+}
+
+// Where a sprite unit's gun flashes when it fires, for effects.js: the
+// muzzle of its turret as drawn, or null for the other units.
+fx.muzzle = (shooter) => {
+  const def = SPRITE_UNITS[shooter.type];
+  const v = def && unitVisuals.get(shooter.id);
+  if (!v) return null;
+  const at = muzzleOffset(def, v.turret);
+  return { x: shooter.x + at.x, y: shooter.y + at.y, angle: v.turret };
+};
+
 function drawEnemy(e) {
   const img = unitSprite(e.type);
   const sizeDef = ENEMY_DRAW_SIZES[e.type] || { h: 28, shadowRx: 20, shadowRy: 12 };
   const h = sizeDef.h;
   const w = ready(img) ? h * (img.naturalWidth / img.naturalHeight) : h * 1.5;
 
+  // The turret turns to what the unit would fire at: the best tower in range.
+  const aim = pickTowerTarget(e, state.towers || []);
+  if (!drawSpriteUnit(e, aim)) drawTurnedSprite(e, img, sizeDef, w, h);
+  drawEnemyBar(e, w, h);
+}
+
+// A unit drawn as one picture, turned to its heading.
+function drawTurnedSprite(e, img, sizeDef, w, h) {
   ctx.save();
   // A small side-to-side bob while moving, out of phase per-enemy
   // (bobPhase) so a wave doesn't all bounce in unison -- makes movement
@@ -879,7 +946,9 @@ function drawEnemy(e) {
     ctx.fill();
   }
   ctx.restore();
+}
 
+function drawEnemyBar(e, w, h) {
   // Health bar, in the enemy side's red (the towers' are green), as in the
   // RTS screenshots the user gave as reference. Placed just above the
   // sprite however it's turned, so a long vehicle heading up or down the
@@ -3950,17 +4019,27 @@ function drawRtsUnit(u, now) {
   ctx.fill();
   ctx.restore();
 
-  // 2. Unit Sprite (rotated by u.angle)
+  // 2. Unit Sprite: rendered off its 3D model if it has one (drawSpriteUnit,
+  // which brings its own shadow), or its one picture rotated by u.angle.
+  ctx.save();
+  ctx.translate(-u.x, -u.y);
+  const modelled = drawSpriteUnit(u, null);
+  ctx.restore();
+
   ctx.save();
   ctx.rotate(u.angle || 0);
 
-  // Shadow
-  ctx.fillStyle = "rgba(0, 0, 0, 0.35)";
-  ctx.beginPath();
-  ctx.ellipse(2, 3, sizeDef.shadowRx || 16, sizeDef.shadowRy || 10, 0, 0, Math.PI * 2);
-  ctx.fill();
+  if (!modelled) {
+    // Shadow
+    ctx.fillStyle = "rgba(0, 0, 0, 0.35)";
+    ctx.beginPath();
+    ctx.ellipse(2, 3, sizeDef.shadowRx || 16, sizeDef.shadowRy || 10, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
 
-  if (ready(img)) {
+  if (modelled) {
+    // Already drawn.
+  } else if (ready(img)) {
     ctx.drawImage(img, -w / 2, -h / 2, w, h);
   } else {
     ctx.fillStyle = u.team === "blue" ? "#3b82f6" : "#ef4444";
@@ -4773,6 +4852,13 @@ function loop(now) {
   const dt = Math.max(0, Math.min((now - lastTime) / 1000, 0.05));
   lastTime = now;
   frameNow = now / 1000;
+  frameDt = dt;
+  visualsSweep += dt;
+  if (visualsSweep > 2) {
+    // Forget how the units that are gone looked.
+    visualsSweep = 0;
+    unitVisuals.keepOnly([...(state.enemies || []), ...(state.rtsUnits || [])].map((u) => u.id));
+  }
 
   if ((!networked || isRtsGame()) && started) {
     // Before stepping: a level's start is only between waves until its

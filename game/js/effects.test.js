@@ -61,3 +61,18 @@ test("however much blows up at once, the effects stay within their caps", () => 
   assert.ok(fx.particles.length <= 700);
   assert.ok(fx.decals.length <= 1400);
 });
+
+test("a unit's gun flashes at its muzzle when the game says where that is, and 14 px ahead of it otherwise", () => {
+  const shot = { id: 5, x: 102, y: 100, target: { x: 300, y: 100 }, style: "shell" };
+  const flashOf = (fx) => fx.particles.find((p) => p.kind === "flash");
+
+  const plain = createEffects();
+  stepEffects(plain, view({ enemies: [tank()], projectiles: [shot] }), 0.016);
+  assert.equal(flashOf(plain).x, 114);
+
+  const fx = createEffects();
+  fx.muzzle = (shooter) => ({ x: shooter.x + 40, y: shooter.y - 10, angle: 0.5 });
+  stepEffects(fx, view({ enemies: [tank()], projectiles: [shot] }), 0.016);
+  const flash = flashOf(fx);
+  assert.deepEqual([flash.x, flash.y, flash.angle], [140, 90, 0.5]);
+});

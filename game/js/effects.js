@@ -201,7 +201,10 @@ export function stepEffects(fx, view, dt) {
       const shooter = nearest(view.enemies, p, 45);
       if (shooter && !nearest(view.towers, p, Math.hypot(shooter.x - p.x, shooter.y - p.y))) {
         const angle = Math.atan2(p.target.y - shooter.y, p.target.x - shooter.x);
-        muzzleFlash(fx, shooter.x + Math.cos(angle) * 14, shooter.y + Math.sin(angle) * 14, angle, p.style === "shell" ? 12 : 7);
+        // fx.muzzle, if the game set it: where this unit's gun is drawn
+        // ({ x, y, angle }), for the ones whose turret turns on its own.
+        const at = (fx.muzzle && fx.muzzle(shooter)) || { x: shooter.x + Math.cos(angle) * 14, y: shooter.y + Math.sin(angle) * 14, angle };
+        muzzleFlash(fx, at.x, at.y, at.angle, p.style === "shell" ? 12 : 7);
       }
     }
     if (p.sound === "missile" && Math.random() < dt * 25) {
