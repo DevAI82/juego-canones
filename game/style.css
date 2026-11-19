@@ -943,7 +943,7 @@ body.gameend-open #attack-shop { display: none !important; }
 }
 .start-level-btn[data-level="1"] { background-image: url(assets/map_bg.png); }
 .start-level-btn[data-level="2"] { background-image: url(assets/map_bg_level2.png); }
-.start-level-btn[data-level="3"] { background-image: url(assets/map_bg_level3.jpg); }
+.start-level-btn[data-level="3"] { background-image: url(assets/maps/level3.jpg); }
 .start-level-btn[data-level="4"] { background-image: url(assets/map_bg_level4.jpg); }
 .start-level-btn::before {
   content: "";

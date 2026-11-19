@@ -1347,7 +1347,7 @@ function drawForeground(level) {
   const img = foregroundImages[level];
   if (!fg || !img || !ready(img)) return;
   ctx.save();
-  ctx.globalAlpha = FOREGROUND_ALPHA;
+  ctx.globalAlpha = fg.alpha ?? FOREGROUND_ALPHA;
   ctx.drawImage(img, fg.x, fg.y);
   ctx.restore();
 }

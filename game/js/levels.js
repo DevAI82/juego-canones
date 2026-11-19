@@ -107,24 +107,19 @@ const LEVEL1_BUILD_SLOTS = [
 // Level 3: a large scrollable base-defense map, per user request ("un
 // mapa grande, que se pueda hacer scroll... cada carretera la pueden usar
 // los enemigos"). Unlike levels 1/2 (whose map image IS the 1200x750
-// viewport), this map ships at its own real 2048x2048 size (see
-// map_bg_level3.jpg / tools/extract_assets.py's extract_map_level3) and
-// main.js scrolls a 1200x750 camera window over it instead of squashing
-// the whole thing to fit -- see worldWidth/worldHeight below, read by
-// main.js to size that camera's scroll bounds.
+// viewport), this map is 2048x2048 and main.js scrolls a 1200x750 camera
+// window over it -- see worldWidth/worldHeight below, read by main.js to
+// size that camera's scroll bounds.
 //
-// The image (AI-generated -- see the conversation for why: the user's own
-// reference images turned out to be Command & Conquer 3 game assets,
-// which aren't ours to ship) shows a walled garden compound in the
-// bottom-left corner -- that's the base -- fed by three separate roads
-// converging on it from the north, east and west, exactly matching the
-// user's ask that "cada carretera la pueden usar los enemigos" and that
-// the garden is "dónde tienen que dirigirse los enemigos". Traced by
-// overlaying a labeled pixel grid on the generated image (see the
-// conversation) and reading waypoints off it directly -- there's no
-// user-drawn reference for this level the way levels 1/2 had, so exact
-// road-pixel tracing isn't the point the way it was there; these
-// waypoints just have to read as plausible routes through the scene.
+// It is a ruined town with a walled garden compound in its bottom-left
+// corner -- that's the base -- fed by roads converging on it from the
+// north, the east and the west ("cada carretera la pueden usar los
+// enemigos"; the garden is "dónde tienen que dirigirse los enemigos").
+// The roads, the wall and its gates below were first traced over an
+// AI-generated picture; the map now drawn is built from this very data by
+// tools/blender/maps/level3_layout.py and level3_build.py, so the picture
+// follows the numbers here and not the other way round: change a road and
+// the map has to be rendered again.
 const LEVEL3_WORLD_SIZE = 2048;
 
 // The fortress's own wall/moat around the garden compound, per user
@@ -564,6 +559,12 @@ function level4BuildSlots() {
 // over the enemies, so traffic passes behind those towers.
 const LEVEL4_FOREGROUND = { image: "assets/map_fg_level4.png", x: 288, y: 328 };
 
+// Level 3's map is built in Blender (tools/blender/maps/level3_*.py), which
+// also renders what stands up from its ground -- the fortress wall and its
+// gatehouses, the ruins' walls, the trees, the keep at the base -- as a
+// picture of the whole map for main.js to draw over the units, nearly solid.
+const LEVEL3_FOREGROUND = { image: "assets/maps/level3_fg.webp", x: 0, y: 0, alpha: 0.92 };
+
 // Streets that show on the map but that the defence game's enemies never
 // use. In attack mode (docs/2026-10-09-modo-atacante-design.md) the army
 // can drive along them too: roadGraph.js joins them to the roads where
@@ -631,7 +632,8 @@ export const LEVELS = {
     ],
     soldierEntry: LEVEL3_NORTH_MAIN_PATH[0],
     soldierExit: LEVEL3_BASE_INTERIOR,
-    mapImage: "assets/map_bg_level3.jpg",
+    mapImage: "assets/maps/level3.jpg",
+    foreground: LEVEL3_FOREGROUND,
     buildSlots: LEVEL3_BUILD_SLOTS,
     worldWidth: LEVEL3_WORLD_SIZE,
     worldHeight: LEVEL3_WORLD_SIZE,

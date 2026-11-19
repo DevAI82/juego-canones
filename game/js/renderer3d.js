@@ -45,6 +45,18 @@ export function createRts3DRenderer(options) {
   const unitModels = {};
   const unitVisuals = createUnitVisuals();
 
+  // Under this scene's lights a Blender model's paint comes out washed out,
+  // and with no sky to reflect its steel goes black: tone both down.
+  function toneDown(root, by = 0.6) {
+    const toned = new Set();
+    root.traverse((o) => {
+      if (!o.isMesh || !o.material || toned.has(o.material)) return;
+      toned.add(o.material);
+      o.material.color.multiplyScalar(by);
+      o.material.metalness = Math.min(o.material.metalness, 0.3);
+    });
+  }
+
   // The turrets' models (tools/blender/towers.py), by "turret_<type>".
   const turretModels = {};
   const TURRET_SCALE = 0.88; // as the 2D view's RTS_TURRET_SCALE
@@ -53,15 +65,7 @@ export function createRts3DRenderer(options) {
     const loader = new GLTFLoader();
     const load = (url, into, key) => {
       loader.load(url, (gltf) => {
-        // Under this scene's lights the models' paint comes out washed out,
-        // and with no sky to reflect their steel goes black: tone both down.
-        const toned = new Set();
-        gltf.scene.traverse((o) => {
-          if (!o.isMesh || !o.material || toned.has(o.material)) return;
-          toned.add(o.material);
-          o.material.color.multiplyScalar(0.6);
-          o.material.metalness = Math.min(o.material.metalness, 0.3);
-        });
+        toneDown(gltf.scene);
         into[key] = gltf.scene;
       }, undefined, () => {});
     };
@@ -342,7 +346,7 @@ export function createRts3DRenderer(options) {
     scene.add(sunLight);
 
     // Cool Secondary Rim/Fill Light
-    const fillLight = new THREE.DirectionalLight(0x38bdf8, 0.4);
+    const fillLight = new THREE.DirectionalLight(0xbfd6ff, 0.28);
     fillLight.position.set(-600, 800, -400);
     scene.add(fillLight);
 
@@ -360,13 +364,19 @@ export function createRts3DRenderer(options) {
     const groundGeo = new THREE.PlaneGeometry(worldSize, worldSize, 32, 32);
     groundGeo.rotateX(-Math.PI / 2);
 
-    // Load actual satellite/military terrain texture from Level 3 RTS map asset
+    // The map's flat ground (tools/blender/maps/level3_layout.py): what
+    // stands on it is not painted here but stood on it below, as a model.
     const textureLoader = new THREE.TextureLoader();
-    textureLoader.load("assets/map_bg_level3.jpg", (tex) => {
+    textureLoader.load("assets/maps/level3_ground.jpg", (tex) => {
       tex.encoding = THREE.sRGBEncoding;
       tex.wrapS = THREE.ClampToEdgeWrapping;
       tex.wrapT = THREE.ClampToEdgeWrapping;
       mats.ground.map = tex;
+      // The picture's own colours, in daylight: the dark tint is only for
+      // the moment before it loads.
+      mats.ground.color.set(0xa6a6a6);
+      mats.ground.metalness = 0;
+      mats.ground.roughness = 0.95;
       mats.ground.needsUpdate = true;
     });
 
@@ -388,12 +398,20 @@ export function createRts3DRenderer(options) {
     borderMesh.receiveShadow = true;
     scene.add(borderMesh);
 
-    // Tactical Cybernetic Grid Lines
-    const grid = new THREE.GridHelper(worldSize, 64, 0x0284c7, 0x1e293b);
-    grid.position.set(worldSize / 2, 0.5, worldSize / 2);
-    grid.material.opacity = 0.22;
-    grid.material.transparent = true;
-    scene.add(grid);
+    // The town itself -- the fortress wall, the ruins, the trees -- from the
+    // same Blender scene the 2D map was rendered from. Its model is in world
+    // px with the map's top edge at z = -worldSize.
+    new GLTFLoader().load("assets/models/map_level3.glb", (gltf) => {
+      const town = gltf.scene;
+      toneDown(town, 0.75);
+      town.position.set(0, 0, worldSize);
+      town.traverse((o) => {
+        if (!o.isMesh) return;
+        o.castShadow = true;
+        o.receiveShadow = true;
+      });
+      scene.add(town);
+    }, undefined, () => {});
   }
 
   // ==========================================================================
