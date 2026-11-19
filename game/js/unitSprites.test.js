@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  SPRITE_UNITS, HEIGHT_ON_SCREEN, DEPTH_ON_SCREEN, directionFrame, turnToward, createUnitVisuals, hullFrame, frameRect, drawSize, muzzleOffset, mountOffset,
+  SPRITE_UNITS, HEIGHT_ON_SCREEN, DEPTH_ON_SCREEN, directionFrame, turnToward, createUnitVisuals, hullFrame, frameRect, drawSize, muzzleOffset, mountOffset, SPRITE_TOWERS, buildFrame, towerMuzzles,
 } from "./unitSprites.js";
 
 const near = (a, b, eps = 1e-9) => assert.ok(Math.abs(a - b) < eps, `${a} is not ${b}`);
@@ -174,4 +174,36 @@ test("a unit counts as moving while it covers ground, and for a moment after", (
   assert.equal(visuals.update(u, 0.016).moving, true);
   assert.equal(visuals.update(u, 0.016).moving, true); // one frame without moving is not a halt
   assert.equal(visuals.update(u, 0.3).moving, false);
+});
+
+test("the defence's three turrets have their sheets: base, turret and construction", () => {
+  assert.deepEqual(Object.keys(SPRITE_TOWERS).sort(), ["basic", "double", "laser"]);
+  for (const def of Object.values(SPRITE_TOWERS)) {
+    for (const sheet of ["base", "turret", "build", "icon", "model"]) assert.ok(def[sheet], sheet);
+  }
+});
+
+test("a turret's construction runs through its frames once, start to finish", () => {
+  const def = SPRITE_TOWERS.basic;
+  assert.equal(buildFrame(def, 0), 0);
+  assert.equal(buildFrame(def, 0.5), def.buildFrames / 2);
+  assert.equal(buildFrame(def, 1), def.buildFrames - 1);
+  assert.equal(buildFrame(def, -0.2), 0);
+  assert.equal(buildFrame(def, 7), def.buildFrames - 1);
+});
+
+test("a turret's guns flash at their muzzles: one for the cannon and the railgun, two side by side for the twin guns", () => {
+  const cannon = SPRITE_TOWERS.basic;
+  const [m] = towerMuzzles(cannon, 0);
+  assert.equal(towerMuzzles(cannon, 0).length, 1);
+  near(m.x, cannon.muzzleAhead * cannon.pxPerMetre);
+  near(m.y, -cannon.muzzleUp * cannon.pxPerMetre * HEIGHT_ON_SCREEN);
+
+  const twin = SPRITE_TOWERS.double;
+  const [a, b] = towerMuzzles(twin, 0); // aiming right: the guns are one above the other on screen
+  near(a.x, b.x);
+  near(Math.abs(a.y - b.y), 2 * twin.muzzleApart * twin.pxPerMetre * DEPTH_ON_SCREEN);
+  const [c, d] = towerMuzzles(twin, Math.PI / 2); // aiming down the screen: side by side
+  near(c.y, d.y);
+  near(Math.abs(c.x - d.x), 2 * twin.muzzleApart * twin.pxPerMetre);
 });

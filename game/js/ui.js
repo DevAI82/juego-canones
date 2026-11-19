@@ -10,7 +10,7 @@ const SKILL_LABELS = { damage: "Daño", range: "Alcance", fireRate: "Vel. dispar
 // from the user's "diseño torres" reference images) as the build menu's
 // icon, instead of a plain text button -- per user request for a more
 // premium look here too.
-const TOWER_ICON = { basic: "assets/tower_basic.png", double: "assets/tower_double.png", laser: "assets/tower_laser.png" };
+const TOWER_ICON = { basic: "assets/units3d/tower_basic_icon.webp", double: "assets/units3d/tower_double_icon.webp", laser: "assets/units3d/tower_laser_icon.webp" };
 // Reuse each enemy's own in-game sprite as the score breakdown's row icon
 // -- per user request for a more visual stats screen.
 const ENEMY_ICON = {

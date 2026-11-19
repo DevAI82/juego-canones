@@ -84,6 +84,7 @@ import {
 import { createRts3DRenderer } from "./renderer3d.js";
 import {
   SPRITE_UNITS, HEIGHT_ON_SCREEN, DEPTH_ON_SCREEN, directionFrame, hullFrame, frameRect, drawSize, mountOffset, muzzleOffset, createUnitVisuals,
+  SPRITE_TOWERS, buildFrame, towerMuzzles,
 } from "./unitSprites.js";
 
 // Browsers refuse to start any audio (synthesized SFX or the background
@@ -485,6 +486,11 @@ for (const [type, def] of Object.entries(SPRITE_UNITS)) {
   unitSheets[type] = { hull: loadImage(def.hull), turret: def.turret ? loadImage(def.turret) : null };
 }
 const unitVisuals = createUnitVisuals();
+// The turrets rendered off 3D models: base, turret and construction sheets.
+const towerSheets = {};
+for (const [type, def] of Object.entries(SPRITE_TOWERS)) {
+  towerSheets[type] = { base: loadImage(def.base), turret: loadImage(def.turret), build: loadImage(def.build) };
+}
 let frameDt = 0; // seconds since the last frame drawn
 let visualsSweep = 0; // seconds since the looks of units gone were last cleared out
 
@@ -1074,6 +1080,48 @@ function drawTurretSprite(t, alpha = 1) {
   ctx.restore();
 }
 
+// Whether a turret type's rendered sheets are there to draw it from.
+function towerModelled(type) {
+  const sheet = towerSheets[type];
+  return Boolean(sheet) && ready(sheet.base) && ready(sheet.turret) && ready(sheet.build);
+}
+
+// A turret rendered off its 3D model, at (x, y) aiming at `angle`: its base
+// with the turret's shadow on it, and the turret turned about its axis by
+// what the angle is off the rendered direction. `scale` is for the RTS
+// mode, whose turrets are a little smaller.
+function drawTowerSprite(type, x, y, angle, scale = 1) {
+  const def = SPRITE_TOWERS[type];
+  const sheet = towerSheets[type];
+  const size = drawSize(def) * scale;
+  const aim = directionFrame(angle, def.directions);
+  const base = frameRect(aim.index, def.baseColumns, def.framePx);
+  const turret = frameRect(aim.index, def.turretColumns, def.framePx);
+  const up = def.turretUp * def.pxPerMetre * HEIGHT_ON_SCREEN * scale;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(sheet.base, base.sx, base.sy, base.size, base.size, -size / 2, -size / 2, size, size);
+  ctx.translate(0, -up);
+  ctx.rotate(aim.rest);
+  ctx.translate(0, up);
+  ctx.drawImage(sheet.turret, turret.sx, turret.sy, turret.size, turret.size, -size / 2, -size / 2, size, size);
+  ctx.restore();
+}
+
+// The same turret `progress` (0 to 1) of the way through its construction.
+function drawTowerBuildSprite(type, x, y, progress, scale = 1) {
+  const def = SPRITE_TOWERS[type];
+  const size = drawSize(def) * scale;
+  const r = frameRect(buildFrame(def, progress), def.buildColumns, def.framePx);
+  ctx.save();
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(towerSheets[type].build, r.sx, r.sy, r.size, r.size, x - size / 2, y - size / 2, size, size);
+  ctx.restore();
+}
+
 // Renders a tower that's still under construction (t.buildTimeRemaining
 // > 0): its build-animation sheet (BUILD_ANIM_* above), crossfading into
 // the resting sprite over the final BUILD_CROSSFADE_FRACTION, plus a
@@ -1081,6 +1129,11 @@ function drawTurretSprite(t, alpha = 1) {
 // resting sprite in if the sheet hasn't loaded.
 function drawTowerBuilding(t) {
   const progress = 1 - t.buildTimeRemaining / BUILD_DURATION; // 0 -> 1
+  if (towerModelled(t.type)) {
+    drawTowerBuildSprite(t.type, t.x, t.y, progress);
+    drawBuildBar(t.x, t.y - 44, progress);
+    return;
+  }
   const sheet = sprites[`tower_${t.type}_build`];
   const crossfadeStart = 1 - BUILD_CROSSFADE_FRACTION;
   const settle = Math.max(0, (progress - crossfadeStart) / BUILD_CROSSFADE_FRACTION); // 0 -> 1 over the crossfade
@@ -1354,23 +1407,27 @@ function drawTowerBar(cx, y, h, w, frac, fill, back) {
 }
 
 function drawTower(t) {
-  // Render the volumetric 3D base pedestal
-  drawTowerBase(t);
+  // A turret rendered off its 3D model brings its base and its shadows;
+  // otherwise, the base pedestal and a drop shadow painted here.
+  const modelled = towerModelled(t.type);
+  if (!modelled) drawTowerBase(t);
 
   if (t.buildTimeRemaining > 0) {
     drawTowerBuilding(t);
   } else {
     const levelSum = t.level.damage + t.level.range + t.level.fireRate;
 
-    // Dynamic drop shadow under the rotating turret body
-    ctx.save();
-    ctx.translate(t.x + 3, t.y + 4);
-    ctx.rotate(t.angle);
-    ctx.fillStyle = "rgba(0, 0, 0, 0.35)";
-    ctx.beginPath();
-    ctx.ellipse(0, 0, 24, 18, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
+    if (!modelled) {
+      // Dynamic drop shadow under the rotating turret body
+      ctx.save();
+      ctx.translate(t.x + 3, t.y + 4);
+      ctx.rotate(t.angle);
+      ctx.fillStyle = "rgba(0, 0, 0, 0.35)";
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 24, 18, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
 
     if (levelSum > 0) {
       ctx.save();
@@ -1387,7 +1444,8 @@ function drawTower(t) {
     // square showed up as a dark box around a damaged turret.
     const damagePct = 1 - t.hp / t.maxHp;
     if (damagePct > 0) ctx.filter = `brightness(${(1 - damagePct * 0.55).toFixed(2)})`;
-    drawTurretSprite(t);
+    if (modelled) drawTowerSprite(t.type, t.x, t.y, t.angle);
+    else drawTurretSprite(t);
     ctx.filter = "none";
 
     // Muzzle flash at the cannon tip, only for the brief window right after
@@ -1400,7 +1458,15 @@ function drawTower(t) {
       ctx.shadowColor = t.type === "laser" ? "#81e6d9" : "#ff8800";
       ctx.shadowBlur = 12;
 
-      if (t.type === "double") {
+      if (modelled) {
+        // At the muzzles of the turret as drawn.
+        ctx.beginPath();
+        for (const m of towerMuzzles(SPRITE_TOWERS[t.type], t.angle)) {
+          ctx.moveTo(t.x + m.x + 5, t.y + m.y);
+          ctx.arc(t.x + m.x, t.y + m.y, t.type === "double" ? 5 : 6, 0, Math.PI * 2);
+        }
+        ctx.fill();
+      } else if (t.type === "double") {
         const spread = 6;
         const p1x = flashX - Math.sin(t.angle) * spread;
         const p1y = flashY + Math.cos(t.angle) * spread;
@@ -3794,6 +3860,10 @@ function drawRtsBuildProgressBar(c, x, y, prog, label) {
   c.restore();
 }
 
+// The RTS mode's turrets stand on a 50 px footprint: a little smaller than
+// the defence's.
+const RTS_TURRET_SCALE = 0.88;
+
 function drawRtsBuilding(b, now) {
   const isSelected = selectedRtsBuilding && selectedRtsBuilding.id === b.id;
   const fp = b.footprint || 45;
@@ -3830,7 +3900,9 @@ function drawRtsBuilding(b, now) {
       const sheet = sprites[`tower_${tType}_build`];
       const finished = sprites[b.type] || sprites[`tower_${tType}`];
       const s = fp * 1.5;
-      if (sheet && ready(sheet)) {
+      if (towerModelled(tType)) {
+        drawTowerBuildSprite(tType, 0, 0, prog, RTS_TURRET_SCALE);
+      } else if (sheet && ready(sheet)) {
         const frameIndex = Math.min(BUILD_ANIM_FRAME_COUNT - 1, Math.floor(prog * BUILD_ANIM_FRAME_COUNT));
         const col = frameIndex % BUILD_ANIM_COLS;
         const row = Math.floor(frameIndex / BUILD_ANIM_COLS);
@@ -3901,7 +3973,9 @@ function drawRtsBuilding(b, now) {
       const sz = fp * 1.35;
       const tType = b.type.replace("turret_", "");
       const turretImg = sprites[b.type] || sprites[`tower_${tType}`];
-      if (ready(turretImg)) {
+      if (towerModelled(tType)) {
+        drawTowerSprite(tType, 0, 0, b.turretAngle || 0, RTS_TURRET_SCALE);
+      } else if (ready(turretImg)) {
         ctx.save();
         ctx.rotate(b.turretAngle || 0);
         ctx.drawImage(turretImg, -sz / 2, -sz / 2, sz, sz);

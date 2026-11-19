@@ -305,7 +305,7 @@ def do_preview(model, spec, out, name):
     """One large picture of the model, to look at."""
     setup_scene(1200, 800, 128)
     add_ground()
-    weather(model["mats"], strength=spec.get("weather", 1.0))
+    weather(model["mats"], spec.get("weathered", WEATHERED), spec.get("weather", 1.0))
     if model["top"]:
         model["top"][0].rotation_euler.z = math.radians(22)
     model["pose"](1, 8) if spec.get("stand") else None
@@ -318,7 +318,7 @@ def do_icon(model, spec, out, name):
     """The unit's picture for the shop and the sidebar."""
     setup_scene(256, 256, 160)
     add_ground()
-    weather(model["mats"], strength=spec.get("weather", 1.0))
+    weather(model["mats"], spec.get("weathered", WEATHERED), spec.get("weather", 1.0))
     if model["top"]:
         model["top"][0].rotation_euler.z = math.radians(18)
     size = spec["frame_m"]
@@ -333,12 +333,16 @@ def do_glb(model, out, name):
 def do_sprites(model, spec, out, name):
     """The frames of the sprite sheets: <name>_hull_<row>_<dir>.png, with a
     row for standing still (if the unit has one) and one per rolling or
-    walking step, and <name>_turret_<dir>.png."""
+    walking step, <name>_build_<k>.png for a turret's construction, and
+    <name>_turret_<dir>.png."""
     setup_scene(spec["frame_px"], spec["frame_px"], 144)
     ground = add_ground()
-    weather(model["mats"], strength=spec.get("weather", 1.0))
+    weather(model["mats"], spec.get("weathered", WEATHERED), spec.get("weather", 1.0))
     add_camera(ortho_metres=spec["frame_m"])
-    root, top, directions, steps = model["root"], model["top"], spec["directions"], spec["roll_frames"]
+    top, directions, steps = model["top"], spec["directions"], spec["roll_frames"]
+    # What turns from one frame to the next: the whole unit, or only a
+    # turret's top on its fixed base.
+    spin = top[0] if spec.get("turn") == "top" else model["root"]
     # The hull: the turret leaves its shadow on it but is not in the picture.
     for ob in top:
         ob.visible_camera = False
@@ -346,15 +350,23 @@ def do_sprites(model, spec, out, name):
     for row, k in enumerate(rows):
         model["pose"](k, steps)
         for d in range(directions):
-            root.rotation_euler.z = -d * 2 * math.pi / directions
+            spin.rotation_euler.z = -d * 2 * math.pi / directions
             render(os.path.join(out, f"{name}_hull_{row:02d}_{d:02d}.png"))
+    spin.rotation_euler.z = 0
+    for ob in top:
+        ob.visible_camera = True
+    # Its construction, start to finish, facing right.
+    frames = spec.get("build_frames", 0)
+    for k in range(frames):
+        model["build"](k / (frames - 1))
+        render(os.path.join(out, f"{name}_build_{k:02d}.png"))
+    if frames:
+        model["build"](1.0)
     if not top:
         return
     # The turret, on its own.
-    for ob in top:
-        ob.visible_camera = True
     for ob in [ground] + model["body"]:
         ob.hide_render = True
     for d in range(directions):
-        root.rotation_euler.z = -d * 2 * math.pi / directions
+        spin.rotation_euler.z = -d * 2 * math.pi / directions
         render(os.path.join(out, f"{name}_turret_{d:02d}.png"))

@@ -9,7 +9,7 @@
 import * as THREE from "./three.module.js";
 import { isVisible, isExplored } from "./fog.js";
 import { GLTFLoader } from "./GLTFLoader.js";
-import { SPRITE_UNITS, createUnitVisuals } from "./unitSprites.js";
+import { SPRITE_UNITS, SPRITE_TOWERS, createUnitVisuals } from "./unitSprites.js";
 
 export function createRts3DRenderer(options) {
   const {
@@ -45,10 +45,14 @@ export function createRts3DRenderer(options) {
   const unitModels = {};
   const unitVisuals = createUnitVisuals();
 
+  // The turrets' models (tools/blender/towers.py), by "turret_<type>".
+  const turretModels = {};
+  const TURRET_SCALE = 0.88; // as the 2D view's RTS_TURRET_SCALE
+
   function loadUnitModels() {
     const loader = new GLTFLoader();
-    for (const [type, def] of Object.entries(SPRITE_UNITS)) {
-      loader.load(def.model, (gltf) => {
+    const load = (url, into, key) => {
+      loader.load(url, (gltf) => {
         // Under this scene's lights the models' paint comes out washed out,
         // and with no sky to reflect their steel goes black: tone both down.
         const toned = new Set();
@@ -58,9 +62,31 @@ export function createRts3DRenderer(options) {
           o.material.color.multiplyScalar(0.6);
           o.material.metalness = Math.min(o.material.metalness, 0.3);
         });
-        unitModels[type] = gltf.scene;
+        into[key] = gltf.scene;
       }, undefined, () => {});
-    }
+    };
+    for (const [type, def] of Object.entries(SPRITE_UNITS)) load(def.model, unitModels, type);
+    for (const [type, def] of Object.entries(SPRITE_TOWERS)) load(def.model, turretModels, `turret_${type}`);
+  }
+
+  // A turret built from its loaded model (base > turret > barrel, facing
+  // +x), or null while it hasn't arrived.
+  function createModelTurret(b) {
+    const source = turretModels[b.type];
+    if (!source) return null;
+    const def = SPRITE_TOWERS[b.type.replace("turret_", "")];
+    const model = source.clone(true);
+    model.scale.setScalar(def.pxPerMetre * TURRET_SCALE);
+    model.traverse((o) => {
+      if (!o.isMesh) return;
+      o.castShadow = true;
+      o.receiveShadow = true;
+      if (o.material && o.material.name === "team") o.material = getTeamMat(b.team);
+    });
+    const group = new THREE.Group();
+    group.add(model);
+    group.userData.modelTurret = model.getObjectByName("turret") || null;
+    return group;
   }
 
   // A unit built from its loaded model, or null while it hasn't arrived.
@@ -791,8 +817,14 @@ export function createRts3DRenderer(options) {
     else if (b.type === "barracks") m = createBarracksModel(b.team);
     else if (b.type === "factory") m = createFactoryModel(b.team);
     else if (b.type === "techlab") m = createTechLabModel(b.team);
-    else if (b.type.startsWith("turret_")) m = createTurretModel(b);
-    else if (b.type === "wall") m = createWallModel();
+    else if (b.type.startsWith("turret_")) {
+      // Its Blender model once loaded; until then a stand-in that update() swaps.
+      m = createModelTurret(b);
+      if (!m) {
+        m = createTurretModel(b);
+        m.userData.standIn = true;
+      }
+    } else if (b.type === "wall") m = createWallModel();
     else m = createHqModel(b.team);
 
     m.position.set(b.x, 0, b.y);
@@ -1266,6 +1298,10 @@ export function createRts3DRenderer(options) {
       if (b.hp <= 0) continue;
       activeBldIds.add(b.id);
       let bMesh = buildingMeshes.get(b.id);
+      if (bMesh && bMesh.userData.standIn && turretModels[b.type]) {
+        scene.remove(bMesh);
+        bMesh = null;
+      }
       if (!bMesh) {
         bMesh = createBuilding3D(b);
         buildingMeshes.set(b.id, bMesh);
@@ -1285,6 +1321,9 @@ export function createRts3DRenderer(options) {
       if (bMesh.userData.ring1 && bMesh.userData.ring2) {
         bMesh.userData.ring1.rotation.z += dt * 1.8;
         bMesh.userData.ring2.rotation.y -= dt * 2.2;
+      }
+      if (bMesh.userData.modelTurret && b.turretAngle !== undefined) {
+        bMesh.userData.modelTurret.rotation.y = -b.turretAngle;
       }
       // Turret aim tracking
       if (bMesh.userData.head && b.turretAngle !== undefined) {

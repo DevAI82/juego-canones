@@ -6,6 +6,7 @@
                     row for standing still (if the unit has one) and one per
                     rolling or walking step.
 <name>_turret.webp  8 columns; frame = direction.
+<name>_build.webp   4 columns; a turret's construction, start to finish.
 <name>_icon.webp    the picture for the shop and the sidebar.
 models/<name>.glb   the model for the 3D view.
 """
@@ -32,14 +33,18 @@ for name in sys.argv[3:]:
     turret = sorted(src.glob(f"{name}_turret_*.png"))
     done = []
     if hull:
-        sheet(hull, 16).save(dst / "units3d" / f"{name}_hull.webp", quality=90, method=6)
+        sheet(hull, 16).save(dst / "units3d" / f"{name}_hull.webp", quality=90, method=4)
         done.append(f"{len(hull)} hull frames")
     if turret:
-        sheet(turret, 8).save(dst / "units3d" / f"{name}_turret.webp", quality=90, method=6)
+        sheet(turret, 8).save(dst / "units3d" / f"{name}_turret.webp", quality=90, method=4)
         done.append(f"{len(turret)} turret frames")
+    build = sorted(src.glob(f"{name}_build_*.png"))
+    if build:
+        sheet(build, 4).save(dst / "units3d" / f"{name}_build.webp", quality=90, method=4)
+        done.append(f"{len(build)} build frames")
     icon = src / f"{name}_icon.png"
     if icon.exists():
-        Image.open(icon).save(dst / "units3d" / f"{name}_icon.webp", quality=90, method=6)
+        Image.open(icon).save(dst / "units3d" / f"{name}_icon.webp", quality=90, method=4)
         done.append("icon")
     glb = src / f"{name}.glb"
     if glb.exists():

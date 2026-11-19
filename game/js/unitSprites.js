@@ -180,3 +180,45 @@ export function createUnitVisuals() {
 
   return { update, keepOnly, get: (id) => seen.get(id), size: () => seen.size };
 }
+
+// The defence's turrets (tools/blender/towers.py): a base that stays put,
+// rendered once per heading for the turret's shadow on it; the turret, which
+// turns about the middle; and the frames of its construction. Distances in
+// metres on the model, as for the units: turretUp is where the turret
+// turns, muzzleAhead and muzzleUp where its guns end, and muzzleApart how
+// far to each side of the middle the twin guns are.
+const towerSheets = (type) => ({
+  base: `assets/units3d/tower_${type}_hull.webp`,
+  turret: `assets/units3d/tower_${type}_turret.webp`,
+  build: `assets/units3d/tower_${type}_build.webp`,
+  icon: `assets/units3d/tower_${type}_icon.webp`,
+  model: `assets/models/tower_${type}.glb`,
+});
+const TOWER_FRAMES = {
+  directions: 32, baseColumns: 16, turretColumns: 8, buildFrames: 16, buildColumns: 4,
+  framePx: 160, frameMetres: 9.6, pxPerMetre: 72 / 7, turretUp: 0.86,
+};
+export const SPRITE_TOWERS = {
+  basic: { ...towerSheets("basic"), ...TOWER_FRAMES, muzzleAhead: 3.72, muzzleUp: 1.46 },
+  double: { ...towerSheets("double"), ...TOWER_FRAMES, muzzleAhead: 3.55, muzzleUp: 1.48, muzzleApart: 1.25 },
+  laser: { ...towerSheets("laser"), ...TOWER_FRAMES, muzzleAhead: 3.92, muzzleUp: 1.44 },
+};
+
+// The frame of a turret's construction `progress` (0 to 1) of the way through.
+export function buildFrame(def, progress) {
+  return Math.max(0, Math.min(def.buildFrames - 1, Math.floor(progress * def.buildFrames)));
+}
+
+// Where a turret's muzzles are on screen, relative to its position, aiming
+// at `angle` radians: one point, or two for guns set apart.
+export function towerMuzzles(def, angle) {
+  const scale = def.pxPerMetre;
+  const up = def.muzzleUp * scale * HEIGHT_ON_SCREEN;
+  const sides = def.muzzleApart ? [def.muzzleApart, -def.muzzleApart] : [0];
+  return sides.map((side) => {
+    // On the ground: ahead along the aim, and `side` to its left.
+    const gx = Math.cos(angle) * def.muzzleAhead + Math.sin(angle) * side;
+    const gy = Math.sin(angle) * def.muzzleAhead - Math.cos(angle) * side;
+    return { x: gx * scale, y: gy * scale * DEPTH_ON_SCREEN - up };
+  });
+}
