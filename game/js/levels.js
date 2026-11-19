@@ -553,17 +553,24 @@ function level4BuildSlots() {
   return [...clear, ...LEVEL4_HQ_ROOF_SLOTS];
 }
 
-// The towers standing in front of roads, cut out of the map
-// (tools/extract_assets.py's LEVEL4_TOWERS_IN_FRONT, whose
-// LEVEL4_FOREGROUND_BOX puts the image at this x, y): main.js draws it
-// over the enemies, so traffic passes behind those towers.
-const LEVEL4_FOREGROUND = { image: "assets/map_fg_level4.png", x: 288, y: 328 };
+// Level 4's map is built in Blender like level 3's (tools/blender/maps/
+// level4_layout.py), with its towers, trees and bridge rails in the picture
+// main.js draws over the units. No tower stands where it would hide a road
+// or a build slot.
+const LEVEL4_FOREGROUND = { image: "assets/maps/level4_fg.webp", x: 0, y: 0, alpha: 0.92 };
 
 // Level 3's map is built in Blender (tools/blender/maps/level3_*.py), which
 // also renders what stands up from its ground -- the fortress wall and its
 // gatehouses, the ruins' walls, the trees, the keep at the base -- as a
 // picture of the whole map for main.js to draw over the units, nearly solid.
 const LEVEL3_FOREGROUND = { image: "assets/maps/level3_fg.webp", x: 0, y: 0, alpha: 0.92 };
+
+// Levels 1 and 2 are built the same way (tools/blender/maps/), rendered at
+// twice their 1200 x 750 because the game zooms into them: their layer
+// over the units says the size to draw it at.
+function builtForeground(level, width, height) {
+  return { image: `assets/maps/level${level}_fg.webp`, x: 0, y: 0, width, height, alpha: 0.92 };
+}
 
 // Streets that show on the map but that the defence game's enemies never
 // use. In attack mode (docs/2026-10-09-modo-atacante-design.md) the army
@@ -601,7 +608,8 @@ export const LEVELS = {
     paths: [LEVEL1_PATH],
     soldierEntry: LEVEL1_PATH[0],
     soldierExit: LEVEL1_PATH.at(-1),
-    mapImage: "assets/map_bg.png",
+    mapImage: "assets/maps/level1.jpg",
+    foreground: builtForeground(1, CANVAS_WIDTH, CANVAS_HEIGHT),
     buildSlots: LEVEL1_BUILD_SLOTS,
     worldWidth: CANVAS_WIDTH,
     worldHeight: CANVAS_HEIGHT,
@@ -610,7 +618,8 @@ export const LEVELS = {
     paths: [LEVEL2_LEFT_PATH, LEVEL2_RIGHT_PATH],
     soldierEntry: LEVEL2_LEFT_PATH[0],
     soldierExit: LEVEL2_SHARED_TAIL.at(-1),
-    mapImage: "assets/map_bg_level2.png",
+    mapImage: "assets/maps/level2.jpg",
+    foreground: builtForeground(2, CANVAS_WIDTH, CANVAS_HEIGHT),
     buildSlots: LEVEL2_BUILD_SLOTS,
     worldWidth: CANVAS_WIDTH,
     worldHeight: CANVAS_HEIGHT,
@@ -651,7 +660,7 @@ export const LEVELS = {
     narrows: [...LEVEL4_BRIDGE_NORTH, ...LEVEL4_BRIDGE_SOUTH],
     water: LEVEL4_WATER,
     shores: shoreSegments(LEVEL4_WATER, LEVEL4_WORLD_SIZE),
-    mapImage: "assets/map_bg_level4.jpg",
+    mapImage: "assets/maps/level4.jpg",
     foreground: LEVEL4_FOREGROUND,
     streets: LEVEL4_STREETS,
     buildSlots: level4BuildSlots(),

@@ -138,7 +138,7 @@ class Part:
             if mirror and abs(y) > 1e-6:
                 piece.verts.new((x, -y, z))
         hull = bmesh.ops.convex_hull(piece, input=piece.verts)
-        junk = [g for g in hull.get("geom_interior", []) + hull.get("geom_unused", []) if isinstance(g, bmesh.types.BMVert)]
+        junk = list(dict.fromkeys(g for g in hull.get("geom_interior", []) + hull.get("geom_unused", []) if isinstance(g, bmesh.types.BMVert)))
         if junk:
             bmesh.ops.delete(piece, geom=junk, context="VERTS")
         bmesh.ops.recalc_face_normals(piece, faces=piece.faces)

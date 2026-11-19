@@ -17,6 +17,11 @@ const out = {
   wall: d.wall || null,
   base: d.soldierExit,
   slots: d.buildSlots,
+  soldierEntries: d.soldierEntries || [d.soldierEntry],
+  soldiersOnRoads: Boolean(d.soldiersOnRoads),
+  water: d.water || [],
+  narrows: d.narrows || [],
+  noGo: d.noGo || d.obstacles || [],
   rts: level === RTS_CONFIG.mapLevel ? { blueBase: RTS_CONFIG.blueBase, redBase: RTS_CONFIG.redBase, minerals: createRtsMineralFields() } : null,
 };
 writeFileSync(process.argv[3], JSON.stringify(out));

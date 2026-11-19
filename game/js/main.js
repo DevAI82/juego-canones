@@ -1342,7 +1342,8 @@ function drawForeground(level) {
   if (!fg || !img || !ready(img)) return;
   ctx.save();
   ctx.globalAlpha = fg.alpha ?? FOREGROUND_ALPHA;
-  ctx.drawImage(img, fg.x, fg.y);
+  // At its own size, or the one its level gives (a picture rendered larger than the map).
+  ctx.drawImage(img, fg.x, fg.y, fg.width ?? img.naturalWidth, fg.height ?? img.naturalHeight);
   ctx.restore();
 }
 
