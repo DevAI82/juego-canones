@@ -13,14 +13,14 @@ import {
 } from "./rts.js";
 
 export const SPRITE_ASSETS = {
-  bld_hq: "assets/bld_hq.jpg",
-  bld_solar: "assets/bld_solar.jpg",
-  bld_wind: "assets/bld_wind.jpg",
-  bld_refinery: "assets/bld_refinery.jpg",
-  bld_barracks: "assets/bld_barracks.jpg",
-  bld_factory: "assets/bld_factory.jpg",
-  bld_techlab: "assets/bld_techlab.jpg",
-  bld_wall: "assets/bld_wall.jpg",
+  bld_hq: "assets/units3d/bld_hq_icon.webp",
+  bld_solar: "assets/units3d/bld_solar_icon.webp",
+  bld_wind: "assets/units3d/bld_wind_icon.webp",
+  bld_refinery: "assets/units3d/bld_refinery_icon.webp",
+  bld_barracks: "assets/units3d/bld_barracks_icon.webp",
+  bld_factory: "assets/units3d/bld_factory_icon.webp",
+  bld_techlab: "assets/units3d/bld_techlab_icon.webp",
+  bld_wall: "assets/units3d/bld_wall_icon.webp",
   turret_basic: "assets/units3d/tower_basic_icon.webp",
   turret_double: "assets/units3d/tower_double_icon.webp",
   turret_laser: "assets/units3d/tower_laser_icon.webp",
@@ -29,8 +29,8 @@ export const SPRITE_ASSETS = {
   enemy_buggy: "assets/units3d/buggy_icon.webp",
   enemy_tank: "assets/units3d/tank_icon.webp",
   enemy_rocket: "assets/units3d/rocket_icon.webp",
-  unit_harvester: "assets/unit_harvester.png",
-  unit_mcv: "assets/unit_mcv.jpg",
+  unit_harvester: "assets/units3d/harvester_icon.webp",
+  unit_mcv: "assets/units3d/mcv_icon.webp",
 };
 
 export const TECH_ICONS = {

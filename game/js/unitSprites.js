@@ -74,6 +74,24 @@ export const SPRITE_UNITS = {
     rollFrames: 8, rollCycle: 20, stand: true, upright: true,
     muzzleAhead: 1.05, muzzleUp: 1.37,
   },
+  // The RTS mode's own vehicles (tools/blender/rts.py). The harvester runs
+  // on tracks: trackPitch is the metres from one tread plate to the next,
+  // for the 3D view to slide them by.
+  harvester: {
+    ...sheets("harvester", false),
+    directions: 32, hullColumns: 16,
+    framePx: 176, frameMetres: 13.2, pxPerMetre: 10,
+    rollFrames: 4, rollCycle: 6, trackPitch: 8.6 / 14,
+    muzzleAhead: 0, muzzleUp: 0,
+  },
+  mcv: {
+    ...sheets("mcv", false),
+    wheelRadius: 0.62,
+    directions: 32, hullColumns: 16,
+    framePx: 160, frameMetres: 11.0, pxPerMetre: 9,
+    rollFrames: 4, rollCycle: 7,
+    muzzleAhead: 0, muzzleUp: 0,
+  },
 };
 
 const HULL_TURN = 5; // rad/s the drawn hull turns toward the unit's heading
@@ -222,3 +240,50 @@ export function towerMuzzles(def, angle) {
     return { x: gx * scale, y: gy * scale * DEPTH_ON_SCREEN - up };
   });
 }
+
+// The RTS mode's buildings (tools/blender/rts.py), a metre of model to 10 px
+// of map: a picture per side with that side's colours, four more of its
+// construction (a 2 x 2 sheet, as the game's constructionFrame steps
+// through), and how many metres a picture's side covers -- 1.9 times the
+// building's footprint, to hold its height and its shadow (the wind
+// turbine's more, for its mast).
+const BUILDING_PX_PER_METRE = 10;
+const building = (type, frameMetres, built = true) => ({
+  frameMetres,
+  built, // whether it goes up in stages (a wall just appears)
+  icon: `assets/units3d/bld_${type}_icon.webp`,
+  model: `assets/models/bld_${type}.glb`,
+});
+export const SPRITE_BUILDINGS = {
+  hq: building("hq", 19.0),
+  solar: building("solar", 14.25),
+  wind: building("wind", 13.0),
+  refinery: building("refinery", 16.15),
+  barracks: building("barracks", 14.25),
+  factory: building("factory", 17.1),
+  techlab: building("techlab", 15.2),
+  wall: building("wall", 6.08, false),
+};
+
+// A building's pictures for a side ("blue" or "red").
+export function buildingSheets(type, team) {
+  return {
+    whole: `assets/units3d/bld_${type}_${team}.webp`,
+    build: SPRITE_BUILDINGS[type].built ? `assets/units3d/bld_${type}_${team}_build.webp` : null,
+  };
+}
+
+// The side, in world px, of the square a building's picture is drawn in.
+export function buildingDrawSize(type) {
+  return SPRITE_BUILDINGS[type].frameMetres * BUILDING_PX_PER_METRE;
+}
+export const BUILDING_MODEL_SCALE = BUILDING_PX_PER_METRE;
+
+// The ore fields' crystals: clusters in amber and, fewer, in cyan, each a
+// picture (60 px across on the map) and a model.
+const crystal = (name) => ({ picture: `assets/units3d/crystal_${name}.webp`, model: `assets/models/crystal_${name}.glb` });
+export const SPRITE_CRYSTALS = {
+  amber: [crystal("amber_0"), crystal("amber_1"), crystal("amber_2")],
+  cyan: [crystal("cyan_0"), crystal("cyan_1")],
+  size: 60,
+};

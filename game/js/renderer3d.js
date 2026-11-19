@@ -9,7 +9,7 @@
 import * as THREE from "./three.module.js";
 import { isVisible, isExplored } from "./fog.js";
 import { GLTFLoader } from "./GLTFLoader.js";
-import { SPRITE_UNITS, SPRITE_TOWERS, createUnitVisuals } from "./unitSprites.js";
+import { SPRITE_UNITS, SPRITE_TOWERS, SPRITE_BUILDINGS, BUILDING_MODEL_SCALE, SPRITE_CRYSTALS, createUnitVisuals } from "./unitSprites.js";
 
 export function createRts3DRenderer(options) {
   const {
@@ -71,6 +71,64 @@ export function createRts3DRenderer(options) {
     };
     for (const [type, def] of Object.entries(SPRITE_UNITS)) load(def.model, unitModels, type);
     for (const [type, def] of Object.entries(SPRITE_TOWERS)) load(def.model, turretModels, `turret_${type}`);
+    for (const [type, def] of Object.entries(SPRITE_BUILDINGS)) load(def.model, buildingModels, type);
+    SPRITE_CRYSTALS.amber.forEach((c, i) => load(c.model, crystalModels.amber, i));
+    SPRITE_CRYSTALS.cyan.forEach((c, i) => load(c.model, crystalModels.cyan, i));
+  }
+
+  // The base's buildings' models (tools/blender/rts.py), by type, and the
+  // ore crystals' clusters.
+  const buildingModels = {};
+  const crystalModels = { amber: [], cyan: [] };
+
+  // A building from its loaded model, or null while it hasn't arrived. Its
+  // parts that move keep their names: the headquarters' radar, the wind
+  // turbine's rotor, the laboratory's two rings.
+  function createModelBuilding(b) {
+    const source = buildingModels[b.type];
+    if (!source) return null;
+    const model = source.clone(true);
+    model.scale.setScalar(BUILDING_MODEL_SCALE);
+    model.traverse((o) => {
+      if (!o.isMesh) return;
+      o.castShadow = true;
+      o.receiveShadow = true;
+      if (o.material && o.material.name === "team") o.material = getTeamMat(b.team);
+    });
+    const group = new THREE.Group();
+    group.add(model);
+    const part = (name) => model.getObjectByName(name) || null;
+    group.userData.radar = part("radar");
+    group.userData.rotorX = part("rotor");
+    group.userData.ring1 = part("ring1");
+    group.userData.ring2 = part("ring2");
+    return group;
+  }
+
+  // An ore field's crystals from their loaded models: clusters where the 2D
+  // view draws them, a cyan one among every three. Null until all are in.
+  function createModelCrystals(field) {
+    const ready = (list, n) => list.filter(Boolean).length === n;
+    if (!ready(crystalModels.amber, SPRITE_CRYSTALS.amber.length) || !ready(crystalModels.cyan, SPRITE_CRYSTALS.cyan.length)) return null;
+    const clusters = [];
+    for (let i = 0; i < 16; i++) {
+      const angle = (i * 2.399963) + (field.id === "ore_center" ? 0.4 : 1.15);
+      const dist = (field.radius * 0.15) + ((i * 47) % Math.round(field.radius * 0.68));
+      const kind = i % 3 === 2 ? crystalModels.cyan : crystalModels.amber;
+      const cluster = kind[i % kind.length].clone(true);
+      cluster.scale.setScalar(BUILDING_MODEL_SCALE * (0.75 + (i % 5) * 0.12));
+      cluster.position.set(Math.cos(angle) * dist, 0, Math.sin(angle) * dist);
+      cluster.rotation.y = i * 1.3;
+      cluster.traverse((o) => {
+        if (!o.isMesh) return;
+        o.castShadow = true;
+        if (o.material && (o.material.name === "crystal" || o.material.name === "core")) {
+          o.material.emissive = o.material.color.clone().multiplyScalar(0.55);
+        }
+      });
+      clusters.push(cluster);
+    }
+    return clusters;
   }
 
   // A turret built from its loaded model (base > turret > barrel, facing
@@ -103,6 +161,7 @@ export function createRts3DRenderer(options) {
     const model = source.clone(true);
     model.scale.setScalar(def.pxPerMetre);
     const wheels = [];
+    const tracks = [];
     model.traverse((o) => {
       if (o.isMesh) {
         o.castShadow = true;
@@ -110,6 +169,10 @@ export function createRts3DRenderer(options) {
         if (o.material && o.material.name === "team") o.material = getTeamMat(u.team);
       }
       if (o.name.startsWith("wheel_")) wheels.push(o);
+      if (o.name.startsWith("track_")) {
+        o.userData.restX = o.position.x;
+        tracks.push(o);
+      }
     });
     const group = new THREE.Group();
     group.add(model);
@@ -119,6 +182,7 @@ export function createRts3DRenderer(options) {
       modelled: true,
       def,
       wheels,
+      tracks,
       turretPart: part("turret"),
       barrel,
       barrelX: barrel ? barrel.position.x : 0,
@@ -131,7 +195,7 @@ export function createRts3DRenderer(options) {
   // Move a model unit's parts for this frame. A turn about Blender's y axis
   // (a wheel rolling forward, a leg swinging back) is one about -z here.
   function animateModelUnit(mesh, u, dt) {
-    const { def, wheels, turretPart, barrel, barrelX, legs, shins } = mesh.userData;
+    const { def, wheels, tracks, turretPart, barrel, barrelX, legs, shins } = mesh.userData;
     const v = unitVisuals.update(u, dt, null);
     mesh.rotation.y = -v.heading;
     if (turretPart) turretPart.rotation.y = -(v.turret - v.heading);
@@ -139,6 +203,11 @@ export function createRts3DRenderer(options) {
     if (def.wheelRadius) {
       const turn = -v.roll / (def.wheelRadius * def.pxPerMetre);
       for (const w of wheels) w.rotation.z = turn;
+    }
+    if (def.trackPitch) {
+      // The tread plates slide forward a pitch and start over.
+      const slide = ((v.roll / def.pxPerMetre) % def.trackPitch + def.trackPitch) % def.trackPitch;
+      for (const t of tracks) t.position.x = t.userData.restX + slide;
     }
     if (legs[0] && legs[1]) {
       const phase = (v.roll / def.rollCycle) * Math.PI * 2;
@@ -827,8 +896,11 @@ export function createRts3DRenderer(options) {
 
   // Dispatch building model creation
   function createBuilding3D(b) {
-    let m = null;
-    if (b.type === "hq") m = createHqModel(b.team);
+    // Its Blender model once loaded; until then a stand-in that update() swaps.
+    let m = createModelBuilding(b);
+    if (m) {
+      // built above
+    } else if (b.type === "hq") m = createHqModel(b.team);
     else if (b.type === "solar") m = createSolarModel(b.team);
     else if (b.type === "wind") m = createWindModel(b.team);
     else if (b.type === "refinery") m = createRefineryModel(b.team);
@@ -844,6 +916,7 @@ export function createRts3DRenderer(options) {
       }
     } else if (b.type === "wall") m = createWallModel();
     else m = createHqModel(b.team);
+    if (SPRITE_BUILDINGS[b.type] && !buildingModels[b.type]) m.userData.standIn = true;
 
     m.position.set(b.x, 0, b.y);
     m.userData.buildingId = b.id;
@@ -1214,9 +1287,21 @@ export function createRts3DRenderer(options) {
       crystalMeshes.push(mesh);
     }
     group.userData.crystals = crystalMeshes;
+    group.userData.cones = crystalMeshes;
 
     scene.add(group);
     return group;
+  }
+
+  // Swap an ore field's stand-in cones for the crystal models when they arrive.
+  function upgradeMineralField(group, field) {
+    if (!group.userData.cones) return;
+    const clusters = createModelCrystals(field);
+    if (!clusters) return;
+    for (const cone of group.userData.cones) group.remove(cone);
+    for (const c of clusters) group.add(c);
+    group.userData.crystals = clusters;
+    group.userData.cones = null;
   }
 
   // ==========================================================================
@@ -1298,6 +1383,7 @@ export function createRts3DRenderer(options) {
         fMesh = createMineralField3D(f);
         fieldMeshes.set(f.id, fMesh);
       }
+      upgradeMineralField(fMesh, f);
       const fieldVisible = !fog || isExplored(fog, f.x, f.y);
       fMesh.visible = fieldVisible;
 
@@ -1316,7 +1402,7 @@ export function createRts3DRenderer(options) {
       if (b.hp <= 0) continue;
       activeBldIds.add(b.id);
       let bMesh = buildingMeshes.get(b.id);
-      if (bMesh && bMesh.userData.standIn && turretModels[b.type]) {
+      if (bMesh && bMesh.userData.standIn && (turretModels[b.type] || buildingModels[b.type])) {
         scene.remove(bMesh);
         bMesh = null;
       }
@@ -1335,6 +1421,7 @@ export function createRts3DRenderer(options) {
       if (bMesh.userData.rotor) {
         bMesh.userData.rotor.rotation.z += dt * 3.4;
       }
+      if (bMesh.userData.rotorX) bMesh.userData.rotorX.rotation.x += dt * 3.4;
       // Animate Tech Lab holographic rings
       if (bMesh.userData.ring1 && bMesh.userData.ring2) {
         bMesh.userData.ring1.rotation.z += dt * 1.8;

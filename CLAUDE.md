@@ -10,11 +10,12 @@ Browser tower-defense game: vanilla JS ES modules + Canvas 2D in `game/`, no bui
 - Don't spawn subagents unless the user asks.
 - The game plays music: before testing in a browser set localStorage `td_settings` to `{"music":false,"effects":false}`, and close the tab afterwards.
 
-## The units' and turrets' 3D art
+## The 3D art: units, turrets, the RTS base and the maps
 
-- The army (tank, buggy, motorcycle, rocket truck, soldier) and the defence's three turrets are 3D models built by Blender scripts in `tools/blender/` (`units.py`, `towers.py`, on `kit.py`); nothing is modelled by hand. `blender -b --factory-startup -P tools/blender/build.py -- <out> <name> <preview|icon|glb|sprites>` renders one job, and `python tools/blender/pack_sprites.py <out> game/assets <name>...` puts the results in `game/assets/units3d/` (sprite sheets, icons) and `game/assets/models/` (GLB, for the RTS mode's 3D view).
+- The army (tank, buggy, motorcycle, rocket truck, soldier), the defence's three turrets and the RTS mode's base (its seven buildings, the wall block, the harvester, the MCV, the ore crystals) are 3D models built by Blender scripts in `tools/blender/` (`units.py`, `towers.py`, `rts.py`, on `kit.py`); nothing is modelled by hand. `blender -b --factory-startup -P tools/blender/build.py -- <out> <name> <preview|icon|glb|sprites>` renders one job, and `python tools/blender/pack_sprites.py <out> game/assets <name>...` puts the results in `game/assets/units3d/` (sprite sheets, pictures, icons) and `game/assets/models/` (GLB, for the RTS mode's 3D view).
 - `game/js/unitSprites.js` holds each model's numbers (frame size, scale, where the turret and the muzzle are) and how a unit looks from frame to frame (hull easing, turret aiming, wheels, walk, recoil). They must match `SPECS` in the Blender scripts. It is looks only: the simulation doesn't know about it.
-- The RTS mode's harvester and MCV, the walls and the support buildings still use the older pictures.
+- Maps are built the same way, from the game's own data: `node tools/blender/maps/dump_level.mjs <N> <json>` writes a level's roads, wall, gates and build slots; `maps/level<N>_layout.py` (plain Python: numpy + PIL) lays the map out and paints its ground; `maps/level<N>_build.py` (Blender) models what stands on it and renders the map and its foreground (what the game draws over the units); `maps/pack_map.py` puts them in `game/assets/maps/`. Change a road in `levels.js` and the map has to be rendered again. Towers can stand on any build slot, so nothing solid goes on one: ruins' walls run on the lines half-way between slots, trees stand where four slots' squares meet.
+- Still on older pictures: the defence mode's wall blocks and support buildings, and levels 1, 2 and 4's maps.
 
 ## How the work is done
 

@@ -56,7 +56,7 @@ import {
 } from "./attackDraw.js";
 import { initShop, updateShop, initUnitUpgrades, updateUnitUpgrades, attackHudLines, defenderHudLines, attackSummary } from "./attackUI.js";
 import { BUILDING_TYPES, BUILDING_ORDER, PHASE_COUNT, SHEET_COLS, buildingProgress, constructionFrame } from "./buildings.js";
-import { RTS_UNIT_TYPES, RTS_UNIT_ORDER } from "./rtsUnits.js";
+import { RTS_UNIT_TYPES } from "./rtsUnits.js";
 import { entrySafePoints, reachesEntryRoad } from "./entryRoads.js";
 import { createRtsUI } from "./rtsUI.js";
 import {
@@ -84,7 +84,7 @@ import {
 import { createRts3DRenderer } from "./renderer3d.js";
 import {
   SPRITE_UNITS, HEIGHT_ON_SCREEN, DEPTH_ON_SCREEN, directionFrame, hullFrame, frameRect, drawSize, mountOffset, muzzleOffset, createUnitVisuals,
-  SPRITE_TOWERS, buildFrame, towerMuzzles,
+  SPRITE_TOWERS, buildFrame, towerMuzzles, SPRITE_BUILDINGS, buildingSheets, buildingDrawSize, SPRITE_CRYSTALS,
 } from "./unitSprites.js";
 
 // Browsers refuse to start any audio (synthesized SFX or the background
@@ -444,27 +444,20 @@ for (const key of BUILDING_ORDER) {
   sprites[`building_${key}`] = loadImage(BUILDING_TYPES[key].sprite);
   sprites[`building_${key}_build`] = loadImage(BUILDING_TYPES[key].sheet);
 }
-// Specific RTS buildings & MCV sprites
-sprites.bld_hq = loadImage("assets/bld_hq.jpg");
-sprites.bld_hq_build = loadImage("assets/bld_hq_build.jpg");
-sprites.unit_mcv = loadImage("assets/unit_mcv.jpg");
-sprites.unit_harvester = loadImage("assets/unit_harvester.png");
-sprites.bld_wall = loadImage("assets/bld_wall.jpg");
-sprites.bld_solar = loadImage("assets/bld_solar.jpg");
-sprites.bld_solar_build = loadImage("assets/bld_solar_build.jpg");
-sprites.bld_wind = loadImage("assets/bld_wind.jpg");
-sprites.bld_wind_build = loadImage("assets/bld_wind_build.jpg");
-sprites.bld_refinery = loadImage("assets/bld_refinery.jpg");
-sprites.bld_refinery_build = loadImage("assets/bld_refinery_build.jpg");
-sprites.bld_barracks = loadImage("assets/bld_barracks.jpg");
-sprites.bld_barracks_build = loadImage("assets/bld_barracks_build.jpg");
-sprites.bld_factory = loadImage("assets/bld_factory.jpg");
-sprites.bld_factory_build = loadImage("assets/bld_factory_build.jpg");
-sprites.bld_techlab = loadImage("assets/bld_techlab.jpg");
-sprites.bld_techlab_build = loadImage("assets/bld_techlab_build.jpg");
-
-// The RTS mode's vehicles (rtsUnits.js): seen from above, like the units.
-for (const key of RTS_UNIT_ORDER) sprites[`unit_${key}`] = loadImage(RTS_UNIT_TYPES[key].sprite);
+// The RTS mode's buildings, rendered off their 3D models (unitSprites.js):
+// per side, each one whole and the sheet of its construction; and the ore
+// fields' crystal clusters.
+for (const type of Object.keys(SPRITE_BUILDINGS)) {
+  for (const team of ["blue", "red"]) {
+    const sheets = buildingSheets(type, team);
+    sprites[`bld_${type}_${team}`] = loadImage(sheets.whole);
+    if (sheets.build) sprites[`bld_${type}_${team}_build`] = loadImage(sheets.build);
+  }
+}
+const crystalImages = {
+  amber: SPRITE_CRYSTALS.amber.map((c) => loadImage(c.picture)),
+  cyan: SPRITE_CRYSTALS.cyan.map((c) => loadImage(c.picture)),
+};
 // A unit's picture: the defence's and the attack's units' (enemy_*), or an
 // RTS vehicle's (unit_*).
 const unitSprite = (type) => sprites[`unit_${type}`] || sprites[`enemy_${type}`];
@@ -836,8 +829,9 @@ const ENEMY_DRAW_SIZES = {
   buggy: { w: 48, h: 30, shadowRx: 22, shadowRy: 13 },
   motorcycle: { w: 51, h: 26, shadowRx: 18, shadowRy: 10 },
   soldier: { w: 19, h: 24, shadowRx: 11, shadowRy: 11 },
-  // The RTS mode's vehicles: drawn as wide as their footprint (rtsUnits.js).
-  harvester: { h: RTS_UNIT_TYPES.harvester.footprint[1], shadowRx: 50, shadowRy: 24 },
+  // The RTS mode's vehicles: the harvester as long and wide as its footprint (rtsUnits.js).
+  harvester: { w: RTS_UNIT_TYPES.harvester.footprint[0], h: RTS_UNIT_TYPES.harvester.footprint[1], shadowRx: 50, shadowRy: 24 },
+  mcv: { w: 80, h: 40, shadowRx: 40, shadowRy: 20 },
 };
 
 // A unit with sheets rendered off its 3D model: the hull's frame for its
@@ -3609,78 +3603,31 @@ function drawMineralField(field, now) {
   }
   ctx.restore();
 
-  // 3. Multi-Faceted 3D Isometric Crystal Spires
-  // Determine crystal clusters based on reserves percentage
+  // 3. The crystals: clusters rendered off their 3D models
+  // (unitSprites.js), fewer and smaller as the field is mined out, a cyan
+  // one among every three; drawn back to front.
   const clusterCount = Math.max(4, Math.round(5 + pct * 11));
+  const clusters = [];
   for (let i = 0; i < clusterCount; i++) {
     // Deterministic distribution seeded by field ID and index
     const angle = (i * 2.399963) + (field.id === "ore_center" ? 0.4 : 1.15);
     const dist = (field.radius * 0.15) + ((i * 47) % Math.round(field.radius * 0.68));
-    const cx = field.x + Math.cos(angle) * dist;
-    const cy = field.y + Math.sin(angle) * dist;
-    const baseH = (14 + (i % 5) * 5) * (0.65 + pct * 0.35); // Height grows with reserves
-    const baseW = (6 + (i % 3) * 2.5);
-    const isCyanSpire = i % 3 === 2; // Mixed rare cyan Tiberium crystals with amber
-    const shimmer = Math.sin(now / 350 + i * 1.7) * 0.25 + 0.75;
-
-    ctx.save();
-    ctx.translate(cx, cy);
-
-    // 3a. Cast Ground Shadow (projected to the bottom-right in isometric perspective)
-    ctx.fillStyle = "rgba(0, 0, 0, 0.45)";
-    ctx.beginPath();
-    ctx.moveTo(-baseW * 0.6, 0);
-    ctx.lineTo(baseH * 0.65, baseH * 0.32);
-    ctx.lineTo(baseH * 0.75 + baseW * 0.3, baseH * 0.36);
-    ctx.lineTo(baseW * 0.6, 0);
-    ctx.closePath();
-    ctx.fill();
-
-    // 3b. Ground Occlusion Base
-    ctx.fillStyle = "rgba(0, 0, 0, 0.35)";
-    ctx.beginPath();
-    ctx.ellipse(0, 0, baseW * 0.9, baseW * 0.5, 0, 0, Math.PI * 2);
-    ctx.fill();
-
-    // 3c. Left Facet (Ambient / Shadowed face)
-    ctx.beginPath();
-    ctx.moveTo(0, -baseH);
-    ctx.lineTo(-baseW * 0.7, -baseH * 0.15);
-    ctx.lineTo(0, baseW * 0.25);
-    ctx.closePath();
-    ctx.fillStyle = isCyanSpire
-      ? `rgba(3, 105, 161, ${shimmer})`
-      : `rgba(180, 83, 9, ${shimmer})`;
-    ctx.fill();
-
-    // 3d. Right Facet (Sunlit face - brightly illuminated)
-    ctx.beginPath();
-    ctx.moveTo(0, -baseH);
-    ctx.lineTo(0, baseW * 0.25);
-    ctx.lineTo(baseW * 0.75, -baseH * 0.12);
-    ctx.closePath();
-    ctx.fillStyle = isCyanSpire
-      ? `rgba(56, 189, 248, ${shimmer})`
-      : `rgba(251, 191, 36, ${shimmer})`;
-    ctx.fill();
-
-    // 3e. Center Specular Ridge Line & Apex Glint
-    ctx.strokeStyle = isCyanSpire ? "#e0f2fe" : "#fef08a";
-    ctx.lineWidth = 1.2;
-    ctx.beginPath();
-    ctx.moveTo(0, -baseH);
-    ctx.lineTo(0, baseW * 0.25);
-    ctx.stroke();
-
-    // 3f. Occasional Apex Light Glint (twinkling star)
+    clusters.push({ i, x: field.x + Math.cos(angle) * dist, y: field.y + Math.sin(angle) * dist });
+  }
+  clusters.sort((a, b) => a.y - b.y);
+  for (const { i, x, y } of clusters) {
+    const kind = i % 3 === 2 ? crystalImages.cyan : crystalImages.amber;
+    const img = kind[i % kind.length];
+    if (!ready(img)) continue;
+    const size = SPRITE_CRYSTALS.size * (0.75 + (i % 5) * 0.12) * (0.65 + pct * 0.35);
+    ctx.drawImage(img, x - size / 2, y - size / 2, size, size);
+    // An occasional glint at the tip.
     if (Math.sin(now / 200 + i * 2.3) > 0.85) {
       ctx.fillStyle = "#ffffff";
       ctx.beginPath();
-      ctx.arc(0, -baseH, 2, 0, Math.PI * 2);
+      ctx.arc(x, y - size * 0.34, 1.8, 0, Math.PI * 2);
       ctx.fill();
     }
-
-    ctx.restore();
   }
 
   // 4. Floating Luminous Ion Particles
@@ -3844,8 +3791,10 @@ function drawRtsBuilding(b, now) {
   ctx.restore();
 
   // 2. Building Body
-  const imgKey = `bld_${b.type}`;
-  const img = sprites[imgKey] || sprites[b.type] || (def.sprite ? sprites[def.sprite] : null);
+  const img = sprites[`bld_${b.type}_${b.team}`];
+  // A building's picture is 1.9 times its footprint across (unitSprites.js),
+  // to hold its height and its shadow.
+  const pictureSize = SPRITE_BUILDINGS[b.type] ? buildingDrawSize(b.type) : fp * 1.5;
 
   if (b.buildTimeRemaining > 0) {
     const totalTime = b.totalBuildTime || def.buildDuration || 4.0;
@@ -3860,9 +3809,9 @@ function drawRtsBuilding(b, now) {
       }
     } else {
       // 4-Phase military building construction animation (2x2 sheet)
-      const sheet = sprites[`bld_${b.type}_build`] || sprites[`building_${b.type}_build`];
-      const finished = sprites[`bld_${b.type}`] || sprites[b.type] || (def.sprite ? sprites[def.sprite] : null);
-      const sz = fp * 1.65;
+      const sheet = sprites[`bld_${b.type}_${b.team}_build`];
+      const finished = img;
+      const sz = pictureSize;
       const frame = constructionFrame(prog);
 
       ctx.save();
@@ -3884,14 +3833,15 @@ function drawRtsBuilding(b, now) {
       if (frame.to !== frame.from) drawPhase(frame.to, frame.mix);
 
       // Active construction effects: holographic grid + sparks
+      const sparks = fp * 1.65;
       ctx.strokeStyle = "rgba(56, 189, 248, 0.75)";
       ctx.lineWidth = 1.5;
       ctx.setLineDash([4, 4]);
       ctx.strokeRect(-fp * 0.7, -fp * 0.7, fp * 1.4, fp * 1.4);
 
       if (prog > 0.1 && prog < 0.95) {
-        drawWeldingSparks(ctx, -sz * 0.18, -sz * 0.1, now);
-        drawWeldingSparks(ctx, sz * 0.18, sz * 0.05, now + 90);
+        drawWeldingSparks(ctx, -sparks * 0.18, -sparks * 0.1, now);
+        drawWeldingSparks(ctx, sparks * 0.18, sparks * 0.05, now + 90);
       }
       ctx.restore();
     }
@@ -3902,8 +3852,8 @@ function drawRtsBuilding(b, now) {
     // Finished building:
     if (b.type === "wall") {
       const sz = 32;
-      if (ready(sprites.bld_wall)) {
-        ctx.drawImage(sprites.bld_wall, -sz / 2, -sz / 2, sz, sz);
+      if (ready(img)) {
+        ctx.drawImage(img, -pictureSize / 2, -pictureSize / 2, pictureSize, pictureSize);
       } else {
         ctx.fillStyle = "#64748b";
         ctx.fillRect(-sz / 2, -sz / 2, sz, sz);
@@ -3933,7 +3883,7 @@ function drawRtsBuilding(b, now) {
         ctx.fillText("⚡ OFF", 0, -fp * 0.6);
       }
     } else {
-      const sz = fp * 1.5;
+      const sz = pictureSize;
       if (ready(img)) {
         ctx.drawImage(img, -sz / 2, -sz / 2, sz, sz);
       } else {
@@ -4005,22 +3955,16 @@ function drawRtsBuilding(b, now) {
 }
 
 function drawRtsUnit(u, now) {
-  // 0. MCV Active Deployment Animation (4 Phases from bld_hq_build.jpg)
+  // 0. MCV Active Deployment Animation (the headquarters' four construction phases)
   if (u.type === "mcv" && u.isDeploying) {
     const prog = Math.max(0, Math.min(0.999, (u.deployProgress || 0) / (u.deployDuration || 3.5)));
-    const sheet = sprites.bld_hq_build;
-    const finished = sprites.bld_hq;
-    const sz = 110;
+    const sheet = sprites[`bld_hq_${u.team}_build`];
+    const finished = sprites[`bld_hq_${u.team}`];
+    const sz = buildingDrawSize("hq");
     const frame = constructionFrame(prog);
 
     ctx.save();
     ctx.translate(u.x, u.y);
-
-    // Foundation shadow
-    ctx.fillStyle = "rgba(0, 0, 0, 0.4)";
-    ctx.beginPath();
-    ctx.ellipse(0, 10, sz * 0.45, sz * 0.3, 0, 0, Math.PI * 2);
-    ctx.fill();
 
     const drawHqPhase = (phase, alpha) => {
       if (alpha <= 0) return;
@@ -4041,17 +3985,17 @@ function drawRtsUnit(u, now) {
 
     // Welding sparks and deploy holographic beacon
     if (prog > 0.2 && prog < 0.95) {
-      drawWeldingSparks(ctx, -sz * 0.12, -sz * 0.18, now);
-      drawWeldingSparks(ctx, sz * 0.16, sz * 0.05, now + 80);
+      drawWeldingSparks(ctx, -14, -20, now);
+      drawWeldingSparks(ctx, 18, 6, now + 80);
     }
 
     ctx.strokeStyle = "rgba(56, 189, 248, 0.8)";
     ctx.lineWidth = 1.5;
     ctx.setLineDash([4, 4]);
-    ctx.strokeRect(-sz * 0.45, -sz * 0.45, sz * 0.9, sz * 0.9);
+    ctx.strokeRect(-50, -50, 100, 100);
     ctx.restore();
 
-    drawRtsBuildProgressBar(ctx, u.x, u.y - sz * 0.5 - 14, prog, "DESPLEGANDO BASE");
+    drawRtsBuildProgressBar(ctx, u.x, u.y - 69, prog, "DESPLEGANDO BASE");
     return;
   }
 
@@ -4107,7 +4051,7 @@ function drawRtsUnit(u, now) {
 
     // 2a. Rear Cargo Hopper with Physical Glowing Tiberium/Ore Crystals
     if (loadPct > 0) {
-      const hopX = -w * 0.32;
+      const hopX = -w * 0.17;
       const hopW = w * 0.38;
       const hopH = h * 0.55;
       ctx.fillStyle = "rgba(10, 15, 20, 0.9)";

@@ -42,6 +42,18 @@ for name in sys.argv[3:]:
     if build:
         sheet(build, 4).save(dst / "units3d" / f"{name}_build.webp", quality=90, method=4)
         done.append(f"{len(build)} build frames")
+    for side in ("blue", "red"):                      # a building: one picture and four of its construction per side
+        whole = src / f"{name}_{side}.png"
+        if whole.exists():
+            Image.open(whole).save(dst / "units3d" / f"{name}_{side}.webp", quality=90, method=4)
+            done.append(f"{side}")
+        going_up = sorted(src.glob(f"{name}_{side}_build_*.png"))
+        if going_up:
+            sheet(going_up, 2).save(dst / "units3d" / f"{name}_{side}_build.webp", quality=88, method=4)
+    alone = src / f"{name}.png"
+    if alone.exists():                               # a prop: its one picture
+        Image.open(alone).save(dst / "units3d" / f"{name}.webp", quality=90, method=4)
+        done.append("picture")
     icon = src / f"{name}_icon.png"
     if icon.exists():
         Image.open(icon).save(dst / "units3d" / f"{name}_icon.webp", quality=90, method=4)

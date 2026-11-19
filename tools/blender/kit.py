@@ -370,3 +370,33 @@ def do_sprites(model, spec, out, name):
     for d in range(directions):
         spin.rotation_euler.z = -d * 2 * math.pi / directions
         render(os.path.join(out, f"{name}_turret_{d:02d}.png"))
+
+
+TEAM_COLORS = {"blue": (0.03, 0.22, 0.62), "red": (0.62, 0.07, 0.05)}
+
+
+def do_static(model, spec, out, name):
+    """The pictures of something that never turns. A building: one per side
+    (<name>_<team>.png, its "team" material in that side's colour) and, of
+    its construction, four each (<name>_<team>_build_<k>.png: its stages
+    going up in order). A prop: just <name>.png."""
+    setup_scene(spec["frame_px"], spec["frame_px"], 160)
+    add_ground()
+    weather(model["mats"], spec.get("weathered", WEATHERED), spec.get("weather", 1.0))
+    add_camera(ortho_metres=spec["frame_m"])
+    if spec.get("kind") != "building":
+        render(os.path.join(out, f"{name}.png"))
+        return
+    stages = model["stages"]
+    team = model["mats"]["team"]
+    bsdf = next(n for n in team.node_tree.nodes if n.type == "BSDF_PRINCIPLED")
+    for side, color in TEAM_COLORS.items():
+        bsdf.inputs["Base Color"].default_value = (*color, 1)
+        for ob in stages:
+            ob.hide_render = False
+        render(os.path.join(out, f"{name}_{side}.png"))
+        if spec.get("stages", True):
+            for k in range(4):
+                for i, ob in enumerate(stages):
+                    ob.hide_render = min(i, 3) > k
+                render(os.path.join(out, f"{name}_{side}_build_{k}.png"))

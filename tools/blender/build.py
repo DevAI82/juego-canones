@@ -19,8 +19,9 @@ import bpy
 import kit
 import units
 import towers
+import rts
 
-SPECS = {**units.SPECS, **towers.SPECS}
+SPECS = {**units.SPECS, **towers.SPECS, **rts.SPECS}
 
 
 def main():
@@ -38,7 +39,10 @@ def main():
     elif job == "icon":
         kit.do_icon(model, spec, out, name)
     elif job == "sprites":
-        kit.do_sprites(model, spec, out, name)
+        if spec.get("kind") in ("building", "prop"):
+            kit.do_static(model, spec, out, name)
+        else:
+            kit.do_sprites(model, spec, out, name)
     else:
         raise SystemExit(f"unknown job {job}")
 

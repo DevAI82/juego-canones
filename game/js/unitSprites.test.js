@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   SPRITE_UNITS, HEIGHT_ON_SCREEN, DEPTH_ON_SCREEN, directionFrame, turnToward, createUnitVisuals, hullFrame, frameRect, drawSize, muzzleOffset, mountOffset, SPRITE_TOWERS, buildFrame, towerMuzzles,
+  SPRITE_BUILDINGS, buildingSheets, buildingDrawSize, SPRITE_CRYSTALS,
 } from "./unitSprites.js";
 
 const near = (a, b, eps = 1e-9) => assert.ok(Math.abs(a - b) < eps, `${a} is not ${b}`);
@@ -150,10 +151,30 @@ test("a turret that isn't over the middle of its vehicle sits where the hull's h
   near(m.x, back - def.muzzleAhead * def.pxPerMetre);
 });
 
-test("every unit of the army has its sheets: the vehicles with a gun that turns, the motorcycle and the soldier without", () => {
-  assert.deepEqual(Object.keys(SPRITE_UNITS).sort(), ["buggy", "motorcycle", "rocket", "soldier", "tank"]);
+test("every unit has its sheets: the army's vehicles with a gun that turns, the rest without", () => {
+  assert.deepEqual(Object.keys(SPRITE_UNITS).sort(), ["buggy", "harvester", "mcv", "motorcycle", "rocket", "soldier", "tank"]);
   for (const type of ["tank", "buggy", "rocket"]) assert.ok(SPRITE_UNITS[type].turret, type);
-  for (const type of ["motorcycle", "soldier"]) assert.equal(SPRITE_UNITS[type].turret, undefined, type);
+  for (const type of ["motorcycle", "soldier", "harvester", "mcv"]) assert.equal(SPRITE_UNITS[type].turret, undefined, type);
+});
+
+test("the RTS mode's own vehicles: the harvester as long as its footprint, on tracks, and the MCV on wheels", () => {
+  near(SPRITE_UNITS.harvester.pxPerMetre * 10, 100); // its 10 m are the footprint's 100 px (rtsUnits.js)
+  assert.ok(SPRITE_UNITS.harvester.trackPitch > 0);
+  assert.ok(SPRITE_UNITS.mcv.wheelRadius > 0);
+});
+
+test("each of the base's buildings has, per side, a picture and its construction, and a size on the map", () => {
+  assert.deepEqual(Object.keys(SPRITE_BUILDINGS).sort(), ["barracks", "factory", "hq", "refinery", "solar", "techlab", "wall", "wind"]);
+  assert.deepEqual(buildingSheets("hq", "red"), { whole: "assets/units3d/bld_hq_red.webp", build: "assets/units3d/bld_hq_red_build.webp" });
+  assert.deepEqual(buildingSheets("wall", "blue"), { whole: "assets/units3d/bld_wall_blue.webp", build: null }); // a wall just appears
+  assert.equal(buildingDrawSize("hq"), 190); // 19 m of picture at 10 px a metre: 1.9 times its 100 px footprint
+  for (const type of Object.keys(SPRITE_BUILDINGS)) assert.ok(SPRITE_BUILDINGS[type].model && SPRITE_BUILDINGS[type].icon, type);
+});
+
+test("ore crystals come in amber and, fewer, in cyan", () => {
+  assert.equal(SPRITE_CRYSTALS.amber.length, 3);
+  assert.equal(SPRITE_CRYSTALS.cyan.length, 2);
+  for (const c of [...SPRITE_CRYSTALS.amber, ...SPRITE_CRYSTALS.cyan]) assert.ok(c.picture.endsWith(".webp") && c.model.endsWith(".glb"));
 });
 
 test("a unit with a standing picture shows it when still, and its walk when moving", () => {
