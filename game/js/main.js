@@ -435,17 +435,6 @@ for (let level = 1; level <= MAX_LEVEL; level++) {
   if (d.foreground) foregroundImages[level] = loadImage(d.foreground.image);
 }
 const sprites = {
-  tower_basic: loadImage("assets/tower_basic.png"),
-  tower_double: loadImage("assets/tower_double.png"),
-  tower_laser: loadImage("assets/tower_laser.png"),
-  tower_basic_build: loadImage("assets/tower_basic_build.png"),
-  tower_double_build: loadImage("assets/tower_double_build.png"),
-  tower_laser_build: loadImage("assets/tower_laser_build.png"),
-  enemy_soldier: loadImage("assets/enemy_soldier.png"),
-  enemy_buggy: loadImage("assets/enemy_buggy.png"),
-  enemy_tank: loadImage("assets/enemy_tank.png"),
-  enemy_motorcycle: loadImage("assets/enemy_motorcycle.png"),
-  enemy_rocket: loadImage("assets/enemy_rocket.png"),
   explosion: loadImage("assets/explosion.png"),
   projectile: loadImage("assets/projectile.png"),
 };
@@ -838,12 +827,15 @@ function postAction(body) {
 // second -- purely a rendering flourish (see drawEnemy), no gameplay effect.
 const BOB_SPEED = 9;
 
+// How big a unit is on the map, for its health bar, its selection ring and
+// the like: the army's units (drawn from unitSprites.js's sheets) as long
+// (w) and wide (h) as the pictures they used to be.
 const ENEMY_DRAW_SIZES = {
-  tank: { h: 36, shadowRx: 28, shadowRy: 16 },
-  rocket: { h: 34, shadowRx: 26, shadowRy: 15 },
-  buggy: { h: 30, shadowRx: 22, shadowRy: 13 },
-  motorcycle: { h: 26, shadowRx: 18, shadowRy: 10 },
-  soldier: { h: 24, shadowRx: 11, shadowRy: 11 },
+  tank: { w: 72, h: 36, shadowRx: 28, shadowRy: 16 },
+  rocket: { w: 73, h: 34, shadowRx: 26, shadowRy: 15 },
+  buggy: { w: 48, h: 30, shadowRx: 22, shadowRy: 13 },
+  motorcycle: { w: 51, h: 26, shadowRx: 18, shadowRy: 10 },
+  soldier: { w: 19, h: 24, shadowRx: 11, shadowRy: 11 },
   // The RTS mode's vehicles: drawn as wide as their footprint (rtsUnits.js).
   harvester: { h: RTS_UNIT_TYPES.harvester.footprint[1], shadowRx: 50, shadowRy: 24 },
 };
@@ -918,7 +910,7 @@ function drawEnemy(e) {
   const img = unitSprite(e.type);
   const sizeDef = ENEMY_DRAW_SIZES[e.type] || { h: 28, shadowRx: 20, shadowRy: 12 };
   const h = sizeDef.h;
-  const w = ready(img) ? h * (img.naturalWidth / img.naturalHeight) : h * 1.5;
+  const w = sizeDef.w || (ready(img) ? h * (img.naturalWidth / img.naturalHeight) : h * 1.5);
 
   // The turret turns to what the unit would fire at: the best tower in range.
   const aim = pickTowerTarget(e, state.towers || []);
@@ -1066,17 +1058,13 @@ function drawSiegeDesignator(e) {
 // t.angle -- shared by drawTower and the end of drawTowerBuilding's
 // crossfade.
 function drawTurretSprite(t, alpha = 1) {
-  const img = sprites[`tower_${t.type}`];
   ctx.save();
   ctx.globalAlpha = alpha;
   ctx.translate(t.x, t.y);
-  ctx.rotate(t.angle - (TOWER_RESTING_ANGLES[t.type] || 0));
-  if (ready(img)) {
-    ctx.drawImage(img, -TOWER_DRAW_SIZE / 2, -TOWER_DRAW_SIZE / 2, TOWER_DRAW_SIZE, TOWER_DRAW_SIZE);
-  } else {
-    ctx.fillStyle = t.type === "laser" ? "#8a6a3a" : t.type === "double" ? "#888" : "#6b7a4a";
-    ctx.fillRect(-14, -10, 28, 20);
-  }
+  ctx.rotate(t.angle);
+  ctx.fillStyle = t.type === "laser" ? "#8a6a3a" : t.type === "double" ? "#888" : "#6b7a4a";
+  ctx.fillRect(-14, -10, 28, 20);
+  ctx.fillRect(10, -3, 22, 6);
   ctx.restore();
 }
 
@@ -1134,25 +1122,7 @@ function drawTowerBuilding(t) {
     drawBuildBar(t.x, t.y - 44, progress);
     return;
   }
-  const sheet = sprites[`tower_${t.type}_build`];
-  const crossfadeStart = 1 - BUILD_CROSSFADE_FRACTION;
-  const settle = Math.max(0, (progress - crossfadeStart) / BUILD_CROSSFADE_FRACTION); // 0 -> 1 over the crossfade
-
-  if (sheet && ready(sheet)) {
-    const frameIndex = Math.min(BUILD_ANIM_FRAME_COUNT - 1, Math.floor(progress * BUILD_ANIM_FRAME_COUNT));
-    const col = frameIndex % BUILD_ANIM_COLS;
-    const row = Math.floor(frameIndex / BUILD_ANIM_COLS);
-    const fw = sheet.naturalWidth / BUILD_ANIM_COLS;
-    const fh = sheet.naturalHeight / BUILD_ANIM_ROWS;
-    const s = BUILD_ANIM_DRAW_SIZE;
-    ctx.save();
-    ctx.globalAlpha = 1 - settle;
-    ctx.drawImage(sheet, col * fw, row * fh, fw, fh, t.x - s / 2, t.y - s / 2, s, s);
-    ctx.restore();
-    if (settle > 0) drawTurretSprite(t, settle);
-  } else {
-    drawTurretSprite(t, Math.max(0.2, progress));
-  }
+  drawTurretSprite(t, Math.max(0.2, progress));
 
   drawBuildBar(t.x, t.y - 44, progress);
 }
@@ -1250,19 +1220,6 @@ function drawTowerBase(t) {
   }
   ctx.restore();
 }
-
-// Which way each tower sprite's barrel points as drawn in its PNG, so the
-// sprite can be rotated to match t.angle (0 = +x). Measured from the
-// sprites' own alpha (direction of the farthest opaque pixels from the
-// hull's centroid): tower_basic.png's barrel points straight down,
-// tower_double/tower_laser.png's straight up. The previous values here
-// (-59.5/+90/+90) didn't match the PNGs, which left every turret aiming
-// well off its target while its rounds still left from the correct side.
-const TOWER_RESTING_ANGLES = {
-  basic: Math.PI / 2,
-  double: -Math.PI / 2,
-  laser: -Math.PI / 2,
-};
 
 // A support building (buildings.js) at its place on the map (b.x, b.y: the
 // middle of its ground), with its works going on or finished: the phase
@@ -3895,24 +3852,9 @@ function drawRtsBuilding(b, now) {
     const prog = Math.max(0, Math.min(0.999, 1 - (b.buildTimeRemaining / totalTime)));
 
     if (b.type.startsWith("turret_")) {
-      // 48-frame turret construction animation
+      // The turret going up, from its model's construction frames
       const tType = b.type.replace("turret_", "");
-      const sheet = sprites[`tower_${tType}_build`];
-      const finished = sprites[b.type] || sprites[`tower_${tType}`];
-      const s = fp * 1.5;
-      if (towerModelled(tType)) {
-        drawTowerBuildSprite(tType, 0, 0, prog, RTS_TURRET_SCALE);
-      } else if (sheet && ready(sheet)) {
-        const frameIndex = Math.min(BUILD_ANIM_FRAME_COUNT - 1, Math.floor(prog * BUILD_ANIM_FRAME_COUNT));
-        const col = frameIndex % BUILD_ANIM_COLS;
-        const row = Math.floor(frameIndex / BUILD_ANIM_COLS);
-        const fw = sheet.naturalWidth / BUILD_ANIM_COLS;
-        const fh = sheet.naturalHeight / BUILD_ANIM_ROWS;
-        ctx.drawImage(sheet, col * fw, row * fh, fw, fh, -s / 2, -s / 2, s, s);
-      } else if (ready(finished)) {
-        ctx.globalAlpha = 0.35 + prog * 0.65;
-        ctx.drawImage(finished, -s / 2, -s / 2, s, s);
-      }
+      if (towerModelled(tType)) drawTowerBuildSprite(tType, 0, 0, prog, RTS_TURRET_SCALE);
       if (prog > 0.1 && prog < 0.95) {
         drawWeldingSparks(ctx, 0, -fp * 0.2, now);
       }
@@ -3970,16 +3912,9 @@ function drawRtsBuilding(b, now) {
         ctx.strokeRect(-sz / 2, -sz / 2, sz, sz);
       }
     } else if (b.type.startsWith("turret_")) {
-      const sz = fp * 1.35;
       const tType = b.type.replace("turret_", "");
-      const turretImg = sprites[b.type] || sprites[`tower_${tType}`];
       if (towerModelled(tType)) {
         drawTowerSprite(tType, 0, 0, b.turretAngle || 0, RTS_TURRET_SCALE);
-      } else if (ready(turretImg)) {
-        ctx.save();
-        ctx.rotate(b.turretAngle || 0);
-        ctx.drawImage(turretImg, -sz / 2, -sz / 2, sz, sz);
-        ctx.restore();
       } else {
         ctx.fillStyle = b.team === "blue" ? "#1e3a8a" : "#7f1d1d";
         ctx.beginPath();
@@ -4124,7 +4059,7 @@ function drawRtsUnit(u, now) {
   const img = unitSprite(u.type);
   const sizeDef = ENEMY_DRAW_SIZES[u.type] || { h: 28, shadowRx: 20, shadowRy: 12 };
   const h = sizeDef.h || 32;
-  const w = ready(img) ? h * (img.naturalWidth / img.naturalHeight) : h * 1.4;
+  const w = sizeDef.w || (ready(img) ? h * (img.naturalWidth / img.naturalHeight) : h * 1.4);
 
   ctx.save();
   ctx.translate(u.x, u.y);
