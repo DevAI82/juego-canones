@@ -1,15 +1,18 @@
-"""Puts the frames build_tank.py rendered into the game's sprite sheets.
+"""Puts what build.py rendered into the game's files.
 
-  python tools/blender/pack_sprites.py <frames_dir> <game/assets/units3d>
+  python tools/blender/pack_sprites.py <frames_dir> <game/assets> <name> [<name> ...]
 
-tank_hull.webp: 16 columns; frame = wheel_frame * 32 + direction.
-tank_turret.webp: 8 columns; frame = direction.
+<name>_hull.webp    16 columns; frame = row * directions + direction, with a
+                    row for standing still (if the unit has one) and one per
+                    rolling or walking step.
+<name>_turret.webp  8 columns; frame = direction.
+<name>_icon.webp    the picture for the shop and the sidebar.
+models/<name>.glb   the model for the 3D view.
 """
+import shutil
 import sys
 from pathlib import Path
 from PIL import Image
-
-DIRECTIONS, WHEEL_FRAMES = 32, 4
 
 
 def sheet(paths, columns):
@@ -22,9 +25,24 @@ def sheet(paths, columns):
 
 
 src, dst = Path(sys.argv[1]), Path(sys.argv[2])
-dst.mkdir(parents=True, exist_ok=True)
-hull = [src / f"hull_{w}_{d:02d}.png" for w in range(WHEEL_FRAMES) for d in range(DIRECTIONS)]
-turret = [src / f"turret_{d:02d}.png" for d in range(DIRECTIONS)]
-sheet(hull, 16).save(dst / "tank_hull.webp", quality=92, method=6)
-sheet(turret, 8).save(dst / "tank_turret.webp", quality=92, method=6)
-print("packed", len(hull), "hull and", len(turret), "turret frames into", dst)
+(dst / "units3d").mkdir(parents=True, exist_ok=True)
+(dst / "models").mkdir(parents=True, exist_ok=True)
+for name in sys.argv[3:]:
+    hull = sorted(src.glob(f"{name}_hull_*.png"))
+    turret = sorted(src.glob(f"{name}_turret_*.png"))
+    done = []
+    if hull:
+        sheet(hull, 16).save(dst / "units3d" / f"{name}_hull.webp", quality=90, method=6)
+        done.append(f"{len(hull)} hull frames")
+    if turret:
+        sheet(turret, 8).save(dst / "units3d" / f"{name}_turret.webp", quality=90, method=6)
+        done.append(f"{len(turret)} turret frames")
+    icon = src / f"{name}_icon.png"
+    if icon.exists():
+        Image.open(icon).save(dst / "units3d" / f"{name}_icon.webp", quality=90, method=6)
+        done.append("icon")
+    glb = src / f"{name}.glb"
+    if glb.exists():
+        shutil.copy(glb, dst / "models" / f"{name}.glb")
+        done.append("model")
+    print(name + ":", ", ".join(done) or "nothing found")

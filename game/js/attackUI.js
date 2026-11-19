@@ -11,11 +11,11 @@ export const UNIT_NAMES = { soldier: "Soldado", motorcycle: "Moto", buggy: "Bugg
 export const SKILL_NAMES = { damage: "Daño", range: "Alcance", armor: "Blindaje", rate: "Cadencia", speed: "Velocidad" };
 
 const UNIT_ICON = {
-  soldier: "assets/enemy_soldier.png",
-  motorcycle: "assets/enemy_motorcycle.png",
-  buggy: "assets/enemy_buggy.png",
-  tank: "assets/enemy_tank.png",
-  rocket: "assets/enemy_rocket.png",
+  soldier: "assets/units3d/soldier_icon.webp",
+  motorcycle: "assets/units3d/motorcycle_icon.webp",
+  buggy: "assets/units3d/buggy_icon.webp",
+  tank: "assets/units3d/tank_icon.webp",
+  rocket: "assets/units3d/rocket_icon.webp",
 };
 const SKILL_ICON = {
   damage: "assets/ui_icon_damage.png",

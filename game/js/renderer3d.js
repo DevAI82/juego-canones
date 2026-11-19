@@ -8,6 +8,8 @@
 
 import * as THREE from "./three.module.js";
 import { isVisible, isExplored } from "./fog.js";
+import { GLTFLoader } from "./GLTFLoader.js";
+import { SPRITE_UNITS, createUnitVisuals } from "./unitSprites.js";
 
 export function createRts3DRenderer(options) {
   const {
@@ -36,6 +38,88 @@ export function createRts3DRenderer(options) {
   const fieldMeshes = new Map();    // id -> THREE.Group
   const projectileMeshes = new Map();
   const activeExplosions = [];      // array of explosion objects
+
+  // The army's models (tools/blender/units.py), by unit type once loaded, and
+  // how each unit on the field looks right now (unitSprites.js): the same
+  // easing, aiming, rolling and walking as the 2D game's sprites.
+  const unitModels = {};
+  const unitVisuals = createUnitVisuals();
+
+  function loadUnitModels() {
+    const loader = new GLTFLoader();
+    for (const [type, def] of Object.entries(SPRITE_UNITS)) {
+      loader.load(def.model, (gltf) => {
+        // Under this scene's lights the models' paint comes out washed out,
+        // and with no sky to reflect their steel goes black: tone both down.
+        const toned = new Set();
+        gltf.scene.traverse((o) => {
+          if (!o.isMesh || !o.material || toned.has(o.material)) return;
+          toned.add(o.material);
+          o.material.color.multiplyScalar(0.6);
+          o.material.metalness = Math.min(o.material.metalness, 0.3);
+        });
+        unitModels[type] = gltf.scene;
+      }, undefined, () => {});
+    }
+  }
+
+  // A unit built from its loaded model, or null while it hasn't arrived.
+  // The model is in metres, facing +x; its parts keep their names: wheel_*,
+  // turret > barrel, leg_L > shin_L, leg_R > shin_R.
+  function createModelUnit(u) {
+    const def = SPRITE_UNITS[u.type];
+    const source = unitModels[u.type];
+    if (!def || !source) return null;
+    const model = source.clone(true);
+    model.scale.setScalar(def.pxPerMetre);
+    const wheels = [];
+    model.traverse((o) => {
+      if (o.isMesh) {
+        o.castShadow = true;
+        o.receiveShadow = true;
+        if (o.material && o.material.name === "team") o.material = getTeamMat(u.team);
+      }
+      if (o.name.startsWith("wheel_")) wheels.push(o);
+    });
+    const group = new THREE.Group();
+    group.add(model);
+    const part = (name) => model.getObjectByName(name) || null;
+    const barrel = part("barrel");
+    group.userData = {
+      modelled: true,
+      def,
+      wheels,
+      turretPart: part("turret"),
+      barrel,
+      barrelX: barrel ? barrel.position.x : 0,
+      legs: [part("leg_L"), part("leg_R")],
+      shins: [part("shin_L"), part("shin_R")],
+    };
+    return group;
+  }
+
+  // Move a model unit's parts for this frame. A turn about Blender's y axis
+  // (a wheel rolling forward, a leg swinging back) is one about -z here.
+  function animateModelUnit(mesh, u, dt) {
+    const { def, wheels, turretPart, barrel, barrelX, legs, shins } = mesh.userData;
+    const v = unitVisuals.update(u, dt, null);
+    mesh.rotation.y = -v.heading;
+    if (turretPart) turretPart.rotation.y = -(v.turret - v.heading);
+    if (barrel) barrel.position.x = barrelX - v.recoil * 0.3;
+    if (def.wheelRadius) {
+      const turn = -v.roll / (def.wheelRadius * def.pxPerMetre);
+      for (const w of wheels) w.rotation.z = turn;
+    }
+    if (legs[0] && legs[1]) {
+      const phase = (v.roll / def.rollCycle) * Math.PI * 2;
+      const swing = v.moving ? Math.sin(phase) : 0;
+      const bend = v.moving ? Math.cos(phase) : 0;
+      legs[0].rotation.z = 0.59 * swing;
+      legs[1].rotation.z = -0.59 * swing;
+      if (shins[0]) shins[0].rotation.z = -1.01 * Math.max(0, bend);
+      if (shins[1]) shins[1].rotation.z = -1.01 * Math.max(0, -bend);
+    }
+  }
 
   // Shared Geometries & Materials (instanced / reused for high performance)
   let mats = {};
@@ -241,6 +325,8 @@ export function createRts3DRenderer(options) {
 
     // 6. Setup Mouse / Pointer Raycasting for Picking in 3D
     setupPointerEvents();
+
+    loadUnitModels();
   }
 
   function buildTerrain() {
@@ -1016,8 +1102,12 @@ export function createRts3DRenderer(options) {
   }
 
   function createUnit3D(u) {
-    let m = null;
-    if (u.type === "harvester") m = createHarvesterModel(u);
+    // Its Blender model if it has one and it has loaded; until then, the
+    // stand-in built here, which update() swaps for the model when it arrives.
+    let m = createModelUnit(u);
+    if (m) {
+      // built above
+    } else if (u.type === "harvester") m = createHarvesterModel(u);
     else if (u.type === "tank") m = createTankModel(u);
     else if (u.type === "buggy") m = createBuggyModel(u);
     else if (u.type === "motorcycle") m = createMotorcycleModel(u);
@@ -1025,6 +1115,7 @@ export function createRts3DRenderer(options) {
     else if (u.type === "mcv") m = createMcvModel(u);
     else if (u.type === "soldier") m = createSoldierModel(u);
     else m = createTankModel(u);
+    if (SPRITE_UNITS[u.type] && !m.userData.modelled) m.userData.standIn = true;
 
     m.position.set(u.x, 0, u.y);
     m.userData.unitId = u.id;
@@ -1215,13 +1306,18 @@ export function createRts3DRenderer(options) {
       if (u.hp <= 0) continue;
       activeUnitIds.add(u.id);
       let uMesh = unitMeshes.get(u.id);
+      if (uMesh && uMesh.userData.standIn && unitModels[u.type]) {
+        scene.remove(uMesh);
+        uMesh = null;
+      }
       if (!uMesh) {
         uMesh = createUnit3D(u);
         unitMeshes.set(u.id, uMesh);
       }
       // Position & rotation
       uMesh.position.set(u.x, 0, u.y);
-      uMesh.rotation.y = -(u.angle || 0);
+      if (uMesh.userData.modelled) animateModelUnit(uMesh, u, dt);
+      else uMesh.rotation.y = -(u.angle || 0);
       uMesh.visible = u.team === "blue" || !fog || isVisible(fog, u.x, u.y);
 
       // Harvester specific 3D animations
@@ -1254,6 +1350,7 @@ export function createRts3DRenderer(options) {
         unitMeshes.delete(id);
       }
     }
+    unitVisuals.keepOnly(activeUnitIds);
 
     // 5. Render Scene with WebGL
     renderer.render(scene, camera);

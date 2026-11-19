@@ -288,24 +288,29 @@ export function hitFlash(fx, id) {
 // the first time it's needed.
 const burnt = new Map();
 function burntSprite(img) {
-  let c = burnt.get(img.src);
+  // An image is known by its address; a frame cut out of a sheet (a canvas
+  // of the game's own) by itself.
+  const key = img.src || img;
+  let c = burnt.get(key);
   if (!c) {
     c = document.createElement("canvas");
-    c.width = img.naturalWidth;
-    c.height = img.naturalHeight;
+    c.width = img.naturalWidth || img.width;
+    c.height = img.naturalHeight || img.height;
     const g = c.getContext("2d");
     g.drawImage(img, 0, 0);
     g.globalCompositeOperation = "source-atop";
     g.fillStyle = "rgba(30, 24, 18, 0.8)";
     g.fillRect(0, 0, c.width, c.height);
-    burnt.set(img.src, c);
+    burnt.set(key, c);
   }
   return c;
 }
 
 // Everything that lies on the ground, under the units: scorch marks, wheel
-// and track marks, wrecks, rubble, dust. `wreckSprite(type)` gives
-// { img, w, h } for drawing a vehicle's wreck, or null if not loaded.
+// and track marks, wrecks, rubble, dust. `wreckSprite(type, angle)` gives
+// { img, w, h } for drawing a vehicle's wreck, or null if not loaded -- with
+// `turn`, if the picture is already one of the vehicle facing (nearly) that
+// angle and only needs turning by that much.
 export function drawGroundEffects(fx, ctx, wreckSprite) {
   ctx.save();
   for (const d of fx.decals) {
@@ -326,12 +331,12 @@ export function drawGroundEffects(fx, ctx, wreckSprite) {
   for (const d of fx.decals) {
     const fade = Math.min(1, (1 - d.age / d.life) * 3); // full until the last third, then fades out
     if (d.kind === "wreck") {
-      const sp = wreckSprite(d.type);
+      const sp = wreckSprite(d.type, d.angle);
       if (!sp) continue;
       ctx.save();
       ctx.globalAlpha = 0.9 * fade;
       ctx.translate(d.x, d.y);
-      ctx.rotate(d.angle);
+      ctx.rotate(sp.turn ?? d.angle);
       ctx.drawImage(burntSprite(sp.img), -sp.w / 2, -sp.h / 2, sp.w, sp.h);
       ctx.restore();
       // Embers glowing in the hull for the first few seconds.

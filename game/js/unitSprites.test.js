@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { SPRITE_UNITS, directionFrame, turnToward, createUnitVisuals, hullFrame, frameRect, drawSize, muzzleOffset } from "./unitSprites.js";
+import {
+  SPRITE_UNITS, HEIGHT_ON_SCREEN, DEPTH_ON_SCREEN, directionFrame, turnToward, createUnitVisuals, hullFrame, frameRect, drawSize, muzzleOffset, mountOffset,
+} from "./unitSprites.js";
 
 const near = (a, b, eps = 1e-9) => assert.ok(Math.abs(a - b) < eps, `${a} is not ${b}`);
 
@@ -95,9 +97,9 @@ test("the hull's frame is its wheel step's row of directions", () => {
   const def = SPRITE_UNITS.tank;
   assert.equal(hullFrame(def, 0, 0), 0);
   assert.equal(hullFrame(def, 5, 0), 5);
-  assert.equal(hullFrame(def, 5, def.wheelCycle * 0.5), 2 * def.directions + 5);
-  assert.equal(hullFrame(def, 5, def.wheelCycle * 1.25), 1 * def.directions + 5);
-  assert.equal(hullFrame(def, 5, -def.wheelCycle * 0.25), 3 * def.directions + 5); // backing up
+  assert.equal(hullFrame(def, 5, def.rollCycle * 0.5), 2 * def.directions + 5);
+  assert.equal(hullFrame(def, 5, def.rollCycle * 1.25), 1 * def.directions + 5);
+  assert.equal(hullFrame(def, 5, -def.rollCycle * 0.25), 3 * def.directions + 5); // backing up
 });
 
 test("a frame's place in its sheet, and the size a unit's frame is drawn at", () => {
@@ -124,11 +126,52 @@ test("a unit's looks can be read back by its id, once it has been drawn", () => 
 
 test("the muzzle is ahead of the turret along its aim, and up the screen by the gun's height", () => {
   const def = SPRITE_UNITS.tank;
-  const up = def.muzzleUp * def.pxPerMetre * def.heightOnScreen;
-  const right = muzzleOffset(def, 0);
+  const up = def.muzzleUp * def.pxPerMetre * HEIGHT_ON_SCREEN;
+  const right = muzzleOffset(def, 0, 0);
   near(right.x, def.muzzleAhead * def.pxPerMetre);
   near(right.y, -up);
-  const down = muzzleOffset(def, Math.PI / 2);
+  const down = muzzleOffset(def, Math.PI / 2, 0);
   near(down.x, 0, 1e-6);
-  near(down.y, def.muzzleAhead * def.pxPerMetre * def.depthOnScreen - up);
+  near(down.y, def.muzzleAhead * def.pxPerMetre * DEPTH_ON_SCREEN - up);
+});
+
+test("a turret that isn't over the middle of its vehicle sits where the hull's heading puts it", () => {
+  const def = SPRITE_UNITS.rocket; // its launcher is over the rear axles
+  assert.ok(def.turretAhead < 0);
+  const back = def.turretAhead * def.pxPerMetre;
+  // Facing right, the mount is behind the middle; facing down the screen, above it.
+  near(mountOffset(def, 0).x, back);
+  near(mountOffset(def, 0).y, 0);
+  near(mountOffset(def, Math.PI / 2).x, 0, 1e-6);
+  near(mountOffset(def, Math.PI / 2).y, back * DEPTH_ON_SCREEN);
+  near(mountOffset(SPRITE_UNITS.tank, 1).x, 0); // the tank's is over its middle
+  // The muzzle is measured from the mount, along the turret's own aim.
+  const m = muzzleOffset(def, Math.PI, 0); // truck facing right, launcher turned back
+  near(m.x, back - def.muzzleAhead * def.pxPerMetre);
+});
+
+test("every unit of the army has its sheets: the vehicles with a gun that turns, the motorcycle and the soldier without", () => {
+  assert.deepEqual(Object.keys(SPRITE_UNITS).sort(), ["buggy", "motorcycle", "rocket", "soldier", "tank"]);
+  for (const type of ["tank", "buggy", "rocket"]) assert.ok(SPRITE_UNITS[type].turret, type);
+  for (const type of ["motorcycle", "soldier"]) assert.equal(SPRITE_UNITS[type].turret, undefined, type);
+});
+
+test("a unit with a standing picture shows it when still, and its walk when moving", () => {
+  const def = SPRITE_UNITS.soldier;
+  assert.ok(def.stand);
+  assert.equal(hullFrame(def, 3, 0, false), 3);
+  assert.equal(hullFrame(def, 3, 0, true), def.directions + 3);
+  assert.equal(hullFrame(def, 3, def.rollCycle * 0.5, true), (1 + def.rollFrames / 2) * def.directions + 3);
+  // A vehicle has no such row: its wheels just stop.
+  assert.equal(hullFrame(SPRITE_UNITS.tank, 3, 0, false), 3);
+});
+
+test("a unit counts as moving while it covers ground, and for a moment after", () => {
+  const visuals = createUnitVisuals();
+  const u = tank();
+  assert.equal(visuals.update(u, 0.016).moving, false);
+  u.x += 1;
+  assert.equal(visuals.update(u, 0.016).moving, true);
+  assert.equal(visuals.update(u, 0.016).moving, true); // one frame without moving is not a halt
+  assert.equal(visuals.update(u, 0.3).moving, false);
 });

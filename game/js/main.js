@@ -82,7 +82,9 @@ import {
   getControlGroupCentroid,
 } from "./rts.js";
 import { createRts3DRenderer } from "./renderer3d.js";
-import { SPRITE_UNITS, directionFrame, hullFrame, frameRect, drawSize, muzzleOffset, createUnitVisuals } from "./unitSprites.js";
+import {
+  SPRITE_UNITS, HEIGHT_ON_SCREEN, DEPTH_ON_SCREEN, directionFrame, hullFrame, frameRect, drawSize, mountOffset, muzzleOffset, createUnitVisuals,
+} from "./unitSprites.js";
 
 // Browsers refuse to start any audio (synthesized SFX or the background
 // music) before a real user gesture. Fire once, on whichever happens
@@ -477,9 +479,11 @@ for (const key of RTS_UNIT_ORDER) sprites[`unit_${key}`] = loadImage(RTS_UNIT_TY
 // RTS vehicle's (unit_*).
 const unitSprite = (type) => sprites[`unit_${type}`] || sprites[`enemy_${type}`];
 // The units rendered off 3D models (unitSprites.js): a sheet of hull frames
-// and one of turret frames each.
+// each and, for those with a gun that turns, one of turret frames.
 const unitSheets = {};
-for (const [type, def] of Object.entries(SPRITE_UNITS)) unitSheets[type] = { hull: loadImage(def.hull), turret: loadImage(def.turret) };
+for (const [type, def] of Object.entries(SPRITE_UNITS)) {
+  unitSheets[type] = { hull: loadImage(def.hull), turret: def.turret ? loadImage(def.turret) : null };
+}
 const unitVisuals = createUnitVisuals();
 let frameDt = 0; // seconds since the last frame drawn
 let visualsSweep = 0; // seconds since the looks of units gone were last cleared out
@@ -839,27 +843,24 @@ const ENEMY_DRAW_SIZES = {
 };
 
 // A unit with sheets rendered off its 3D model: the hull's frame for its
-// heading and its wheels' turn, and over it the turret's, turned to
-// `target` ({x, y}, or null for straight ahead). Each frame is turned by
-// what its heading is off the rendered direction, so it turns smoothly.
-// Returns false, drawing nothing, for a unit without sheets (or while they
-// load).
+// heading and its wheels' turn (or its walk), and over it the turret's,
+// turned to `target` ({x, y}, or null for straight ahead). A vehicle's
+// frame is turned by what its heading is off the rendered direction, so it
+// turns smoothly; a figure's stays upright. Returns false, drawing
+// nothing, for a unit without sheets (or while they load).
 function drawSpriteUnit(u, target) {
   const def = SPRITE_UNITS[u.type];
   const sheet = unitSheets[u.type];
-  if (!def || !ready(sheet.hull) || !ready(sheet.turret)) return false;
+  if (!def || !ready(sheet.hull) || (sheet.turret && !ready(sheet.turret))) return false;
   const v = unitVisuals.update(u, frameDt, target);
   const size = drawSize(def);
-  const hull = directionFrame(v.heading, def.directions);
-  const turret = directionFrame(v.turret, def.directions);
-  const kick = v.recoil * 2.4; // px the gun jumps back
-  const turretUp = def.turretUp * def.pxPerMetre * def.heightOnScreen;
   const flash = hitFlash(fx, u.id);
-  const layer = (img, r, rest, pivotY, dx, dy) => {
+  // One layer: frame `r` of `img`, turned by `rest` about the point (px, py).
+  const layer = (img, r, rest, px, py, dx, dy) => {
     ctx.save();
-    ctx.translate(dx, dy - pivotY);
+    ctx.translate(dx + px, dy + py);
     ctx.rotate(rest);
-    ctx.translate(0, pivotY);
+    ctx.translate(-px, -py);
     ctx.drawImage(img, r.sx, r.sy, r.size, r.size, -size / 2, -size / 2, size, size);
     if (flash > 0) {
       ctx.globalCompositeOperation = "lighter";
@@ -872,22 +873,40 @@ function drawSpriteUnit(u, target) {
   ctx.translate(u.x, u.y);
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
-  layer(sheet.hull, frameRect(hullFrame(def, hull.index, v.roll), def.hullColumns, def.framePx), hull.rest, 0, 0, 0);
-  layer(sheet.turret, frameRect(turret.index, def.turretColumns, def.framePx), turret.rest, turretUp,
-    -Math.cos(v.turret) * kick, -Math.sin(v.turret) * kick * def.depthOnScreen);
+  const hull = directionFrame(v.heading, def.directions);
+  layer(sheet.hull, frameRect(hullFrame(def, hull.index, v.roll, v.moving), def.hullColumns, def.framePx), def.upright ? 0 : hull.rest, 0, 0, 0, 0);
+  if (sheet.turret) {
+    // The turret's frame has its mount where a hull facing the frame's own
+    // direction would carry it: moved to where this hull does, and turned
+    // about that mount.
+    const turret = directionFrame(v.turret, def.directions);
+    const drawn = mountOffset(def, v.turret - turret.rest);
+    const mount = mountOffset(def, v.heading);
+    const up = def.turretUp * def.pxPerMetre * HEIGHT_ON_SCREEN;
+    const kick = v.recoil * 2.4; // px the gun jumps back
+    layer(sheet.turret, frameRect(turret.index, def.turretColumns, def.framePx), turret.rest, drawn.x, drawn.y - up,
+      mount.x - drawn.x - Math.cos(v.turret) * kick, mount.y - drawn.y - Math.sin(v.turret) * kick * DEPTH_ON_SCREEN);
+  }
   ctx.restore();
   return true;
 }
 
 // Where a sprite unit's gun flashes when it fires, for effects.js: the
-// muzzle of its turret as drawn, or null for the other units.
+// muzzle as drawn, or null for the other units.
 fx.muzzle = (shooter) => {
   const def = SPRITE_UNITS[shooter.type];
   const v = def && unitVisuals.get(shooter.id);
   if (!v) return null;
-  const at = muzzleOffset(def, v.turret);
-  return { x: shooter.x + at.x, y: shooter.y + at.y, angle: v.turret };
+  const aim = def.turret ? v.turret : v.heading;
+  const at = muzzleOffset(def, aim, v.heading);
+  return { x: shooter.x + at.x, y: shooter.y + at.y, angle: aim };
 };
+
+// Units in the order to paint them: the ones further up the screen first, so
+// one standing in front of another is drawn over it.
+function byDepth(units) {
+  return [...units].sort((a, b) => a.y - b.y);
+}
 
 function drawEnemy(e) {
   const img = unitSprite(e.type);
@@ -971,7 +990,32 @@ function drawEnemyBar(e, w, h) {
 
 // What effects.js draws a destroyed vehicle's wreck from: its sprite at the
 // same size drawEnemy draws it, or null until the image has loaded.
-function wreckSprite(type) {
+// For a unit rendered off its 3D model: the frame of it facing the way it
+// died, hull and turret together, cut out of its sheets once and kept.
+const wreckFrames = new Map();
+function wreckSprite(type, angle = 0) {
+  const def = SPRITE_UNITS[type];
+  if (def) {
+    const sheet = unitSheets[type];
+    if (!ready(sheet.hull) || (sheet.turret && !ready(sheet.turret))) return null;
+    const facing = directionFrame(angle, def.directions);
+    const key = `${type}:${facing.index}`;
+    let frame = wreckFrames.get(key);
+    if (!frame) {
+      frame = document.createElement("canvas");
+      frame.width = frame.height = def.framePx;
+      const g = frame.getContext("2d");
+      const hull = frameRect(hullFrame(def, facing.index, 0, false), def.hullColumns, def.framePx);
+      g.drawImage(sheet.hull, hull.sx, hull.sy, hull.size, hull.size, 0, 0, hull.size, hull.size);
+      if (sheet.turret) {
+        const turret = frameRect(facing.index, def.turretColumns, def.framePx);
+        g.drawImage(sheet.turret, turret.sx, turret.sy, turret.size, turret.size, 0, 0, turret.size, turret.size);
+      }
+      wreckFrames.set(key, frame);
+    }
+    const size = drawSize(def);
+    return { img: frame, w: size, h: size, turn: def.upright ? 0 : facing.rest };
+  }
   const img = unitSprite(type);
   if (!ready(img)) return null;
   const h = (ENEMY_DRAW_SIZES[type] || { h: 28 }).h;
@@ -3476,7 +3520,7 @@ function drawAttackWorld(view, now) {
   for (const t of known.towers) drawTower(t);
   const picked = attackControls.selectedIds();
   for (const e of view.enemies) if (picked.has(e.id)) drawSelectionRing(ctx, e);
-  for (const e of view.enemies) drawEnemy(e);
+  for (const e of byDepth(view.enemies)) drawEnemy(e);
   drawForeground(state.level);
   for (const e of view.enemies) {
     const group = attackControls.groupOf(e.id);
@@ -4435,7 +4479,7 @@ function drawRtsWorld(state, now, overlaysOnly = false) {
   }
 
   // 4. RTS Units
-  for (const u of state.rtsUnits) {
+  for (const u of byDepth(state.rtsUnits)) {
     if (u.team === "blue" || !fog || isVisible(fog, u.x, u.y)) {
       if (!overlaysOnly) {
         drawRtsUnit(u, now);
@@ -4927,7 +4971,7 @@ function loop(now) {
       // The support buildings (buildings.js) -- none in any mode yet.
       drawBuildings(state.buildings || []);
       for (const t of view.towers) drawTower(t);
-      for (const e of view.enemies) drawEnemy(e);
+      for (const e of byDepth(view.enemies)) drawEnemy(e);
       drawForeground(state.level);
       // Over the foreground: a rocket truck shelling from behind a skyscraper
       // still shows where it's firing from.
