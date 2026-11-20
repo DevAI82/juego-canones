@@ -1,7 +1,8 @@
 export const CANVAS_WIDTH = 1200;
 export const CANVAS_HEIGHT = 750;
 
-// Waypoints tracing the trench in game/assets/map_bg.png. The road enters
+// Waypoints tracing the trench of the level's first map picture (map_bg.png,
+// since replaced by assets/maps/level1.jpg, built from them). The road enters
 // top-left, curves down into the fortified hook-shaped trench, and exits
 // off the right edge.
 //
