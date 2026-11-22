@@ -18,6 +18,12 @@ Browser tower-defense game: vanilla JS ES modules + Canvas 2D in `game/`, no bui
 - All four levels' maps are built this way: level 3 by its own `level3_layout.py` / `level3_build.py` (it is also the RTS mode's map: `pack_map.py <dir> game/assets 3 3d` ships its flat ground and its model for the 3D view too), levels 1, 2 and 4 by `level<N>_layout.py` on `paintkit.py` and the one `build_map.py` on `scenekit.py`. Levels 1 and 2 (1200 x 750) are rendered at twice their size. A building hides what is behind it, so none stands where its picture would cover a build slot or a road.
 - Still on older pictures: the defence mode's wall blocks and support buildings.
 
+## The duel minigame (in progress)
+
+- A fifth way to play, asked for on 2026-11-22: two small armies, bought, upgraded and placed by their players, fight by themselves in an arena, round after round, first to three. Design: `docs/2026-11-22-duelo-design.md` (the table at its top holds what the user decided). Four plans: (A) the core without a screen -- done (`docs/2026-11-22-duelo-nucleo-plan.md`); (B) the screen, the menu and the first arena; (C) balance with simulated duels and the other four arenas; (D) the home network. Online duels are a later phase.
+- The core is four DOM-free modules that touch no other mode: `js/duel.js` (state, actions, a deterministic fixed-step fight from a seed, `duelView` for what a side may see), `js/duelArenas.js` (zones and mirrored round obstacles), `js/duelProfile.js` (level, skill points, league, in the browser's storage) and `js/duelAI.js` (the computer's five grades, playing through the same actions from a view).
+- The units' numbers in `DUEL_UNITS` and the grades in `DUEL_GRADES` are starting values: plan C tunes them, and tuned values will carry a comment saying so. The prices are the attack mode's (a test holds them together).
+
 ## How the work is done
 
 - Each part of the roadmap gets a design doc (the spec, approved by the user) and implementation plans in `docs/`, executed task by task with TDD (a test that fails first). Decisions the spec doesn't settle are recorded as rulings, each with what it costs if wrong, and reported to the user at the end with the deferred minor issues.
