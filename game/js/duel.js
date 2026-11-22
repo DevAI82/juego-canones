@@ -107,13 +107,14 @@ function freshSide({ money = START_MONEY, free = {} } = {}) {
     // added up -- the experience the profile gets.
     destroyed: {},
     xp: 0,
+    shown: null, // see remember()
   };
 }
 
 // `timed`: the purchase has a clock (two players). `left` and `right`:
 // { money, free } for a side that doesn't start as everybody does.
 export function createDuelState({ arena = 1, seed = 1, timed = false, left, right } = {}) {
-  return {
+  const state = {
     mode: "duel",
     arena: arenaOf(arena).id,
     timed: Boolean(timed),
@@ -130,6 +131,34 @@ export function createDuelState({ arena = 1, seed = 1, timed = false, left, righ
     nextId: 1,
     acc: 0, // time not yet turned into ticks
   };
+  remember(state);
+  return state;
+}
+
+// What a side lets its rival know while both shop: how it stood when the
+// purchase began -- the army of the last fight, and its money and upgrades
+// before it spent anything (side.shown). What it buys and where it puts it
+// stays hidden until the fight.
+function remember(state) {
+  for (const side of SIDES) {
+    const mine = state.sides[side];
+    mine.shown = JSON.parse(JSON.stringify({ army: mine.army, money: mine.money, upgrades: mine.upgrades }));
+  }
+}
+
+// The duel as this side may see it, as a copy: while shopping, the rival
+// is as it was when the purchase began; in a fight and after it, all of it.
+// It is what the computer opponent decides from, and what the home server
+// sends each player.
+export function duelView(state, side) {
+  const view = JSON.parse(JSON.stringify(state));
+  if (state.phase === "buy") {
+    const rival = view.sides[otherSide(side)];
+    rival.army = rival.shown.army;
+    rival.money = rival.shown.money;
+    rival.upgrades = rival.shown.upgrades;
+  }
+  return view;
 }
 
 // A unit type's numbers at these upgrade levels.
@@ -608,6 +637,7 @@ function nextRound(state) {
   state.units = [];
   state.shots = [];
   for (const side of SIDES) state.sides[side].ready = false;
+  remember(state);
 }
 
 function tick(state) {

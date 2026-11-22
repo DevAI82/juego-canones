@@ -20,6 +20,7 @@ import {
   setReady,
   canPlace,
   stepDuel,
+  duelView,
   STEP,
   COMBAT_TIME,
   BUY_TIME,
@@ -581,4 +582,66 @@ test("between two players, the fight starts when the purchase's time runs out", 
   assert.equal(s.phase, "buy");
   assert.equal(BUY_TIME, 30);
   assert.ok(s.clock <= BUY_TIME && s.clock > BUY_TIME - 0.1, "the later purchases get 30 s");
+});
+
+// ------------------------------------------------------------ what each side sees
+
+test("while shopping, a side sees the rival as it was when the purchase began", () => {
+  const s = rich(300);
+  buyUnit(s, "left", "soldier");
+  buyUnit(s, "right", "tank");
+  upgradeUnit(s, "right", "tank", "damage");
+  setReady(s, "right");
+
+  const mine = duelView(s, "left");
+  assert.deepEqual(mine.sides.right.army, [], "what the rival buys now is not shown");
+  assert.equal(mine.sides.right.money, 300);
+  assert.equal(mine.sides.right.upgrades.tank.damage, 0);
+  assert.equal(mine.sides.right.ready, true, "that it is ready is no secret");
+  assert.equal(mine.sides.left.army.length, 1);
+  assert.equal(mine.sides.left.money, 290);
+
+  const theirs = duelView(s, "right");
+  assert.equal(theirs.sides.right.army.length, 1);
+  assert.equal(theirs.sides.right.upgrades.tank.damage, 1);
+  assert.deepEqual(theirs.sides.left.army, []);
+  assert.equal(theirs.sides.left.money, 300);
+});
+
+test("a view is a copy: changing it leaves the duel alone", () => {
+  const s = rich(300);
+  buyUnit(s, "left", "soldier");
+  const view = duelView(s, "left");
+  view.sides.left.money = 0;
+  view.sides.left.army[0].x = -50;
+  view.sides.right.upgrades.tank.damage = 5;
+  assert.equal(s.sides.left.money, 290);
+  assert.notEqual(s.sides.left.army[0].x, -50);
+  assert.equal(s.sides.right.upgrades.tank.damage, 0);
+});
+
+test("in the next purchase the rival's army of the last fight is known, not what it adds", () => {
+  const s = rich(300);
+  buyUnit(s, "left", "tank");
+  const first = buyUnit(s, "right", "tank").unit;
+  bothReady(s);
+  fight(s);
+  if (s.phase === "roundEnd") run(s, ROUND_END_TIME);
+  assert.equal(s.phase, "buy");
+  const before = s.sides.right.money;
+  buyUnit(s, "right", "rocket");
+  upgradeUnit(s, "right", "tank", "armor");
+
+  const view = duelView(s, "left");
+  assert.deepEqual(view.sides.right.army.map((u) => u.id), [first.id]);
+  assert.equal(view.sides.right.money, before);
+  assert.equal(view.sides.right.upgrades.tank.armor, 0);
+});
+
+test("during the fight and after it, both sides see everything", () => {
+  const s = fighting(["tank", "soldier"], ["rocket"], { arena: 2 });
+  run(s, 1);
+  for (const side of SIDES) assert.deepEqual(duelView(s, side), JSON.parse(JSON.stringify(s)));
+  fight(s);
+  for (const side of SIDES) assert.deepEqual(duelView(s, side), JSON.parse(JSON.stringify(s)));
 });
