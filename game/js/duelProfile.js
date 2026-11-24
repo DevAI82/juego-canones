@@ -41,6 +41,15 @@ function levelFor(xp) {
   return level;
 }
 
+// How far into its level a profile is: the experience it has of the
+// `need` to the next one (need: null at the top level).
+export function xpProgress(profile) {
+  let have = profile.xp;
+  for (let level = 1; level < profile.level; level++) have -= xpToNext(level);
+  const need = xpToNext(profile.level);
+  return need === null ? { have: 0, need: null } : { have: Math.max(0, have), need };
+}
+
 // A duel in a higher league's arena is worth more experience.
 export function leagueFactor(league) {
   return 1 + 0.25 * (league - 1);

@@ -15,6 +15,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Tower Defense" />
   <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="duel.css" />
 </head>
 <body>
   <div id="game-viewport">
@@ -77,12 +78,22 @@
                 <span class="menu-choice-name">⭐ RTS (Estrategia C&C)</span>
                 <span class="menu-choice-desc">Base viva, VCM, cosechadoras, energía y ejército</span>
               </button>
+              <!-- The duel minigame (js/duelScreen.js). -->
+              <button class="menu-choice" data-mode="duel">
+                <span class="menu-choice-name">Duelo</span>
+                <span class="menu-choice-desc">Tu ejército contra otro, asalto a asalto</span>
+              </button>
               <!-- At home (server.js) only: one computer defends, another attacks. -->
               <button class="menu-choice hidden" data-mode="versus">
                 <span class="menu-choice-name">Uno contra otro</span>
                 <span class="menu-choice-desc">Un ordenador defiende y otro ataca</span>
               </button>
             </div>
+            <button class="menu-back">Volver</button>
+          </div>
+          <!-- The duel's profile and arenas: js/duelUI.js fills it. -->
+          <div class="menu-screen hidden" data-screen="duel">
+            <div class="duel-lobby"></div>
             <button class="menu-back">Volver</button>
           </div>
           <div class="menu-screen hidden" data-screen="rts-mode">
@@ -238,6 +249,7 @@
         </div>
       </div>
       <div id="toast" class="hidden"></div>
+      <div id="duel-result" class="hidden"></div>
       <div id="gameend-overlay" class="hidden">
         <div id="gameend-modal">
           <div id="gameend-title"></div>

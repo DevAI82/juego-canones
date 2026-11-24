@@ -26,7 +26,7 @@ test("every arena has 3 to 7 obstacles, inside it and apart from each other", ()
       for (let j = i + 1; j < obs.length; j++) {
         const gap = Math.hypot(obs[i].x - obs[j].x, obs[i].y - obs[j].y) - obs[i].r - obs[j].r;
         // Wide enough for the biggest unit to pass between two of them.
-        assert.ok(gap >= 34, `arena ${arena.id}: obstacles ${i} and ${j} are ${gap} apart`);
+        assert.ok(gap >= 48, `arena ${arena.id}: obstacles ${i} and ${j} are ${gap} apart`);
       }
     }
   }

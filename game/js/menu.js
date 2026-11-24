@@ -97,6 +97,7 @@ export function createMenu(root, handlers) {
     else if (name === "multiplayer") renderMultiplayer();
     else if (name === "mode") renderMode();
     else if (name === "levels") renderLevels();
+    else if (name === "duel") renderDuel();
   }
 
   // "Volver", or Esc: answers a question still open with "No", else goes
@@ -211,6 +212,19 @@ export function createMenu(root, handlers) {
     defense.querySelector(".menu-choice-desc").textContent = home ? "Todos defendéis el mismo mapa" : "Construye torres y protege la base";
   }
 
+  // The duel minigame's own screen: the profile and its arenas. main.js
+  // fills it (duelScreen.js); picking an arena starts a duel there.
+  function renderDuel() {
+    if (handlers.renderDuel) handlers.renderDuel(root.querySelector(".duel-lobby"), chooseDuel);
+  }
+
+  // A duel is never saved, so it takes no saved game's place: only a game
+  // under way is asked about.
+  async function chooseDuel(arena) {
+    if (handlers.hasGame() && !(await confirm("Dejarás la partida en curso. ¿Empezar el duelo?"))) return;
+    handlers.onNewGame(arena, { mode: "duel" });
+  }
+
   function renderLevels() {
     root.querySelector('[data-screen="levels"] .menu-subtitle').textContent =
       chosenMode === "attack" ? "Elige el mapa que atacarás" : chosenMode === "versus" ? "Elige el mapa" : "Elige nivel";
@@ -302,6 +316,7 @@ export function createMenu(root, handlers) {
       if (chosenMode === "rts") {
         return show("rts-mode");
       }
+      if (chosenMode === "duel") return show("duel");
       return show("levels");
     }
     const rtsSubmodeBtn = target.closest("[data-rts-submode]");

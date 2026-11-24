@@ -55,6 +55,7 @@ import {
   drawSelectionBox,
 } from "./attackDraw.js";
 import { initShop, updateShop, initUnitUpgrades, updateUnitUpgrades, attackHudLines, defenderHudLines, attackSummary } from "./attackUI.js";
+import { createDuelScreen } from "./duelScreen.js";
 import { BUILDING_TYPES, BUILDING_ORDER, PHASE_COUNT, SHEET_COLS, buildingProgress, constructionFrame } from "./buildings.js";
 import { RTS_UNIT_TYPES } from "./rtsUnits.js";
 import { entrySafePoints, reachesEntryRoad } from "./entryRoads.js";
@@ -217,6 +218,10 @@ function positionNavControls() {
 let state = null;
 let menu = null;
 const isRtsGame = () => Boolean(state && (state.isRts || state.mode === "rts"));
+// The duel minigame: `state` is duel.js's while it lasts.
+const dueling = () => Boolean(state && state.mode === "duel");
+// The games that run in this browser even on the home server's page.
+const localGame = () => isRtsGame() || dueling();
 
 function resizeGame() {
   const winW = window.innerWidth;
@@ -1810,27 +1815,32 @@ initUpgradePanel(upgradePanelEl, {
 // The attack mode's shop and unit upgrade panel (attackUI.js), in place of
 // the build menu and the towers' upgrade panel.
 const attackShopEl = document.getElementById("attack-shop");
-initShop(attackShopEl, {
-  onBuy: (type, count) => {
-    if (!commanding() || state.gameOver) return;
-    actions.buy(type, count);
-  },
-});
 const unitUpgradeEl = document.getElementById("unit-upgrade-panel");
 let unitUpgradeType = null; // the type whose upgrades show (a tab per type in the selection)
 let unitUpgradesOpen = false; // folded away to its tabs until the player opens it
-initUnitUpgrades(unitUpgradeEl, {
-  onUpgrade: (skill) => {
-    if (commanding() && unitUpgradeType) actions.upgradeUnit(unitUpgradeType, skill);
-  },
-  onTab: (type) => {
-    unitUpgradeType = type;
-    unitUpgradesOpen = true;
-  },
-  onToggle: () => {
-    unitUpgradesOpen = !unitUpgradesOpen;
-  },
-});
+// Filled again after a duel, which borrows both elements for its own shop
+// and unit panel (duelScreen.js).
+function mountAttackPanels() {
+  initShop(attackShopEl, {
+    onBuy: (type, count) => {
+      if (!commanding() || state.gameOver) return;
+      actions.buy(type, count);
+    },
+  });
+  initUnitUpgrades(unitUpgradeEl, {
+    onUpgrade: (skill) => {
+      if (commanding() && unitUpgradeType) actions.upgradeUnit(unitUpgradeType, skill);
+    },
+    onTab: (type) => {
+      unitUpgradeType = type;
+      unitUpgradesOpen = true;
+    },
+    onToggle: () => {
+      unitUpgradesOpen = !unitUpgradesOpen;
+    },
+  });
+}
+mountAttackPanels();
 
 // RTS mode's Command & Conquer sidebar and contextual building panel (rtsUI.js)
 const cncSidebarEl = document.getElementById("cnc-sidebar");
@@ -2022,6 +2032,7 @@ if (radarMountEl) {
 
 const skipWaveBtn = document.getElementById("skip-wave-btn");
 skipWaveBtn.addEventListener("click", () => {
+  if (dueling()) return duel().ready(); // a duel's «¡Listo!»
   if (state.gameOver || state.win || state.levelComplete) return;
   // In an attack's preparation it's «¡Al ataque!» (one against the other,
   // either player's «¡Listo!»).
@@ -2068,6 +2079,10 @@ muteBtn.addEventListener("click", () => {
 
 const pauseBtn = document.getElementById("pause-btn");
 pauseBtn.addEventListener("click", async () => {
+  if (dueling()) {
+    state.paused = !state.paused;
+    return;
+  }
   if (state.gameOver || state.win || state.levelComplete) return;
   if (!versusGame()) return actions.pause();
   // One against the other, only the side that paused carries on (versus.js).
@@ -2130,6 +2145,34 @@ async function listSavesForMenu() {
 }
 
 // Back to the board, with nothing left selected or showing from before.
+// The duel minigame's screen (duelScreen.js), made when a duel is first
+// asked for. While a duel lasts it has the frame and the pointer to itself
+// (loop() and the pointer's handlers hand them over), and the attack mode's
+// shop and unit panel hold its own.
+let duelScreen = null;
+let duelPanels = false; // the shop and the unit panel hold the duel's
+function duel() {
+  if (!duelScreen) {
+    duelScreen = createDuelScreen({
+      ctx,
+      shopEl: attackShopEl,
+      panelEl: unitUpgradeEl,
+      readyBtn: skipWaveBtn,
+      resultEl: document.getElementById("duel-result"),
+      drawUnit: drawSpriteUnit,
+      resetVisuals: () => unitVisuals.keepOnly([]),
+      playSound,
+      showToast,
+      onRematch: (arena) => startNewGame(arena, { mode: "duel" }),
+      onExit: () => {
+        duel().leave();
+        backToNewGame();
+      },
+    });
+  }
+  return duelScreen;
+}
+
 function enterGame() {
   menu.close();
   selectedId = null;
@@ -2144,6 +2187,14 @@ function enterGame() {
   lastCameraLevel = null;
   showGameEndOverlay(false);
   gameEndShown = false;
+  if (dueling()) {
+    duel().mount();
+    duelPanels = true;
+  } else if (duelPanels) {
+    duel().leave();
+    mountAttackPanels();
+    duelPanels = false;
+  }
 
   const isRts = Boolean(state && (state.isRts || state.mode === "rts"));
   if (cncSidebarEl) cncSidebarEl.classList.toggle("hidden", !isRts);
@@ -2158,7 +2209,14 @@ function enterGame() {
     skipWaveBtn.classList.add("hidden");
   } else {
     // Non-RTS modes: restore standard TD / Attack HUD controls!
-    if (state && state.mode === "attack") {
+    if (dueling()) {
+      // The duel's shop is in the attack's element; «¡Listo!» and the
+      // unit panel come and go with its phases (duelScreen.js).
+      buildMenuEl.classList.add("hidden");
+      attackShopEl.classList.remove("hidden");
+      unitUpgradeEl.classList.add("hidden");
+      skipWaveBtn.classList.add("hidden");
+    } else if (state && state.mode === "attack") {
       buildMenuEl.classList.add("hidden");
       attackShopEl.classList.remove("hidden");
       unitUpgradeEl.classList.remove("hidden");
@@ -2188,7 +2246,7 @@ const GAME_IN_PROGRESS = "Hay una partida uno contra otro en marcha: solo sus do
 // at home -- this tab takes `side`, the other is left for the second player;
 // { mode: "rts", submode: "campaign"|"survival" } for RTS mode.
 async function startNewGame(level, { mode = "defense", difficulty = "normal", side = "defense", money = "normal", submode = "campaign" } = {}) {
-  if (networked && mode !== "rts") {
+  if (networked && mode !== "rts" && mode !== "duel") {
     const result = await askServer(mode === "versus" ? { type: "newVersus", level, side, money } : { type: "restart", level });
     if (!result.ok) return showToast(result.reason === "game-in-progress" ? GAME_IN_PROGRESS : "No se ha podido empezar la partida");
   }
@@ -2202,6 +2260,9 @@ async function startNewGame(level, { mode = "defense", difficulty = "normal", si
         showToast("¡Cosechadora desplegada automáticamente en la Refinería!");
       }
     };
+  } else if (mode === "duel") {
+    // `level` is the arena (duelArenas.js); against the computer.
+    state = duel().start(level);
   } else if (mode === "attack") {
     state = createAttackState(level, difficulty);
   } else if (mode === "versus") {
@@ -2211,7 +2272,7 @@ async function startNewGame(level, { mode = "defense", difficulty = "normal", si
     state = createGameState(level);
   }
 
-  saveScheduler.reset(state);
+  if (mode !== "duel") saveScheduler.reset(state); // a duel is never saved
   started = true;
   prevSnapshot = null;
   window.__gameState = () => state;
@@ -2242,6 +2303,7 @@ async function loadSlot(slot) {
 }
 
 async function saveToSlot(slot) {
+  if (dueling()) return showToast("Un duelo no se guarda: tu perfil se guarda al terminarlo");
   if (networked) {
     const result = await askServer({ type: "save", slot });
     const later = attacking() ? "Se guardará al empezar la ronda siguiente" : "Se guardará al terminar la oleada";
@@ -2262,7 +2324,7 @@ async function saveToSlot(slot) {
 let pausedBeforeMenu = false;
 function openPauseMenu() {
   if (menu.isOpen() || gameEndShown) return;
-  if (!networked || isRtsGame()) {
+  if (!networked || localGame()) {
     if (!started) return;
     pausedBeforeMenu = state.paused;
     state.paused = true;
@@ -2271,6 +2333,8 @@ function openPauseMenu() {
     postAction({ type: "pause", on: true });
   }
   menu.openPause();
+  // A duel is never saved (its design, §14).
+  document.querySelector('#menu [data-screen="pause"] [data-go="save"]').classList.toggle("hidden", dueling());
   resizeGame();
 }
 
@@ -2278,7 +2342,7 @@ function openPauseMenu() {
 function backToNewGame() {
   showGameEndOverlay(false);
   gameEndShown = false;
-  if (!networked || isRtsGame()) started = false;
+  if (!networked || localGame()) started = false;
   menu.openNewGame();
   resizeGame();
 }
@@ -2299,12 +2363,14 @@ menu = createMenu(document.getElementById("menu"), {
   onLoad: loadSlot,
   onSave: saveToSlot,
   onRecords: openStatsModal,
+  renderDuel: (el, start) => duel().renderLobby(el, start),
   onQuitToMain: () => {
-    if (!networked || isRtsGame()) started = false;
+    if (!networked || localGame()) started = false;
     const bMenu = document.getElementById("build-menu");
     if (bMenu) bMenu.classList.add("hidden");
     const aShop = document.getElementById("attack-shop");
     if (aShop) aShop.classList.add("hidden");
+    if (dueling()) duel().leave();
     if (cncSidebarEl) cncSidebarEl.classList.add("hidden");
     if (rtsContextPanelEl) rtsContextPanelEl.classList.add("hidden");
     const nav = document.getElementById("nav-controls");
@@ -2313,7 +2379,7 @@ menu = createMenu(document.getElementById("menu"), {
     resizeGame();
   },
   onResume: () => {
-    if (!networked || isRtsGame()) state.paused = pausedBeforeMenu;
+    if (!networked || localGame()) state.paused = pausedBeforeMenu;
     else if (versusGame() && net.you && !pausedBeforeMenu) postAction({ type: "pause", on: false });
   },
   onSettingsChange: (next) => {
@@ -2989,6 +3055,10 @@ document.addEventListener("mouseout", (evt) => {
 window.addEventListener("blur", () => attackControls.pointerAt(null));
 
 canvas.addEventListener("pointerdown", (evt) => {
+  if (dueling()) {
+    if (started && !menu.isOpen()) duel().pointerDown(canvasPoint(evt));
+    return;
+  }
   if (pinchDown(evt)) return;
   if (commanding()) {
     if (!started || state.gameOver) return;
@@ -3110,6 +3180,7 @@ canvas.addEventListener("pointerdown", (evt) => {
 });
 
 canvas.addEventListener("pointermove", (evt) => {
+  if (dueling()) return void duel().pointerMove(canvasPoint(evt));
   if (pinchMove(evt)) return;
   const pos = worldPos(evt);
   mouseX = pos.x;
@@ -3166,6 +3237,7 @@ canvas.addEventListener("pointermove", (evt) => {
 });
 
 window.addEventListener("pointerup", (evt) => {
+  if (dueling()) return void duel().pointerUp();
   if (pinchUp(evt)) {
     minimapDragging = false;
     wallPaint = null;
@@ -3272,6 +3344,7 @@ canvas.addEventListener(
   "wheel",
   (evt) => {
     evt.preventDefault();
+    if (dueling()) return; // an arena fits the screen: nothing to zoom
     const rect = canvas.getBoundingClientRect();
     const cx = ((evt.clientX - rect.left) / rect.width) * CANVAS_WIDTH;
     const cy = ((evt.clientY - rect.top) / rect.height) * CANVAS_HEIGHT;
@@ -3301,6 +3374,14 @@ window.addEventListener("keydown", (evt) => {
   const key = evt.key.toLowerCase();
   if (key === "f") {
     toggleFullscreen();
+    return;
+  }
+  if (dueling()) {
+    // A duel has no shortcuts of its own: Esc is the menu's.
+    if (key === "escape") {
+      if (menu.isOpen()) menu.back();
+      else openPauseMenu();
+    }
     return;
   }
   if (key === "escape") {
@@ -4721,7 +4802,7 @@ let prevSnapshot = null;
 let snapshotAt = 0;
 
 function receiveSnapshot(body) {
-  if (isRtsGame()) return;
+  if (localGame()) return;
   const view = unpackView(body);
   const before = { you: net.you, kind: net.kind, over: state.gameOver };
   prevSnapshot = { state, at: snapshotAt };
@@ -4746,7 +4827,7 @@ function resetLocalView() {
 // uno contra otro en marcha»), over the game going on.
 let lastSeatInfo = null;
 function checkSeat() {
-  if (isRtsGame()) return;
+  if (localGame()) return;
   if (!versusGame() || net.you) {
     if (menu.isSeatScreen()) menu.close();
     lastSeatInfo = null;
@@ -4772,7 +4853,7 @@ function checkSeat() {
 // behind, which nobody notices at this game's pace), and explosions and
 // beams keep ageing locally in between.
 function drawnView(now) {
-  if (!networked || isRtsGame() || !prevSnapshot) return state;
+  if (!networked || localGame() || !prevSnapshot) return state;
   const span = snapshotAt - prevSnapshot.at;
   const elapsed = now - snapshotAt;
   const k = span > 0 ? Math.min(1, elapsed / span) : 1;
@@ -4852,13 +4933,26 @@ function loop(now) {
   frameNow = now / 1000;
   frameDt = dt;
   visualsSweep += dt;
-  if (visualsSweep > 2) {
+  if (visualsSweep > 2 && !dueling()) {
     // Forget how the units that are gone looked.
     visualsSweep = 0;
     unitVisuals.keepOnly([...(state.enemies || []), ...(state.rtsUnits || [])].map((u) => u.id));
   }
 
-  if ((!networked || isRtsGame()) && started) {
+  if (dueling()) {
+    // A duel has the frame to itself (duelScreen.js): its own step, its
+    // own drawing, its own panels. It stands still behind a menu.
+    ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+    duel().frame(dt, { running: started && !menu.isOpen() });
+    syncMusicToPause();
+    pauseBtn.textContent = state.paused ? "▶" : "⏸";
+    pauseBtn.title = state.paused ? "Reanudar" : "Pausar";
+    pauseBtn.classList.toggle("active", Boolean(state.paused));
+    requestAnimationFrame(loop);
+    return;
+  }
+
+  if ((!networked || localGame()) && started) {
     // Before stepping: a level's start is only between waves until its
     // first tick spawns the opening units.
     saveScheduler.tick(state, (slot, ok) => showToast(savedMessage(slot, ok)));

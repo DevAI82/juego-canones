@@ -41,14 +41,16 @@ export const STEP = 1 / 30; // s of a tick of the fight
 //   tank        armoured: light weapons (the three above) do it half damage
 //   rocket      long range and splash damage; slow, and frail up close
 // hp, speed (px/s), range (px), damage a shot, cooldown (s between shots),
-// radius (px, how much room it takes), splash (px round its target).
+// radius (px, how much room it takes: about half the length of its picture,
+// so that units stand apart on screen as they do in the fight), splash (px
+// round its target).
 export const DUEL_ORDER = ["soldier", "motorcycle", "buggy", "tank", "rocket"];
 export const DUEL_UNITS = {
-  soldier: { price: 10, hp: 30, speed: 45, range: 90, damage: 3, cooldown: 1.0, radius: 7, light: true },
-  motorcycle: { price: 15, hp: 34, speed: 110, range: 80, damage: 4, cooldown: 0.8, radius: 9, light: true },
-  buggy: { price: 20, hp: 55, speed: 80, range: 110, damage: 5, cooldown: 0.7, radius: 11, light: true },
-  tank: { price: 50, hp: 220, speed: 38, range: 130, damage: 16, cooldown: 2.0, radius: 15, armored: true },
-  rocket: { price: 70, hp: 90, speed: 34, range: 260, damage: 26, cooldown: 3.0, radius: 14, splash: 45 },
+  soldier: { price: 10, hp: 30, speed: 45, range: 90, damage: 3, cooldown: 1.0, radius: 8, light: true },
+  motorcycle: { price: 15, hp: 34, speed: 110, range: 80, damage: 4, cooldown: 0.8, radius: 11, light: true },
+  buggy: { price: 20, hp: 55, speed: 80, range: 110, damage: 5, cooldown: 0.7, radius: 16, light: true },
+  tank: { price: 50, hp: 220, speed: 38, range: 130, damage: 16, cooldown: 2.0, radius: 22, armored: true },
+  rocket: { price: 70, hp: 90, speed: 34, range: 260, damage: 26, cooldown: 3.0, radius: 22, splash: 45 },
 };
 export const LIGHT_VS_ARMOR = 0.5; // a light weapon's damage on an armoured unit
 export const SPLASH_SHARE = 0.6; // of a splash weapon's damage, to the others near its target
@@ -211,7 +213,7 @@ export function canPlace(state, side, x, y, radius, ignoreId = null) {
 // Where a new unit goes: the free place nearest the middle of its side's
 // zone, on a grid wide enough for the biggest unit. The player then drags
 // it where they want it.
-const GRID = 44;
+const GRID = 52;
 function freePlace(state, side, radius) {
   const z = ZONES[side];
   const cx = (z.x0 + z.x1) / 2;

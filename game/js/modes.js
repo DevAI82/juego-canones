@@ -16,6 +16,8 @@ export function stepGame(state, dt) {
 }
 
 export function canSaveGame(state) {
+  // A duel (duel.js) lasts a few minutes and is never saved.
+  if (state.mode === "duel") return false;
   if (state.isRts) return true;
   return attacking(state) ? canSaveAttack(state) : canSaveNow(state);
 }

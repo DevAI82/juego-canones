@@ -31,6 +31,7 @@ import {
   ROUNDS_TO_WIN,
 } from "./duel.js";
 import { UNIT_PRICES, UNIT_ORDER } from "./attack.js";
+import { canSaveGame } from "./modes.js";
 import { ARENA, ZONES, arenaOf } from "./duelArenas.js";
 
 const inZone = (side, u) => {
@@ -406,8 +407,8 @@ test("an obstacle on the line stops the shots, and the units walk round it", () 
   const s = fighting(["tank"], ["tank"], { arena: 1 }); // obstacle at 600,375 r 38
   const [a] = unitsOf(s, "left");
   const [b] = unitsOf(s, "right");
-  Object.assign(a, { x: 540, y: 375, fireTimer: 0 });
-  Object.assign(b, { x: 660, y: 375, fireTimer: 0 });
+  Object.assign(a, { x: 536, y: 375, fireTimer: 0 });
+  Object.assign(b, { x: 664, y: 375, fireTimer: 0 });
   stepDuel(s, STEP);
   assert.equal(a.hp, a.maxHp, "in range, but the obstacle is between them");
   assert.equal(b.hp, b.maxHp);
@@ -644,4 +645,10 @@ test("during the fight and after it, both sides see everything", () => {
   for (const side of SIDES) assert.deepEqual(duelView(s, side), JSON.parse(JSON.stringify(s)));
   fight(s);
   for (const side of SIDES) assert.deepEqual(duelView(s, side), JSON.parse(JSON.stringify(s)));
+});
+
+test("a duel is never saved", () => {
+  assert.equal(canSaveGame(createDuelState()), false);
+  const s = fighting(["tank"], ["tank"]);
+  assert.equal(canSaveGame(s), false);
 });
