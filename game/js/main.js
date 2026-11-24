@@ -2220,7 +2220,15 @@ function leaveLocalDuel() {
   if (!localDuel) return;
   localDuel = false;
   duel().leave();
-  if (!networked) return;
+  // The duel's state is nothing the board's own frame can draw (it has no
+  // enemies, no towers: loop() would throw and stop for good). Until
+  // another game takes its place a blank one stands in, as when the page
+  // opens.
+  state = createGameState();
+  if (!networked) {
+    started = false;
+    return;
+  }
   started = true;
   if (heldSnapshot) {
     const body = heldSnapshot;
