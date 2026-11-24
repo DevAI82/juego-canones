@@ -5,7 +5,7 @@ Browser tower-defense game: vanilla JS ES modules + Canvas 2D in `game/`, no bui
 ## The user's rules
 
 - Commit locally as you go; `git push` and the Vercel deploy (project `torres-defensa`, https://torres-defensa.vercel.app, Vercel CLI from `game/`) only when the user says a round of changes is done. Ask before publishing. Never enter credentials: the user logs in to Vercel themselves.
-- `node server.js` (port 8420) is a shared LAN game people may be playing: never restart it without asking. To test, use `PORT=8431 DATA_DIR=<temp dir> node server.js`, or the no-cache static server `python tools/serve_nocache.py game 8421`.
+- `node server.js` (port 8421 since the user's own commit 8e50bec; 8420 before) is a shared LAN game people may be playing: never restart it without asking. To test, use `PORT=8432 DATA_DIR=<temp dir> node server.js`, or the no-cache static server `python tools/serve_nocache.py game 8431`.
 - Never ship Command & Conquer images (copyrighted). Don't rewrite git history.
 - Don't spawn subagents unless the user asks.
 - The game plays music: before testing in a browser set localStorage `td_settings` to `{"music":false,"effects":false}`, and close the tab afterwards.
@@ -20,8 +20,10 @@ Browser tower-defense game: vanilla JS ES modules + Canvas 2D in `game/`, no bui
 
 ## The duel minigame (in progress)
 
-- A fifth way to play, asked for on 2026-11-22: two small armies, bought, upgraded and placed by their players, fight by themselves in an arena, round after round, first to three. Design: `docs/2026-11-22-duelo-design.md` (the table at its top holds what the user decided). Four plans: (A) the core without a screen -- done (`docs/2026-11-22-duelo-nucleo-plan.md`); (B) the screen, the menu and the first arena; (C) balance with simulated duels and the other four arenas; (D) the home network. Online duels are a later phase.
+- A fifth way to play, asked for on 2026-11-22: two small armies, bought, upgraded and placed by their players, fight by themselves in an arena, round after round, first to three. Design: `docs/2026-11-22-duelo-design.md` (the table at its top holds what the user decided). Four plans: (A) the core without a screen -- done (`docs/2026-11-22-duelo-nucleo-plan.md`); (B) the screen, the menu and the first arena -- done (`docs/2026-11-24-duelo-pantalla-plan.md`); (C) balance with simulated duels and the other four arenas; (D) the home network. Online duels are a later phase.
 - The core is four DOM-free modules that touch no other mode: `js/duel.js` (state, actions, a deterministic fixed-step fight from a seed, `duelView` for what a side may see), `js/duelArenas.js` (zones and mirrored round obstacles), `js/duelProfile.js` (level, skill points, league, in the browser's storage) and `js/duelAI.js` (the computer's five grades, playing through the same actions from a view).
+- On screen: `js/duelScreen.js` runs a duel against the computer (the state, the computer's turns, the pointer, the profile at the end), `js/duelDraw.js` paints it, `js/duelUI.js` says what its panels show (pure functions, tested) and builds them; `duel.css` styles the profile's screen and the result. While the game's mode is `"duel"`, `main.js`'s `loop()` and pointer handlers hand everything to it (`dueling()`), and the attack mode's shop and unit panel elements hold the duel's (`mountAttackPanels()` puts the attack's back). A duel is never saved; it runs in the browser even on the home server's page, like the RTS mode.
+- An arena's picture is built like a map's: `node tools/blender/maps/dump_arena.mjs <N> <json>`, `python tools/blender/maps/duel<N>_layout.py <json> <dir>`, `blender ... build_map.py -- <dir> duel<N> render 96 2`, `python tools/blender/maps/pack_map.py <dir> game/assets duel<N>`, then `art: true` in `js/duelArenas.js`. What stands up must stand inside the arena's obstacle circles. Arena 1 is made; 2 to 5 are drawn plain until plan C.
 - The units' numbers in `DUEL_UNITS` and the grades in `DUEL_GRADES` are starting values: plan C tunes them, and tuned values will carry a comment saying so. The prices are the attack mode's (a test holds them together).
 
 ## How the work is done

@@ -2,6 +2,9 @@
 
   python tools/blender/maps/pack_map.py <dir> <game/assets> <N> [3d]
 
+<N> is a level’s number, or a whole name for a map that isn’t a level’s
+(a duel arena: "duel1"): its files are then <name>.jpg and so on.
+
 maps/level<N>.jpg         the whole map
 maps/level<N>_fg.webp     what stands up on it, drawn over the units
 and, with "3d" (the RTS mode's map):
@@ -15,23 +18,24 @@ from PIL import Image
 
 src, dst, n = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
 in_3d = "3d" in sys.argv[4:]
+name = f"level{n}" if n.isdigit() else n
 (dst / "maps").mkdir(parents=True, exist_ok=True)
 done = []
-bg = src / f"level{n}_bg.png"
+bg = src / f"{name}_bg.png"
 if bg.exists():
-    Image.open(bg).convert("RGB").save(dst / "maps" / f"level{n}.jpg", quality=88, optimize=True)
+    Image.open(bg).convert("RGB").save(dst / "maps" / f"{name}.jpg", quality=88, optimize=True)
     done.append("map")
-fg = src / f"level{n}_fg.png"
+fg = src / f"{name}_fg.png"
 if fg.exists():
-    Image.open(fg).save(dst / "maps" / f"level{n}_fg.webp", quality=88, method=4)
+    Image.open(fg).save(dst / "maps" / f"{name}_fg.webp", quality=88, method=4)
     done.append("foreground")
 ground = src / "ground_color.png"
 if in_3d and ground.exists():
-    Image.open(ground).convert("RGB").save(dst / "maps" / f"level{n}_ground.jpg", quality=86, optimize=True)
+    Image.open(ground).convert("RGB").save(dst / "maps" / f"{name}_ground.jpg", quality=86, optimize=True)
     done.append("ground")
-glb = src / f"level{n}.glb"
+glb = src / f"{name}.glb"
 if in_3d and glb.exists():
     (dst / "models").mkdir(parents=True, exist_ok=True)
-    shutil.copy(glb, dst / "models" / f"map_level{n}.glb")
+    shutil.copy(glb, dst / "models" / f"map_{name}.glb")
     done.append("model")
-print(f"level {n}:", ", ".join(done) or "nothing found")
+print(f"{name}:", ", ".join(done) or "nothing found")

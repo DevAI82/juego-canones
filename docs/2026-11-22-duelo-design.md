@@ -1,7 +1,7 @@
 # Duelo: minijuego de uno contra uno — Diseño
 
 Fecha: 2026-11-22
-Estado: pendiente de la revisión del usuario.
+Estado: aprobado por el usuario (2026-11-22). Hecho: el núcleo (plan A) y la pantalla con la primera arena (plan B). Pendiente: equilibrio y las otras cuatro arenas (plan C) y la red de casa (plan D).
 
 ## 1. Contexto
 
@@ -77,7 +77,7 @@ Un duelo son asaltos. Cada asalto tiene dos fases.
 - **El ejército dura todo el duelo.** En cada asalto vuelve entero y reparado al sitio donde el jugador lo dejó, y se va ampliando. Quien pierde un asalto no pierde sus unidades.
 - **Máximo 12 vehículos** por bando.
 - **Vender:** un vehículo comprado en esta misma fase devuelve todo su precio; uno de asaltos anteriores, la mitad.
-- **Colores:** cada bando lleva su color pintado en el vehículo (azul o rojo, en las piezas que los modelos ya tienen para eso) y un aro del mismo color en el suelo. Las hojas de dibujos rojas se renderizan en Blender y se cargan solo al entrar en un duelo.
+- **Colores:** cada bando lleva su color (azul el de la izquierda, rojo el de la derecha) y un aro del mismo color en el suelo. El color se pone al dibujar: sustituye al de la pintura del vehículo y conserva las luces y sombras del modelo. (Cambiado al construirlo, 2026-11-24: las piezas de bando de los modelos son demasiado pequeñas para verse a este tamaño, y así no hacen falta dibujos nuevos ni más descarga.)
 
 ## 6. El dinero
 
@@ -122,7 +122,7 @@ Se guarda en cada aparato (en el navegador, como los ajustes). No hay cuentas ni
 ## 10. La pantalla del duelo
 
 - **Arriba:** el marcador de asaltos de cada bando, el dinero, el tiempo que queda y los botones de siempre (pantalla completa, sonido, pausa, menú).
-- **Compra:** una barra con las cinco unidades y su precio; tocar una la compra. Tocar un vehículo ya colocado abre el panel de su tipo: las cinco habilidades con su nivel y su precio, y «Vender». Se arrastra con el ratón o con el dedo; la zona propia se ve marcada. Botón «¡Listo!».
+- **Compra:** una barra con las cinco unidades y su precio; tocar una la compra. Tocar un vehículo ya colocado abre el panel de su tipo: las cinco habilidades con su nivel y su precio, y «Vender». Se arrastra con el ratón o con el dedo; la zona propia se ve marcada. «¡Listo!» está en la propia tienda, lo primero, para que tenga buen tamaño también en el móvil.
 - **Combate:** se mira. Cada unidad lleva su barra de vida; el dinero sube al hacer daño. Al acabar, un cartel dice quién gana el asalto y cuánto cobra cada uno.
 - **Final del duelo:** resultado, experiencia ganada, nivel nuevo si lo hay (con el punto de habilidad para asignar), progreso hacia la liga siguiente, y «Revancha» o «Salir».
 - Funciona igual en el ordenador y en el móvil.

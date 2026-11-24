@@ -845,6 +845,13 @@ const ENEMY_DRAW_SIZES = {
 // frame is turned by what its heading is off the rendered direction, so it
 // turns smoothly; a figure's stays upright. Returns false, drawing
 // nothing, for a unit without sheets (or while they load).
+// A duel's two armies are the same units (duelDraw.js): each side's are
+// drawn painted in its colour (unit.paint: "blue" or "red").
+const SIDE_WASH = { blue: "rgb(40, 110, 255)", red: "rgb(255, 45, 30)" };
+const SIDE_WASH_STRENGTH = 0.55; // 1 would be the pure colour, 0 the model as rendered
+const washCanvas = document.createElement("canvas");
+const washCtx = washCanvas.getContext("2d");
+
 function drawSpriteUnit(u, target) {
   const def = SPRITE_UNITS[u.type];
   const sheet = unitSheets[u.type];
@@ -852,13 +859,30 @@ function drawSpriteUnit(u, target) {
   const v = unitVisuals.update(u, frameDt, target);
   const size = drawSize(def);
   const flash = hitFlash(fx, u.id);
+  const wash = SIDE_WASH[u.paint];
   // One layer: frame `r` of `img`, turned by `rest` about the point (px, py).
   const layer = (img, r, rest, px, py, dx, dy) => {
     ctx.save();
     ctx.translate(dx + px, dy + py);
     ctx.rotate(rest);
     ctx.translate(-px, -py);
-    ctx.drawImage(img, r.sx, r.sy, r.size, r.size, -size / 2, -size / 2, size, size);
+    if (wash) {
+      // The frame goes through a small canvas of its own: the side's colour
+      // takes the place of the paint's (its hue; the light and shade of the
+      // model stay), and then everything outside the unit is cut away again.
+      washCanvas.width = washCanvas.height = r.size;
+      washCtx.drawImage(img, r.sx, r.sy, r.size, r.size, 0, 0, r.size, r.size);
+      washCtx.globalCompositeOperation = "color";
+      washCtx.globalAlpha = SIDE_WASH_STRENGTH;
+      washCtx.fillStyle = wash;
+      washCtx.fillRect(0, 0, r.size, r.size);
+      washCtx.globalCompositeOperation = "destination-in";
+      washCtx.globalAlpha = 1;
+      washCtx.drawImage(img, r.sx, r.sy, r.size, r.size, 0, 0, r.size, r.size);
+      ctx.drawImage(washCanvas, 0, 0, r.size, r.size, -size / 2, -size / 2, size, size);
+    } else {
+      ctx.drawImage(img, r.sx, r.sy, r.size, r.size, -size / 2, -size / 2, size, size);
+    }
     if (flash > 0) {
       ctx.globalCompositeOperation = "lighter";
       ctx.globalAlpha = 0.65 * flash;
@@ -2032,7 +2056,6 @@ if (radarMountEl) {
 
 const skipWaveBtn = document.getElementById("skip-wave-btn");
 skipWaveBtn.addEventListener("click", () => {
-  if (dueling()) return duel().ready(); // a duel's «¡Listo!»
   if (state.gameOver || state.win || state.levelComplete) return;
   // In an attack's preparation it's «¡Al ataque!» (one against the other,
   // either player's «¡Listo!»).
@@ -2157,7 +2180,6 @@ function duel() {
       ctx,
       shopEl: attackShopEl,
       panelEl: unitUpgradeEl,
-      readyBtn: skipWaveBtn,
       resultEl: document.getElementById("duel-result"),
       drawUnit: drawSpriteUnit,
       resetVisuals: () => unitVisuals.keepOnly([]),
@@ -2210,8 +2232,8 @@ function enterGame() {
   } else {
     // Non-RTS modes: restore standard TD / Attack HUD controls!
     if (dueling()) {
-      // The duel's shop is in the attack's element; «¡Listo!» and the
-      // unit panel come and go with its phases (duelScreen.js).
+      // The duel's shop, with its «¡Listo!», is in the attack's element;
+      // the unit panel comes and goes with what is picked (duelScreen.js).
       buildMenuEl.classList.add("hidden");
       attackShopEl.classList.remove("hidden");
       unitUpgradeEl.classList.add("hidden");

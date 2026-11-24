@@ -54,12 +54,12 @@ const GRAB = 12; // px round a unit within which a press takes it (a finger is w
 const DRAG_AFTER = 6; // px the pointer moves before a press is a drag, not a tap
 
 // ctx: the canvas's. shopEl, panelEl: the elements the shop and the unit
-// panel go in (the attack mode's, see mount()). readyBtn: «¡Listo!».
+// panel go in (the attack mode's, see mount()).
 // resultEl: where the duel's result shows. drawUnit(unit, target): main.js's
 // drawing of a unit off its sheets. resetVisuals(): forget how units
 // looked (a new duel's units reuse the last one's ids). onRematch(arena),
 // onExit(): the result's two buttons.
-export function createDuelScreen({ ctx, shopEl, panelEl, readyBtn, resultEl, drawUnit, resetVisuals, playSound, showToast, onRematch, onExit, storage }) {
+export function createDuelScreen({ ctx, shopEl, panelEl, resultEl, drawUnit, resetVisuals, playSound, showToast, onRematch, onExit, storage }) {
   let state = null;
   let arena = 1;
   let grade = 1;
@@ -126,6 +126,7 @@ export function createDuelScreen({ ctx, shopEl, panelEl, readyBtn, resultEl, dra
         if (result.ok) selectedId = result.unit.id;
         else refuse(result.reason);
       },
+      onReady: ready,
     });
     mountDuelUnitPanel(panelEl, {
       onUpgrade(skill) {
@@ -239,13 +240,6 @@ export function createDuelScreen({ ctx, shopEl, panelEl, readyBtn, resultEl, dra
     updateDuelShop(shopEl, view, PLAYER);
     // The panel gets out of the way of a unit being dragged.
     updateDuelUnitPanel(panelEl, view, PLAYER, drag ? null : picked());
-    const offer = shopping() && running;
-    readyBtn.classList.toggle("hidden", !offer);
-    if (offer) {
-      readyBtn.textContent = "✔ ¡Listo!";
-      readyBtn.title = "Empezar el asalto";
-      readyBtn.classList.toggle("pulse", state.sides[PLAYER].army.length > 0);
-    }
   }
 
   // ---------------------------------------------------------- the pointer
@@ -298,7 +292,6 @@ export function createDuelScreen({ ctx, shopEl, panelEl, readyBtn, resultEl, dra
   // button go.
   function leave() {
     hideDuelResult(resultEl);
-    readyBtn.classList.add("hidden");
     panelEl.classList.add("hidden");
     selectedId = null;
     press = null;

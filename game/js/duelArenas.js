@@ -22,21 +22,30 @@ export const ZONES = {
 // are cover. An arena is written as what stands on the middle line plus
 // its left half; the right half is the left one mirrored, so that neither
 // side has the better ground.
-function arena(id, league, { middle = [], left = [] }) {
+// `art`: its picture has been made (tools/blender/maps/duel<id>_layout.py):
+// the ground, and what stands up on it, drawn over the units. An arena
+// without it yet is drawn plain.
+function arena(id, league, { middle = [], left = [], art = false }) {
   const circle = ([x, y, r]) => ({ x, y, r });
   const obstacles = [
     ...middle.map(circle),
     ...left.map(circle),
     ...left.map(([x, y, r]) => circle([mirrorX(x), y, r])),
   ];
-  return { id, league, obstacles };
+  return {
+    id,
+    league,
+    obstacles,
+    image: art ? `assets/maps/duel${id}.jpg` : null,
+    foreground: art ? `assets/maps/duel${id}_fg.webp` : null,
+  };
 }
 
 const MID = ARENA.width / 2;
 
 export const DUEL_ARENAS = [
   // A sand pit: one mound in the middle and a palisade before each side.
-  arena(1, "Arena", { middle: [[MID, 375, 38]], left: [[440, 190, 26], [440, 560, 26]] }),
+  arena(1, "Arena", { middle: [[MID, 375, 38]], left: [[440, 190, 26], [440, 560, 26]], art: true }),
   // A scrapyard: two heaps on the middle line leave three lanes, and a
   // container shelters each side's centre.
   arena(2, "Hierro", { middle: [[MID, 210, 34], [MID, 540, 34]], left: [[350, 375, 30]] }),

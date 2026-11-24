@@ -1,6 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ARENA, ZONES, DUEL_ARENAS, arenaOf, mirrorX } from "./duelArenas.js";
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const gameDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 test("there are five arenas, one a league, in order", () => {
   assert.deepEqual(DUEL_ARENAS.map((a) => a.id), [1, 2, 3, 4, 5]);
@@ -61,4 +66,16 @@ test("an unknown arena is the first one", () => {
   assert.equal(arenaOf(3).id, 3);
   assert.equal(arenaOf(99).id, 1);
   assert.equal(arenaOf(undefined).id, 1);
+});
+
+test("an arena with its picture made has its ground and its foreground in the game", () => {
+  assert.equal(arenaOf(1).image, "assets/maps/duel1.jpg");
+  assert.equal(arenaOf(1).foreground, "assets/maps/duel1_fg.webp");
+  for (const arena of DUEL_ARENAS) {
+    // Both or neither: an arena without them is drawn plain (duelDraw.js).
+    assert.equal(Boolean(arena.image), Boolean(arena.foreground), `arena ${arena.id}`);
+    for (const file of [arena.image, arena.foreground]) {
+      if (file) assert.ok(existsSync(path.join(gameDir, file)), `${file} is missing`);
+    }
+  }
 });

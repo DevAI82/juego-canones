@@ -215,9 +215,13 @@ const el = (tag, className, text) => {
   return node;
 };
 
-// The shop: a card a unit. A click buys one.
-export function mountDuelShop(container, { onBuy }) {
+// The shop: «¡Listo!» first, where it is always in sight and big enough
+// for a finger on any screen, then a card a unit. A click buys one.
+export function mountDuelShop(container, { onBuy, onReady }) {
   container.innerHTML = "";
+  const ready = el("button", "duel-ready", "✔ ¡Listo!");
+  ready.title = "Empezar el asalto";
+  ready.addEventListener("click", () => onReady());
   const list = el("div", "build-towers-section");
   const refs = {};
   for (const type of DUEL_ORDER) {
@@ -229,8 +233,9 @@ export function mountDuelShop(container, { onBuy }) {
     list.appendChild(btn);
     refs[type] = { btn, label };
   }
-  container.append(el("div", "shop-title", "Ejército"), list);
+  container.append(el("div", "shop-title", "Ejército"), ready, list);
   container._duelShop = refs;
+  container._duelReady = ready;
 }
 
 export function updateDuelShop(container, view, side) {
@@ -240,6 +245,12 @@ export function updateDuelShop(container, view, side) {
     btn.title = entry.title;
     label.textContent = entry.stars ? `${entry.label} ★${entry.stars}` : entry.label;
   }
+  const mine = view.sides[side];
+  const ready = container._duelReady;
+  ready.disabled = Boolean(shopShut(view, side));
+  ready.textContent = view.phase === "buy" && mine.ready ? "✔ Listo" : "✔ ¡Listo!";
+  // It calls for a press once there is an army to send.
+  ready.classList.toggle("pulse", !ready.disabled && mine.army.length > 0);
 }
 
 // The panel of the unit picked on the map: its type's five upgrades, and

@@ -21,13 +21,13 @@
 ## Rulings this plan takes where the spec leaves room
 
 1. **The duel's shop and unit panel use the attack mode's elements** (`#attack-shop`, `#unit-upgrade-panel`), refilled on entering a duel and put back on leaving it: the same look and the same place on every screen size, with no second copy of their styles. Costs: two modes share two elements, so each must refill them when it starts.
-2. **«¡Listo!» is the button that already starts an attack** (`#skip-wave-btn`), under the HUD.
+2. **«¡Listo!» is the first card of the duel's shop.** (First built on the button that starts an attack, `#skip-wave-btn`; inside the game's scaled box it came out 26 px wide on a phone held upright.)
 3. **A duel against the computer runs in the browser even on the home server's page**, like the RTS mode. The duel between two players is plan D.
 4. **While shopping, the rival's army of the last fight is drawn faded in its zone**: it is what the player may know (spec §4), and it shows what they are buying against.
 5. **An arena without its picture yet is drawn plain** (flat ground, its obstacles as rocks): arenas 2 to 5 can be played before plan C makes their art.
 6. **The computer takes its turn when the purchase begins** and is ready at once; the fight starts when the player says «¡Listo!».
 7. **The pause menu hides «Guardar partida» during a duel.**
-8. **The right-hand side's units wear red**: a second set of sprite sheets rendered from the same models with their team pieces in red, loaded when a duel first starts. A ring of the side's colour lies under every unit.
+8. **Each side's units are painted its colour as they are drawn**: the frame goes through a small canvas where the side's hue replaces the paint's and the model's light and shade stay (`drawSpriteUnit`, for a unit whose `paint` is `"blue"` or `"red"`). A ring of the side's colour lies under every unit. Rendering a second set of sheets was tried first: the models' team pieces are too small to show at this size, and two more sets would add some 10 MB. Costs, if wrong: the colour is a wash over the whole vehicle, not a paint scheme.
 9. **The skill points are assigned in the profile's screen by clicking a skill, and taken back all at once** («Reiniciar puntos»): moving one point is taking all back and putting them again, which costs nothing (spec §8).
 
 ## Tasks
@@ -45,9 +45,9 @@
 **Files:** Create `tools/blender/maps/dump_arena.mjs`, `tools/blender/maps/duel1_layout.py`; modify `tools/blender/maps/build_map.py` if it needs a new prop; `game/js/duelArenas.js` (the pictures' paths), `game/assets/maps/duel1.jpg`, `duel1_fg.webp`; a test that an arena's pictures exist.
 - [ ] A sand pit: mound, palisades and sandbags where the obstacles are, nothing solid elsewhere.
 
-### Task 4: Red for the right-hand side
-**Files:** Modify `tools/blender/kit.py` / `build.py` / `pack_sprites.py` (a `team` option), `game/js/unitSprites.js`, `game/js/main.js`; `game/assets/units3d/*_red_*.webp`.
-- [ ] The five units' sheets with their team pieces in red; `drawSpriteUnit` uses them for a unit whose `paint` is `"red"`.
+### Task 4: Each side in its colour
+**Files:** Modify `game/js/main.js` (`drawSpriteUnit`), `game/js/duelDraw.js`.
+- [ ] `drawSpriteUnit` paints a unit whose `paint` is `"blue"` or `"red"` in that colour (ruling 8); checked in the browser.
 
 ### Task 5: Review and hand-over
 - [ ] A whole duel in the browser, on a phone's size too; the published files' test; `CLAUDE.md`; commit.

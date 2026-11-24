@@ -105,7 +105,7 @@ function drawBar(ctx, u, side) {
 
 // One unit: its picture off the 3D model, or a disc while the sheets load.
 function drawUnit(ctx, scene, u, side, target = null) {
-  const drawn = scene.drawUnit({ ...u, paint: side === "right" ? "red" : null }, target);
+  const drawn = scene.drawUnit({ ...u, paint: side === "right" ? "red" : "blue" }, target);
   if (drawn) return;
   ctx.save();
   ctx.fillStyle = SIDE_COLOR[side];
@@ -340,7 +340,7 @@ function drawBanner(ctx, banner) {
 //   map, foreground   the arena's pictures (loaded images), or null
 //   drawUnit(unit, target)   draws a unit off its 3D model's sheets (main.js);
 //                            false if they aren't loaded yet. unit.paint is
-//                            "red" for the right-hand side's
+//                            its side's colour, "blue" or "red"
 //   selectedId, drag         the unit picked, and { id, x, y, ok } while one is dragged
 //   scorch, bursts           marks of the fallen: [{ x, y, r }], [{ x, y, age, size }]
 //   paused
