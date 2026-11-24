@@ -5,7 +5,11 @@
 //     -- any tab may do anything, as it always could;
 //   - "versus": «Uno contra otro», an attack with a person defending
 //     (attack.js's defender "player"): one tab defends, one attacks
-//     (versus.js keeps who), and each may only act for its own side.
+//     (versus.js keeps who), and each may only act for its own side;
+//   - "duel": the duel minigame between two players (duel.js, its design
+//     §11): one tab is the left side, another the right, each shops for
+//     its own army without seeing the other's, and the armies then fight
+//     by themselves.
 // It ticks the game, makes the autosaves (autosave.js), runs the automatic
 // army for an attacker playing on a phone (autoArmy.js), and answers each
 // tab with the game as that tab needs it (viewJson).
@@ -53,11 +57,14 @@ import {
   resume,
   mayChangeGame,
   swapSides,
+  sidesOf,
 } from "./versus.js";
+import { createDuelState, duelView, buyUnit, sellUnit, moveUnit, upgradeUnit, setReady, SIDES as DUEL_SIDES } from "./duel.js";
 
 const AUTO_ARMY_EVERY = 0.25; // s between the automatic army's looks, as in solo play
 
 const isVersus = (state) => state.mode === "attack" && state.attack.defender === "player";
+const isDuel = (state) => state.mode === "duel";
 
 // What travels to the browsers, out of the state: the units' whole routes
 // stay behind, a shot only says where its target is, and the attacker's fog
@@ -121,10 +128,42 @@ export function createHost({ store, now = () => Date.now(), initial = null, log 
     },
   };
 
+  // A duel's shopping, each player for their own side (duel.js).
+  const duel = {
+    duelBuy: (side, b) => buyUnit(state, side, b.unitType),
+    duelSell: (side, b) => sellUnit(state, side, b.id),
+    duelMove: (side, b) => moveUnit(state, side, b.id, Number(b.x), Number(b.y)),
+    duelUpgrade: (side, b) => upgradeUnit(state, side, b.unitType, b.skill),
+    // «¡Listo!», or (on: false) taking it back.
+    duelReady: (side, b) => setReady(state, side, b.on !== false),
+  };
+
+  // A new duel between two players: both start alike, the purchase has
+  // its clock, and nothing runs until the second player is there.
+  function freshDuel(arena, waiting) {
+    const next = createDuelState({ arena: Number(arena), seed: Math.floor(Math.random() * 0x7fffffff), timed: true });
+    next.paused = waiting;
+    return next;
+  }
+
+  // Both players are there: the duel that was waiting for the second starts.
+  function startIfBothThere(t) {
+    if (!seats.waiting || !sidesOf(seats).every((s) => isConnected(seats, s, t))) return;
+    seats.waiting = false;
+    state.paused = false;
+    seats.pausedBy = null;
+  }
+
   async function act(playerId, body = {}) {
     const t = now();
     const side = seats ? sideOf(seats, playerId) : null;
     const type = body.type;
+
+    if (duel[type]) {
+      if (!isDuel(state)) return refuse("wrong-game");
+      if (!side) return refuse("not-seated");
+      return duel[type](side, body);
+    }
 
     if (defence[type]) {
       if (seats && side !== "defense") return refuse("not-your-side");
@@ -153,14 +192,30 @@ export function createHost({ store, now = () => Date.now(), initial = null, log 
           return ok;
         }
         if (!side) return refuse("not-seated");
+        // (A duel still waiting for its second player has nothing to resume.)
+        if (!on && seats.waiting) return refuse("waiting");
         return on ? pause(seats, state, side) : resume(seats, state, side, t);
       }
       case "ready":
         if (!seats || !side) return refuse("not-seated");
+        if (isDuel(state)) return refuse("wrong-game"); // (a duel's is duelReady)
         return ready(seats, state, side, t);
-      case "join":
+      case "join": {
         if (!seats) return refuse("wrong-game");
-        return sit(seats, body.side, playerId, t);
+        const sat = sit(seats, body.side, playerId, t);
+        if (sat.ok && isDuel(state)) startIfBothThere(t);
+        return sat;
+      }
+      case "newDuel": {
+        // «Duelo» against another player: whoever creates it is the left
+        // side; the right one is for the second player to join.
+        if (seats && !mayChangeGame(seats, playerId, t)) return refuse("game-in-progress");
+        const nextSeats = createSeats(DUEL_SIDES);
+        nextSeats.waiting = true;
+        sit(nextSeats, "left", playerId, t);
+        setGame(freshDuel(body.arena, true), nextSeats);
+        return ok;
+      }
       case "restart":
         // «Defender juntos»: a new co-op game on the chosen level.
         if (seats && !mayChangeGame(seats, playerId, t)) return refuse("game-in-progress");
@@ -180,6 +235,16 @@ export function createHost({ store, now = () => Date.now(), initial = null, log 
       case "rematch": {
         // The same map and money, each player on the other side.
         if (!seats || !side) return refuse("not-seated");
+        if (isDuel(state)) {
+          // A duel's: the same arena and the same sides (it is mirrored).
+          if (state.phase !== "over") return refuse("not-over");
+          for (const s of sidesOf(seats)) seats[s].ready = false;
+          seats.pausedBy = null;
+          seats.gone = null;
+          seats.waiting = false;
+          setGame(freshDuel(state.arena, false), seats);
+          return ok;
+        }
         if (!state.gameOver) return refuse("not-over");
         const next = createAttackState(state.level, state.attack.difficulty, { defender: "player" });
         swapSides(seats);
@@ -187,6 +252,7 @@ export function createHost({ store, now = () => Date.now(), initial = null, log 
         return ok;
       }
       case "save": {
+        if (isDuel(state)) return refuse("duel"); // a duel is never saved (its design §14)
         const slot = Number(body.slot);
         if (![1, 2, 3].includes(slot)) return refuse("bad-slot");
         if (seats && !side) return refuse("not-seated");
@@ -210,7 +276,7 @@ export function createHost({ store, now = () => Date.now(), initial = null, log 
         if (restored.mode === "attack" && !isVersus(restored)) return refuse("solo-only");
         // Whoever was playing one against the other keeps their side; any
         // side nobody holds is free to join.
-        const nextSeats = isVersus(restored) ? seats || createSeats() : null;
+        const nextSeats = isVersus(restored) ? (seats && !seats.sides ? seats : createSeats()) : null;
         if (nextSeats) {
           nextSeats.pausedBy = null;
           nextSeats.gone = null;
@@ -228,10 +294,23 @@ export function createHost({ store, now = () => Date.now(), initial = null, log 
   // saves due now are made, the game moves on, and an attacker playing on
   // a phone has their army sent in for them.
   function tick(dt) {
-    if (seats) checkGone(seats, state, now());
-    saves.tick(state);
+    const t = now();
+    if (seats && isDuel(state)) {
+      // A duel: a side gone pauses it wherever it is (the purchase has a
+      // clock), and it carries on by itself when that side is back.
+      startIfBothThere(t);
+      const wasGone = seats.gone;
+      checkGone(seats, state, t, !seats.waiting && state.phase !== "over");
+      if (wasGone && !seats.gone && state.paused && seats.pausedBy === wasGone) {
+        state.paused = false;
+        seats.pausedBy = null;
+      }
+    } else if (seats) {
+      checkGone(seats, state, t);
+    }
+    if (!isDuel(state)) saves.tick(state);
     stepGame(state, dt);
-    if (seats && seats.attack.auto && isConnected(seats, "attack", now()) && !state.paused) {
+    if (seats && isVersus(state) && seats.attack.auto && isConnected(seats, "attack", t) && !state.paused) {
       autoClock += dt;
       if (autoClock >= AUTO_ARMY_EVERY) {
         autoClock = 0;
@@ -250,15 +329,19 @@ export function createHost({ store, now = () => Date.now(), initial = null, log 
       const you = seen(seats, playerId, t, { auto });
       const sideInfo = (s) => ({ taken: seats[s].player != null, connected: isConnected(seats, s, t), ready: seats[s].ready });
       net = {
-        kind: "versus",
+        kind: isDuel(state) ? "duel" : "versus",
         you,
-        sides: { defense: sideInfo("defense"), attack: sideInfo("attack") },
+        sides: Object.fromEntries(sidesOf(seats).map((s) => [s, sideInfo(s)])),
         pausedBy: seats.pausedBy,
         gone: seats.gone,
         mayChange: mayChangeGame(seats, playerId, t),
       };
+      // (A duel: still waiting for its second player.)
+      if (isDuel(state)) net.waiting = Boolean(seats.waiting);
     }
-    return JSON.stringify({ state, net }, forBrowsers);
+    // Of a duel each tab gets what its side may see (duel.js's duelView).
+    const shown = isDuel(state) ? duelView(state, net.you) : state;
+    return JSON.stringify({ state: shown, net }, forBrowsers);
   }
 
   return { act, tick, viewJson, get state() { return state; } };

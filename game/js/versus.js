@@ -18,13 +18,21 @@ export const otherSide = (side) => (side === "defense" ? "attack" : "defense");
 
 const emptySeat = () => ({ player: null, lastSeen: 0, ready: false, auto: false });
 
-export function createSeats() {
+// Seats for a game's two sides: an attack's (the default), or any other
+// two -- the duel minigame's are "left" and "right" (host.js). Everything
+// here but ready() works the same for either.
+export function createSeats(sides = SIDES) {
   // pausedBy: the side whose pause it is; gone: the side that left mid-round.
-  return { defense: emptySeat(), attack: emptySeat(), pausedBy: null, gone: null };
+  const seats = { [sides[0]]: emptySeat(), [sides[1]]: emptySeat(), pausedBy: null, gone: null };
+  if (sides !== SIDES) seats.sides = [...sides];
+  return seats;
 }
 
+// The two sides these seats are for.
+export const sidesOf = (seats) => seats.sides || SIDES;
+
 export function sideOf(seats, playerId) {
-  return SIDES.find((side) => playerId != null && seats[side].player === playerId) || null;
+  return sidesOf(seats).find((side) => playerId != null && seats[side].player === playerId) || null;
 }
 
 export function isConnected(seats, side, now) {
@@ -34,12 +42,12 @@ export function isConnected(seats, side, now) {
 
 // The sides another tab could take now.
 export function freeSides(seats, now) {
-  return SIDES.filter((side) => !isConnected(seats, side, now));
+  return sidesOf(seats).filter((side) => !isConnected(seats, side, now));
 }
 
 // A tab takes `side`: free, or its own already.
 export function sit(seats, side, playerId, now) {
-  if (!SIDES.includes(side)) return { ok: false, reason: "no-such-side" };
+  if (!sidesOf(seats).includes(side)) return { ok: false, reason: "no-such-side" };
   const mine = sideOf(seats, playerId);
   if (mine && mine !== side) return { ok: false, reason: "already-seated" };
   if (!mine && isConnected(seats, side, now)) return { ok: false, reason: "taken" };
@@ -62,12 +70,13 @@ export function seen(seats, playerId, now, { auto } = {}) {
 // A side gone in the middle of a round pauses the game -- its pause, so the
 // one left can carry on only once it's clear the other isn't coming back
 // (resume below). The preparation has no clock, so nothing to pause there.
-// Returns the sides gone just now.
-export function checkGone(seats, state, now) {
+// Returns the sides gone just now. `running`: whether the game is at a
+// point where a side's absence matters -- an attack's round under way,
+// unless the caller says otherwise for its own kind of game.
+export function checkGone(seats, state, now, running = state.attack?.phase === "battle" && !state.gameOver) {
   if (seats.gone && isConnected(seats, seats.gone, now)) seats.gone = null;
-  const battle = state.attack?.phase === "battle" && !state.gameOver;
-  if (!battle) return [];
-  const gone = SIDES.filter((side) => !isConnected(seats, side, now));
+  if (!running) return [];
+  const gone = sidesOf(seats).filter((side) => !isConnected(seats, side, now));
   if (!gone.length || state.paused) return [];
   state.paused = true;
   seats.pausedBy = gone[0];
@@ -116,14 +125,15 @@ export function resume(seats, state, side, now) {
 // third device at home can't cut their game short while either is there.
 export function mayChangeGame(seats, playerId, now) {
   if (sideOf(seats, playerId)) return true;
-  return !SIDES.some((side) => isConnected(seats, side, now));
+  return !sidesOf(seats).some((side) => isConnected(seats, side, now));
 }
 
 // «Revancha»: the same two players, each on the other side.
 export function swapSides(seats) {
-  const { defense, attack } = seats;
-  seats.defense = { ...attack, ready: false };
-  seats.attack = { ...defense, ready: false };
+  const [a, b] = sidesOf(seats);
+  const first = seats[a];
+  seats[a] = { ...seats[b], ready: false };
+  seats[b] = { ...first, ready: false };
   seats.pausedBy = null;
   seats.gone = null;
 }

@@ -146,3 +146,48 @@ test("a rematch swaps the sides", () => {
   assert.equal(seats.defense.ready, false);
   assert.equal(seats.pausedBy, null);
 });
+
+// ------------------------------------------------------------ seats for any two sides
+// (The duel minigame's are "left" and "right": host.js.)
+
+test("seats can be for any two sides, and work the same", () => {
+  const seats = createSeats(["left", "right"]);
+  assert.deepEqual(sit(seats, "left", "A", 1000), { ok: true });
+  assert.deepEqual(sit(seats, "attack", "B", 1000), { ok: false, reason: "no-such-side" });
+  assert.deepEqual(sit(seats, "left", "B", 1000), { ok: false, reason: "taken" });
+  assert.deepEqual(sit(seats, "right", "B", 1000), { ok: true });
+  assert.equal(sideOf(seats, "A"), "left");
+  assert.equal(sideOf(seats, "B"), "right");
+  assert.equal(sideOf(seats, "C"), null);
+  assert.deepEqual(freeSides(seats, 1000), []);
+  assert.deepEqual(freeSides(seats, 1000 + GONE_AFTER + 1), ["left", "right"]);
+  assert.equal(seen(seats, "B", 9000), "right");
+  assert.equal(isConnected(seats, "right", 9000), true);
+  assert.equal(isConnected(seats, "left", 9000), false);
+  assert.equal(mayChangeGame(seats, "C", 9000), false, "one of the two is still there");
+  assert.equal(mayChangeGame(seats, "A", 9000), true);
+  assert.equal(mayChangeGame(seats, "C", 9000 + GONE_AFTER + 1), true);
+
+  swapSides(seats);
+  assert.equal(sideOf(seats, "A"), "right");
+  assert.equal(sideOf(seats, "B"), "left");
+});
+
+test("a side gone pauses a game that is running, whatever «running» is for it", () => {
+  const seats = createSeats(["left", "right"]);
+  sit(seats, "left", "A", 1000);
+  sit(seats, "right", "B", 1000);
+  const state = { paused: false };
+  seen(seats, "A", 1000 + GONE_AFTER + 10);
+  assert.deepEqual(checkGone(seats, state, 1000 + GONE_AFTER + 10, false), [], "not running: nothing to pause");
+  assert.equal(state.paused, false);
+  assert.deepEqual(checkGone(seats, state, 1000 + GONE_AFTER + 10, true), ["right"]);
+  assert.equal(state.paused, true);
+  assert.equal(seats.pausedBy, "right");
+  assert.equal(seats.gone, "right");
+  // Back again: no longer gone (the pause is lifted by whoever runs the game).
+  seen(seats, "B", 20000);
+  seen(seats, "A", 20000);
+  checkGone(seats, state, 20000, true);
+  assert.equal(seats.gone, null);
+});

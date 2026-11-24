@@ -34,7 +34,7 @@ import {
   upgradeCost as nextCost,
 } from "./duel.js";
 import { UNIT_PRICES, UNIT_ORDER } from "./attack.js";
-import { canSaveGame } from "./modes.js";
+import { canSaveGame, stepGame } from "./modes.js";
 import { ARENA, ZONES, arenaOf } from "./duelArenas.js";
 
 const inZone = (side, u) => {
@@ -780,4 +780,30 @@ test("no kind of unit beats all the others, and none loses to all", () => {
       if (a !== "soldier" || budget === 100) assert.ok(Math.max(...shares) > 0.5, `${a} wins nothing at $${budget}`);
     }
   }
+});
+
+// ------------------------------------------------------------ for the home server
+
+test("somebody only watching sees neither army while the two shop", () => {
+  const s = rich(300);
+  buyUnit(s, "left", "tank");
+  buyUnit(s, "right", "rocket");
+  const watching = duelView(s, null);
+  assert.deepEqual(watching.sides.left.army, []);
+  assert.deepEqual(watching.sides.right.army, []);
+  assert.equal(watching.sides.left.money, 300);
+  bothReady(s);
+  assert.equal(duelView(s, null).units.length, 2, "and the whole fight");
+});
+
+test("the game's own step moves a duel on, unless it is paused", () => {
+  const s = fighting(["tank"], ["tank"], { arena: 3 });
+  stepGame(s, STEP * 3);
+  assert.ok(Math.abs(s.clock - (COMBAT_TIME - 3 * STEP)) < 1e-9);
+  s.paused = true;
+  stepGame(s, STEP * 3);
+  assert.ok(Math.abs(s.clock - (COMBAT_TIME - 3 * STEP)) < 1e-9);
+  s.paused = false;
+  stepGame(s, STEP);
+  assert.ok(Math.abs(s.clock - (COMBAT_TIME - 4 * STEP)) < 1e-9);
 });

@@ -8,6 +8,7 @@ import { LEVELS } from "./levels.js";
 import { TOWER_TYPES } from "./tower.js";
 import { createGameState, createSave } from "./simulate.js";
 import { ROUND_TIME } from "./attack.js";
+import { BUY_TIME_FIRST, ROUND_END_TIME, COMBAT_TIME } from "./duel.js";
 
 // A host with its saves in memory and a clock the test moves.
 function setup(initial = null) {
@@ -261,4 +262,244 @@ test("an attack against the computer is solo only: its save doesn't load here", 
   const { host, saved } = setup();
   saved[1] = createAttackSave(createAttackState(2, "normal"));
   assert.equal((await host.act("X", { type: "load", slot: 1 })).reason, "solo-only");
+});
+
+// ------------------------------------------------------------ a duel between two players
+// (docs/2026-11-22-duelo-design.md §11.)
+
+// A duel in arena 2 that A created (the left side) and B joined.
+async function duel() {
+  const s = setup();
+  assert.deepEqual(await s.host.act("A", { type: "newDuel", arena: 2 }), { ok: true });
+  assert.deepEqual(await s.host.act("B", { type: "join", side: "right" }), { ok: true });
+  return s;
+}
+
+// Both say «¡Listo!» and the fight is run to its result.
+async function playRound(s) {
+  assert.deepEqual(await s.host.act("A", { type: "duelReady" }), { ok: true });
+  assert.deepEqual(await s.host.act("B", { type: "duelReady" }), { ok: true });
+  for (let guard = 0; guard < 400 && s.view("A").state.phase === "combat"; guard++) {
+    s.view("B");
+    s.run(0.25);
+  }
+}
+
+test("a duel waits for its second player: the creator is the left side and can shop, the clock stands still", async () => {
+  const { host, view, run } = setup();
+  assert.deepEqual(await host.act("A", { type: "newDuel", arena: 2 }), { ok: true });
+  let v = view("A");
+  assert.equal(v.net.kind, "duel");
+  assert.equal(v.net.you, "left");
+  assert.equal(v.net.waiting, true);
+  assert.equal(v.net.sides.left.connected, true);
+  assert.equal(v.net.sides.right.connected, false);
+  assert.equal(v.state.mode, "duel");
+  assert.equal(v.state.arena, 2);
+  assert.equal(v.state.timed, true);
+  assert.equal(v.state.sides.left.money, 100);
+  assert.equal(v.state.sides.right.money, 100);
+
+  assert.equal((await host.act("A", { type: "duelBuy", unitType: "tank" })).ok, true);
+  run(3);
+  v = view("A");
+  assert.equal(v.state.clock, BUY_TIME_FIRST, "nobody's time runs while waiting");
+  assert.equal(v.state.sides.left.army.length, 1);
+
+  // Somebody else at home: no side yet, the right one free, neither army shown.
+  const other = view("B");
+  assert.equal(other.net.you, null);
+  assert.equal(other.state.sides.left.army.length, 0);
+
+  assert.deepEqual(await host.act("B", { type: "join", side: "left" }), { ok: false, reason: "taken" });
+  assert.deepEqual(await host.act("B", { type: "join", side: "right" }), { ok: true });
+  assert.equal(view("B").net.you, "right");
+  assert.equal(view("A").net.waiting, false);
+  run(2);
+  view("B");
+  assert.ok(view("A").state.clock <= BUY_TIME_FIRST - 1.9, "now it runs");
+});
+
+test("each player shops for their own side only, and doesn't see the other's shopping", async () => {
+  const s = await duel();
+  const { host, view } = s;
+  assert.equal((await host.act("A", { type: "duelBuy", unitType: "tank" })).ok, true);
+  assert.equal((await host.act("B", { type: "duelBuy", unitType: "rocket" })).ok, true);
+  assert.equal((await host.act("B", { type: "duelUpgrade", unitType: "rocket", skill: "range" })).ok, true);
+
+  const a = view("A");
+  assert.equal(a.state.sides.left.army.length, 1);
+  assert.equal(a.state.sides.left.money, 50);
+  assert.deepEqual(a.state.sides.right.army, []);
+  assert.equal(a.state.sides.right.money, 100);
+  const b = view("B");
+  assert.equal(b.state.sides.right.army[0].type, "rocket");
+  assert.equal(b.state.sides.right.upgrades.rocket.range, 1);
+  assert.deepEqual(b.state.sides.left.army, []);
+
+  // Moving and selling, by the unit's id; never the other side's unit.
+  const tank = a.state.sides.left.army[0];
+  assert.deepEqual(await host.act("A", { type: "duelMove", id: tank.id, x: 200, y: 300 }), { ok: true });
+  assert.deepEqual(await host.act("B", { type: "duelMove", id: tank.id, x: 900, y: 300 }), { ok: false, reason: "unit" });
+  assert.deepEqual(await host.act("B", { type: "duelSell", id: tank.id }), { ok: false, reason: "unit" });
+  assert.deepEqual(await host.act("A", { type: "duelMove", id: tank.id, x: 900, y: 300 }), { ok: false, reason: "zone" });
+  const moved = view("A").state.sides.left.army[0];
+  assert.deepEqual({ x: moved.x, y: moved.y }, { x: 200, y: 300 });
+  assert.deepEqual(await host.act("A", { type: "duelSell", id: tank.id }), { ok: true, refund: 50 });
+
+  // A third device plays no side.
+  assert.deepEqual(await host.act("C", { type: "duelBuy", unitType: "soldier" }), { ok: false, reason: "not-seated" });
+  assert.deepEqual(await host.act("C", { type: "duelReady" }), { ok: false, reason: "not-seated" });
+  // And a duel's actions mean nothing in another game.
+  const coop = setup();
+  assert.deepEqual(await coop.host.act("A", { type: "duelBuy", unitType: "soldier" }), { ok: false, reason: "wrong-game" });
+});
+
+test("the fight starts when both are ready, and then nothing is hidden", async () => {
+  const s = await duel();
+  const { host, view } = s;
+  await host.act("A", { type: "duelBuy", unitType: "tank" });
+  await host.act("B", { type: "duelBuy", unitType: "buggy" });
+  assert.deepEqual(await host.act("A", { type: "duelReady" }), { ok: true });
+  assert.equal(view("B").state.sides.left.ready, true);
+  assert.equal(view("B").state.phase, "buy");
+  // Taking it back, and saying it again.
+  assert.deepEqual(await host.act("A", { type: "duelReady", on: false }), { ok: true });
+  assert.equal(view("B").state.sides.left.ready, false);
+  await playRound(s);
+
+  const v = view("B");
+  assert.equal(v.state.phase, "roundEnd");
+  assert.equal(v.state.units.length, 2);
+  assert.equal(v.state.lastRound.winner, "left");
+  assert.deepEqual(v.state.wins, { left: 1, right: 0 });
+  assert.equal(v.state.sides.left.army.length, 1, "after the fight the armies are no secret");
+});
+
+test("the purchase has its clock between two players", async () => {
+  const s = await duel();
+  await s.host.act("A", { type: "duelBuy", unitType: "tank" });
+  await s.host.act("B", { type: "duelBuy", unitType: "tank" });
+  for (let i = 0; i < BUY_TIME_FIRST + 1; i++) {
+    s.view("A");
+    s.view("B");
+    s.run(1);
+  }
+  assert.notEqual(s.view("A").state.phase, "buy", "the time ran out: the fight started by itself");
+});
+
+test("a side gone pauses the duel, and it carries on when that side is back", async () => {
+  const s = await duel();
+  const { host, view, run, clock } = s;
+  await host.act("A", { type: "duelBuy", unitType: "tank" });
+  run(1);
+  view("A");
+  view("B");
+  const before = view("A").state.clock;
+  // B's tab stops asking for news.
+  for (let i = 0; i < 8; i++) {
+    view("A");
+    run(1);
+  }
+  let v = view("A");
+  assert.equal(v.state.paused, true);
+  assert.equal(v.net.gone, "right");
+  assert.ok(v.state.clock > before - 7, "the clock stopped when the side went");
+  const stopped = v.state.clock;
+  run(3);
+  assert.equal(view("A").state.clock, stopped);
+  // A can't simply carry on without B...
+  assert.deepEqual(await host.act("A", { type: "pause", on: false }), { ok: true });
+  // ...(the pause was the gone side's: with it away, the one left may lift it)
+  assert.equal(view("A").state.paused, false);
+
+  // Gone again, and back: it carries on by itself.
+  for (let i = 0; i < 8; i++) {
+    view("A");
+    run(1);
+  }
+  assert.equal(view("A").state.paused, true);
+  clock.add(50);
+  assert.equal(view("B").net.you, "right", "the tab is known again");
+  view("A");
+  run(0.2);
+  v = view("A");
+  assert.equal(v.state.paused, false);
+  assert.equal(v.net.gone, null);
+});
+
+test("either player can pause a duel, and only they carry on", async () => {
+  const s = await duel();
+  const { host, view, run } = s;
+  assert.deepEqual(await host.act("B", { type: "pause", on: true }), { ok: true });
+  assert.equal(view("A").net.pausedBy, "right");
+  const stopped = view("A").state.clock;
+  view("B");
+  run(2);
+  assert.equal(view("A").state.clock, stopped);
+  view("B");
+  assert.deepEqual(await host.act("A", { type: "pause", on: false }), { ok: false, reason: "not-yours" });
+  assert.deepEqual(await host.act("B", { type: "pause", on: false }), { ok: true });
+  assert.equal(view("A").state.paused, false);
+  // A third device can't.
+  assert.deepEqual(await host.act("C", { type: "pause", on: true }), { ok: false, reason: "not-seated" });
+});
+
+test("a duel is played to three rounds; a rematch keeps the sides and starts level", async () => {
+  const s = await duel();
+  const { host, view, run } = s;
+  await host.act("A", { type: "duelBuy", unitType: "tank" });
+  await host.act("A", { type: "duelBuy", unitType: "tank" });
+  await host.act("B", { type: "duelBuy", unitType: "soldier" });
+  assert.deepEqual(await host.act("A", { type: "rematch" }), { ok: false, reason: "not-over" });
+  for (let round = 0; round < 5 && view("A").state.phase !== "over"; round++) {
+    await playRound(s);
+    for (let guard = 0; guard < 40 && view("A").state.phase === "roundEnd"; guard++) {
+      view("B");
+      run(0.25);
+    }
+  }
+  const end = view("B");
+  assert.equal(end.state.phase, "over");
+  assert.equal(end.state.winner, "left");
+  assert.equal(end.state.sides.left.xp, 30, "what each side destroyed, for its player's profile");
+
+  assert.deepEqual(await host.act("C", { type: "rematch" }), { ok: false, reason: "not-seated" });
+  assert.deepEqual(await host.act("B", { type: "rematch" }), { ok: true });
+  const again = view("A");
+  assert.equal(again.net.you, "left");
+  assert.equal(view("B").net.you, "right");
+  assert.equal(again.state.phase, "buy");
+  assert.equal(again.state.round, 1);
+  assert.equal(again.state.arena, 2);
+  assert.deepEqual(again.state.wins, { left: 0, right: 0 });
+  assert.equal(again.state.sides.left.money, 100);
+  assert.deepEqual(again.state.sides.left.army, []);
+  assert.notEqual(again.state.rng, end.state.rng, "another duel, other dice");
+  assert.equal(again.net.waiting, false);
+});
+
+test("a duel isn't saved, and a third device can't take the game from its two players", async () => {
+  const s = await duel();
+  const { host, view, run, writes } = s;
+  await host.act("A", { type: "duelBuy", unitType: "tank" });
+  for (let i = 0; i < 4; i++) {
+    view("A");
+    view("B");
+    run(1);
+  }
+  assert.deepEqual(writes, [], "no autosave of a duel");
+  assert.deepEqual(await host.act("A", { type: "save", slot: 1 }), { ok: false, reason: "duel" });
+  assert.deepEqual(await host.act("C", { type: "restart", level: 1 }), { ok: false, reason: "game-in-progress" });
+  assert.deepEqual(await host.act("C", { type: "newDuel", arena: 1 }), { ok: false, reason: "game-in-progress" });
+  assert.equal(view("C").net.mayChange, false);
+  // One of the two can: back to defending together.
+  assert.deepEqual(await host.act("B", { type: "restart", level: 1 }), { ok: true });
+  assert.equal(view("A").net.kind, "coop");
+});
+
+test("an arena that isn't one is the first", async () => {
+  const { host, view } = setup();
+  await host.act("A", { type: "newDuel", arena: 99 });
+  assert.equal(view("A").state.arena, 1);
 });

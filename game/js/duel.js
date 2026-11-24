@@ -159,14 +159,18 @@ function remember(state) {
 // The duel as this side may see it, as a copy: while shopping, the rival
 // is as it was when the purchase began; in a fight and after it, all of it.
 // It is what the computer opponent decides from, and what the home server
-// sends each player.
+// sends each player -- and, with no side (null), somebody only watching,
+// who sees neither side's shopping.
 export function duelView(state, side) {
   const view = JSON.parse(JSON.stringify(state));
   if (state.phase === "buy") {
-    const rival = view.sides[otherSide(side)];
-    rival.army = rival.shown.army;
-    rival.money = rival.shown.money;
-    rival.upgrades = rival.shown.upgrades;
+    for (const other of SIDES) {
+      if (other === side) continue;
+      const hidden = view.sides[other];
+      hidden.army = hidden.shown.army;
+      hidden.money = hidden.shown.money;
+      hidden.upgrades = hidden.shown.upgrades;
+    }
   }
   return view;
 }
