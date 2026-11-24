@@ -1,7 +1,7 @@
 # Duelo: minijuego de uno contra uno — Diseño
 
 Fecha: 2026-11-22
-Estado: aprobado por el usuario (2026-11-22). Hecho: el núcleo (plan A), la pantalla con la primera arena (plan B) y el equilibrio (plan C). Pendiente: las otras cuatro arenas (plan C) y la red de casa (plan D).
+Estado: aprobado por el usuario (2026-11-22). Hecho: el núcleo (plan A), la pantalla (plan B), el equilibrio y las cinco arenas (plan C). Pendiente: la red de casa (plan D).
 
 ## 1. Contexto
 

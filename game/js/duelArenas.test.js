@@ -71,6 +71,7 @@ test("an unknown arena is the first one", () => {
 test("an arena with its picture made has its ground and its foreground in the game", () => {
   assert.equal(arenaOf(1).image, "assets/maps/duel1.jpg");
   assert.equal(arenaOf(1).foreground, "assets/maps/duel1_fg.webp");
+  for (const arena of DUEL_ARENAS) assert.equal(arena.image, `assets/maps/duel${arena.id}.jpg`, "all five arenas have their picture");
   for (const arena of DUEL_ARENAS) {
     // Both or neither: an arena without them is drawn plain (duelDraw.js).
     assert.equal(Boolean(arena.image), Boolean(arena.foreground), `arena ${arena.id}`);

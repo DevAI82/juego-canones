@@ -8,7 +8,9 @@ level3_build.py).
 <dir> holds layout.json, ground_color.png and ground_height.png
 (level<N>_layout.py); into it go <name>_bg.png and <name>_fg.png, or
 <name>.glb. The layout lists what stands on the map, by kind; whatever
-kinds it has are built.
+kinds it has are built. It may also bring surfaces of its own ("paints")
+and props made of plain shapes ("solids"): the duel arenas' do
+(duel_layout.py).
 """
 import math
 import os
@@ -25,6 +27,10 @@ SCALE = float(args[4]) if len(args) > 4 else 1.0
 
 s = Scene(DIR, plain=JOB == "glb")
 L = s.layout
+# Surfaces the layout brings: {name: {"color": [r, g, b], "rough", "metal", "blotch", "grain"}}.
+for name, spec in L.get("paints", {}).items():
+    s.mats[name] = s.paint(name, tuple(spec["color"]), rough=spec.get("rough", 0.85), grain=spec.get("grain", 0.07),
+                           blotch=spec.get("blotch", 0.38), metal=spec.get("metal", 0.0))
 s.ground()
 if L.get("water"):
     s.water(L["water"])
@@ -119,9 +125,26 @@ def flags(places):
     return s.done(p)
 
 
+def solids(items):
+    """Plain shapes a layout makes its own props of, each at (x, y) with its
+    middle z px up and a surface "mat": {"shape": "box", "size": [w, d, h],
+    "turn": degrees}, {"shape": "cyl", "r", "h", "r2", "segments"} (upright)
+    or {"shape": "ball", "r", "squash"}."""
+    p = s.part("solids")
+    for it in items:
+        at = s.at(it["x"], it["y"], it.get("z", 0))
+        if it["shape"] == "box":
+            p.box(tuple(it["size"]), at, it["mat"], bevel=it.get("bevel", 0.4), rot=rot("Z", -it.get("turn", 0)))
+        elif it["shape"] == "cyl":
+            p.cyl(it["r"], it["h"], at, it["mat"], r2=it.get("r2"), segments=it.get("segments", 16), bevel=it.get("bevel", 0.3))
+        else:
+            p.ball(it["r"], at, it["mat"], squash=it.get("squash", 1.0))
+    return s.done(p)
+
+
 BUILDERS = {
     "sandbags": s.sandbags, "hedgehogs": s.hedgehogs, "rocks": s.boulders, "tents": s.tents, "crates": s.crates,
-    "fences": s.fences, "wrecks": s.wrecks, "posts": s.posts, "gates": gates, "ruins": ruins, "blocks": blocks, "flags": flags,
+    "fences": s.fences, "wrecks": s.wrecks, "posts": s.posts, "gates": gates, "ruins": ruins, "blocks": blocks, "flags": flags, "solids": solids,
 }
 for kind, build in BUILDERS.items():
     if L.get(kind):

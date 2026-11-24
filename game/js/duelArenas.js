@@ -22,7 +22,8 @@ export const ZONES = {
 // are cover. An arena is written as what stands on the middle line plus
 // its left half; the right half is the left one mirrored, so that neither
 // side has the better ground.
-// `art`: its picture has been made (tools/blender/maps/duel<id>_layout.py):
+// `art`: its picture has been made (tools/blender/maps/duel1_layout.py for
+// the first arena, duel_layout.py for the others):
 // the ground, and what stands up on it, drawn over the units. An arena
 // without it yet is drawn plain.
 function arena(id, league, { middle = [], left = [], art = false }) {
@@ -48,15 +49,15 @@ export const DUEL_ARENAS = [
   arena(1, "Arena", { middle: [[MID, 375, 38]], left: [[440, 190, 26], [440, 560, 26]], art: true }),
   // A scrapyard: two heaps on the middle line leave three lanes, and a
   // container shelters each side's centre.
-  arena(2, "Hierro", { middle: [[MID, 210, 34], [MID, 540, 34]], left: [[350, 375, 30]] }),
+  arena(2, "Hierro", { middle: [[MID, 210, 34], [MID, 540, 34]], left: [[350, 375, 30]], art: true }),
   // A foundry yard: crucibles at each side's flanks and one on each side
   // of the middle.
-  arena(3, "Bronce", { left: [[300, 210, 28], [300, 540, 28], [530, 375, 30]] }),
+  arena(3, "Bronce", { left: [[300, 210, 28], [300, 540, 28], [530, 375, 30]], art: true }),
   // A snowed-in base: a rock in the middle, two before each side and one
   // deep in its zone.
-  arena(4, "Plata", { middle: [[MID, 375, 30]], left: [[470, 240, 24], [470, 510, 24], [210, 375, 26]] }),
+  arena(4, "Plata", { middle: [[MID, 375, 30]], left: [[470, 240, 24], [470, 510, 24], [210, 375, 26]], art: true }),
   // A palace courtyard: a fountain in the middle and columns round it.
-  arena(5, "Oro", { middle: [[MID, 375, 24]], left: [[400, 150, 22], [400, 600, 22], [505, 375, 22]] }),
+  arena(5, "Oro", { middle: [[MID, 375, 24]], left: [[400, 150, 22], [400, 600, 22], [505, 375, 22]], art: true }),
 ];
 
 // The arena with this number; the first one for a number that isn't one
