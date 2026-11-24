@@ -29,6 +29,9 @@ import {
   WIN_BONUS,
   KILL_SHARE,
   ROUNDS_TO_WIN,
+  LIGHT_VS_ARMOR,
+  SPLASH_SHARE,
+  upgradeCost as nextCost,
 } from "./duel.js";
 import { UNIT_PRICES, UNIT_ORDER } from "./attack.js";
 import { canSaveGame } from "./modes.js";
@@ -358,10 +361,11 @@ function faceOff(shooter, victim) {
   return { s, a, b };
 }
 
-test("a light weapon does an armoured unit half damage; a tank's gun, all of it", () => {
+test("a light weapon does an armoured unit less damage; a tank's gun, all of it", () => {
   const light = faceOff("buggy", "tank");
   stepDuel(light.s, STEP);
-  assert.equal(light.b.maxHp - light.b.hp, DUEL_UNITS.buggy.damage / 2);
+  assert.ok(LIGHT_VS_ARMOR < 1);
+  assert.equal(light.b.maxHp - light.b.hp, DUEL_UNITS.buggy.damage * LIGHT_VS_ARMOR);
 
   const heavy = faceOff("tank", "tank");
   stepDuel(heavy.s, STEP);
@@ -399,7 +403,8 @@ test("a rocket also hurts what stands near its target, and nothing farther", () 
   Object.assign(far, { x: 650, y: 200, fireTimer: 99 });
   stepDuel(s, STEP);
   assert.equal(target.maxHp - target.hp, DUEL_UNITS.rocket.damage);
-  assert.ok(Math.abs(near.maxHp - near.hp - DUEL_UNITS.rocket.damage * 0.6) < 1e-9);
+  assert.ok(SPLASH_SHARE > 0 && SPLASH_SHARE < 1);
+  assert.ok(Math.abs(near.maxHp - near.hp - DUEL_UNITS.rocket.damage * SPLASH_SHARE) < 1e-9);
   assert.equal(far.hp, far.maxHp);
 });
 
@@ -651,4 +656,128 @@ test("a duel is never saved", () => {
   assert.equal(canSaveGame(createDuelState()), false);
   const s = fighting(["tank"], ["tank"]);
   assert.equal(canSaveGame(s), false);
+});
+
+// ------------------------------------------------------------ the rocket truck's rules
+
+test("a rocket hits armour harder than anything else", () => {
+  assert.ok(DUEL_UNITS.rocket.antiArmor > 1);
+  const armour = faceOff("rocket", "tank");
+  stepDuel(armour.s, STEP);
+  assert.equal(armour.b.maxHp - armour.b.hp, DUEL_UNITS.rocket.damage * DUEL_UNITS.rocket.antiArmor);
+
+  const soft = faceOff("rocket", "buggy");
+  stepDuel(soft.s, STEP);
+  assert.equal(soft.b.maxHp - soft.b.hp, DUEL_UNITS.rocket.damage);
+});
+
+test("a rocket truck can't shoot what is right on top of it", () => {
+  const blind = DUEL_UNITS.rocket.minRange;
+  assert.ok(blind > 0 && blind < DUEL_UNITS.rocket.range);
+
+  // An enemy inside its blind spot, and nobody else: it holds, and waits.
+  const alone = fighting(["rocket"], ["buggy"], { arena: 3 });
+  const [rocket] = unitsOf(alone, "left");
+  const [buggy] = unitsOf(alone, "right");
+  Object.assign(rocket, { x: 550, y: 120, fireTimer: 0 });
+  Object.assign(buggy, { x: 550 + blind - 10, y: 120, fireTimer: 99, speed: 0 });
+  run(alone, 0.5);
+  assert.equal(buggy.hp, buggy.maxHp, "too near to be shot at");
+  assert.deepEqual({ x: rocket.x, y: rocket.y }, { x: 550, y: 120 }, "and it doesn't drive into it either");
+
+  // Just outside the blind spot it is shot.
+  const edge = fighting(["rocket"], ["buggy"], { arena: 3 });
+  const [r2] = unitsOf(edge, "left");
+  const [b2] = unitsOf(edge, "right");
+  Object.assign(r2, { x: 550, y: 120, fireTimer: 0 });
+  Object.assign(b2, { x: 550 + blind + 10, y: 120, fireTimer: 99, speed: 0 });
+  stepDuel(edge, STEP);
+  assert.equal(b2.maxHp - b2.hp, DUEL_UNITS.rocket.damage);
+
+  // With one enemy too near and another in reach, it shoots the other.
+  const two = fighting(["rocket"], ["buggy", "buggy"], { arena: 3 });
+  const [r3] = unitsOf(two, "left");
+  const [near, far] = unitsOf(two, "right");
+  Object.assign(r3, { x: 450, y: 120, fireTimer: 0 });
+  Object.assign(near, { x: 450 + blind - 20, y: 120, fireTimer: 99 });
+  Object.assign(far, { x: 650, y: 120, fireTimer: 99 });
+  stepDuel(two, STEP);
+  assert.equal(near.hp, near.maxHp);
+  assert.equal(far.maxHp - far.hp, DUEL_UNITS.rocket.damage);
+  assert.deepEqual(two.shots[0].to, { x: 650, y: 120 });
+});
+
+// ------------------------------------------------------------ the balance
+// Tuned with simulated fights (the session's matrix.mjs): armies of one
+// kind of unit, at the same money, what is left of it spent on that unit's
+// upgrades. No kind beats every other: tanks crush what is light, rockets
+// break tanks, and the fast light units get under the rockets' guns.
+
+// An army for this money: as many of `type` as it buys and, with the
+// change, soldiers; 12 units at most.
+function armyFor(type, budget) {
+  const army = [];
+  let money = budget;
+  for (const unit of [type, "soldier"]) {
+    while (army.length < UNIT_CAP && money >= DUEL_UNITS[unit].price) {
+      army.push(unit);
+      money -= DUEL_UNITS[unit].price;
+    }
+  }
+  return army;
+}
+
+// The share of fights `a` wins against `b` at this money, each on either
+// side of two arenas.
+function winShare(a, b, budget) {
+  const field = (s, side, type) => {
+    s.sides[side].money = budget;
+    for (const unit of armyFor(type, budget)) buyUnit(s, side, unit);
+    for (let guard = 0; guard < 40; guard++) {
+      let pick = null;
+      for (const skill of SKILLS) {
+        const cost = nextCost(s, side, type, skill);
+        if (cost !== null && cost <= s.sides[side].money && (!pick || cost < pick.cost)) pick = { skill, cost };
+      }
+      if (!pick) break;
+      upgradeUnit(s, side, type, pick.skill);
+    }
+  };
+  let wins = 0;
+  let fights = 0;
+  for (const arena of [1, 3]) {
+    for (const [left, right] of [[a, b], [b, a]]) {
+      const s = createDuelState({ arena, seed: arena });
+      field(s, "left", left);
+      field(s, "right", right);
+      bothReady(s);
+      fight(s);
+      if (s.lastRound.winner === (left === a ? "left" : "right")) wins++;
+      fights++;
+    }
+  }
+  return wins / fights;
+}
+
+test("tanks crush light units, rockets break tanks, fast units get under rockets", () => {
+  for (const budget of [200, 350]) {
+    for (const light of ["soldier", "motorcycle", "buggy"]) {
+      assert.ok(winShare("tank", light, budget) >= 0.75, `tanks against ${light} at $${budget}`);
+    }
+    assert.ok(winShare("rocket", "tank", budget) >= 0.75, `rockets against tanks at $${budget}`);
+    assert.ok(winShare("buggy", "rocket", budget) >= 0.75, `buggies against rockets at $${budget}`);
+    assert.ok(winShare("motorcycle", "rocket", budget) >= 0.5, `motorcycles against rockets at $${budget}`);
+  }
+});
+
+test("no kind of unit beats all the others, and none loses to all", () => {
+  for (const budget of [100, 200, 350]) {
+    for (const a of DUEL_ORDER) {
+      const shares = DUEL_ORDER.filter((b) => b !== a).map((b) => winShare(a, b, budget));
+      assert.ok(Math.min(...shares) < 0.5, `${a} wins everything at $${budget}`);
+      // (Soldiers are the first round's unit: capped at 12, they are
+      // outgrown by anything once there is money for more.)
+      if (a !== "soldier" || budget === 100) assert.ok(Math.max(...shares) > 0.5, `${a} wins nothing at $${budget}`);
+    }
+  }
 });

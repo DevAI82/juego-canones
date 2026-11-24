@@ -25,9 +25,11 @@ export function freshProfile() {
   return { xp: 0, level: 1, league: 1, leagueWins: 0, champion: false, points: {}, duels: 0, wins: 0 };
 }
 
-// Experience from one level to the next; null at the top.
+// Experience from one level to the next; null at the top. (300 a level:
+// with the design's first figure, 100, simulated careers reached the top
+// level in some 17 duels, before the last league.)
 export function xpToNext(level) {
-  return level >= MAX_LEVEL ? null : 100 * level;
+  return level >= MAX_LEVEL ? null : 300 * level;
 }
 
 // The level this much experience (in all) makes.

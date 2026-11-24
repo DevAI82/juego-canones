@@ -1,7 +1,7 @@
 # Duelo: minijuego de uno contra uno — Diseño
 
 Fecha: 2026-11-22
-Estado: aprobado por el usuario (2026-11-22). Hecho: el núcleo (plan A) y la pantalla con la primera arena (plan B). Pendiente: equilibrio y las otras cuatro arenas (plan C) y la red de casa (plan D).
+Estado: aprobado por el usuario (2026-11-22). Hecho: el núcleo (plan A), la pantalla con la primera arena (plan B) y el equilibrio (plan C). Pendiente: las otras cuatro arenas (plan C) y la red de casa (plan D).
 
 ## 1. Contexto
 
@@ -71,8 +71,10 @@ Un duelo son asaltos. Cada asalto tiene dos fases.
 | Soldado | Barato y numeroso; cae rápido ante el daño en área |
 | Moto | Muy rápida: llega pronto a la retaguardia rival; poca vida |
 | Buggy | Equilibrado: buena cadencia y velocidad |
-| Tanque | Blindado: las armas ligeras (soldado, moto, buggy) le hacen la mitad de daño |
-| Lanzacohetes | Largo alcance y daño en área; lento y frágil de cerca |
+| Tanque | Blindado: las armas ligeras (soldado, moto, buggy) le hacen menos daño |
+| Lanzacohetes | Largo alcance, daño en área y más daño a los blindados; lento, y no puede disparar a lo que tiene encima |
+
+Ninguna unidad gana a todas las demás (ajustado con combates simulados, 2026-11-24): el tanque arrolla a las ligeras, el lanzacohetes rompe a los tanques, y motos y buggies se meten bajo los cañones del lanzacohetes. Diez soldados son el mejor ejército del primer asalto contra todo menos tanques.
 
 - **El ejército dura todo el duelo.** En cada asalto vuelve entero y reparado al sitio donde el jugador lo dejó, y se va ampliando. Quien pierde un asalto no pierde sus unidades.
 - **Máximo 12 vehículos** por bando.
@@ -101,7 +103,7 @@ Se guarda en cada aparato (en el navegador, como los ajustes). No hay cuentas ni
 **Nivel**
 
 - Cada unidad enemiga destruida da experiencia igual a su precio, multiplicada por la liga de la arena (×1 en Arena, ×1,25 en Hierro, hasta ×2 en Oro).
-- Para pasar del nivel n al n + 1 hacen falta 100 × n de experiencia. El nivel máximo es 15.
+- Para pasar del nivel n al n + 1 hacen falta 300 × n de experiencia. El nivel máximo es 15. (Eran 100 × n: en carreras simuladas se llegaba al nivel máximo en unos 17 duelos, antes de la última liga. Con 300 se es campeón hacia el nivel 11, tras unos 25–35 duelos.)
 - Cada nivel ganado da **un punto de habilidad** y **10 $ más de dinero inicial**.
 - Un punto de habilidad se asigna a una habilidad de un tipo de vehículo: en los duelos contra la máquina, ese tipo empieza con un nivel gratis de esa habilidad (varios puntos en la misma suman niveles, hasta el máximo de cinco; los niveles gratis cuentan dentro de ese máximo). Los puntos se pueden recolocar entre duelos sin coste.
 

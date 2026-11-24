@@ -161,7 +161,7 @@ test("the banner explains a round that wasn't decided by destroying an army", ()
 
 test("the duel's result: the score, what was destroyed and what the profile gained", () => {
   const s = wonDuel();
-  const before = { ...freshProfile(), xp: 95 };
+  const before = { ...freshProfile(), xp: 280 };
   const { profile, gained } = recordDuel(before, { arena: 1, won: true, xp: s.sides.left.xp, rival: "computer" });
   const result = duelResult(s, "left", gained, profile);
   assert.equal(result.won, true);
@@ -188,24 +188,24 @@ test("the result announces a promotion and a championship", () => {
   assert.deepEqual(promoted.news, ["¡Asciendes a la liga Hierro!"]);
   assert.equal(promoted.league, "Liga Hierro · 0/3 victorias para ascender");
 
-  const champ = duelResult(s, "left", { xp: 30, levels: 2, promoted: false, champion: true }, { ...freshProfile(), xp: 300, level: 3, league: 5, leagueWins: 3, champion: true });
+  const champ = duelResult(s, "left", { xp: 30, levels: 2, promoted: false, champion: true }, { ...freshProfile(), xp: 900, level: 3, league: 5, leagueWins: 3, champion: true });
   assert.deepEqual(champ.news, ["¡Subes al nivel 3! Tienes 2 puntos de habilidad por asignar", "¡Campeón de la liga Oro!"]);
   assert.equal(champ.league, "Campeón de la liga Oro");
 });
 
 test("experience within the level, for the profile's bar", () => {
-  assert.deepEqual(xpProgress(freshProfile()), { have: 0, need: 100 });
-  assert.deepEqual(xpProgress({ ...freshProfile(), xp: 350, level: 3 }), { have: 50, need: 300 });
-  assert.deepEqual(xpProgress({ ...freshProfile(), xp: 20000, level: 15 }), { have: 0, need: null });
+  assert.deepEqual(xpProgress(freshProfile()), { have: 0, need: 300 });
+  assert.deepEqual(xpProgress({ ...freshProfile(), xp: 950, level: 3 }), { have: 50, need: 900 });
+  assert.deepEqual(xpProgress({ ...freshProfile(), xp: 50000, level: 15 }), { have: 0, need: null });
 });
 
 test("the profile's screen: level, league, points and which arenas are open", () => {
-  let p = recordDuel(freshProfile(), { arena: 1, won: true, xp: 350, rival: "computer" }).profile; // level 3
+  let p = recordDuel(freshProfile(), { arena: 1, won: true, xp: 950, rival: "computer" }).profile; // level 3
   p = assignPoint(p, "tank", "armor").profile;
   p = { ...p, league: 3, leagueWins: 2 };
   const info = lobbyInfo(p);
   assert.equal(info.level, 3);
-  assert.deepEqual(info.xp, { have: 50, need: 300 });
+  assert.deepEqual(info.xp, { have: 50, need: 900 });
   assert.equal(info.league, "Liga Bronce · 2/3 victorias para ascender");
   assert.equal(info.pointsFree, 1);
   assert.equal(info.points.tank.armor, 1);

@@ -36,24 +36,24 @@ test("a new profile: level 1, the Arena league, nothing won", () => {
   assert.equal(WINS_TO_PROMOTE, 3);
 });
 
-test("level n to n + 1 takes 100 x n experience, up to level 15", () => {
-  assert.equal(xpToNext(1), 100);
-  assert.equal(xpToNext(7), 700);
+test("level n to n + 1 takes 300 x n experience, up to level 15", () => {
+  assert.equal(xpToNext(1), 300);
+  assert.equal(xpToNext(7), 2100);
   assert.equal(xpToNext(15), null);
-  assert.equal(withXp(99).level, 1);
-  assert.equal(withXp(100).level, 2);
-  assert.equal(withXp(299).level, 2);
-  assert.equal(withXp(300).level, 3);
-  assert.equal(withXp(10499).level, 14);
-  assert.equal(withXp(10500).level, 15);
+  assert.equal(withXp(299).level, 1);
+  assert.equal(withXp(300).level, 2);
+  assert.equal(withXp(899).level, 2);
+  assert.equal(withXp(900).level, 3);
+  assert.equal(withXp(31499).level, 14);
+  assert.equal(withXp(31500).level, 15);
   assert.equal(withXp(999999).level, 15);
 });
 
 test("a duel's experience counts by the arena's league", () => {
   assert.deepEqual([1, 2, 3, 4, 5].map(leagueFactor), [1, 1.25, 1.5, 1.75, 2]);
-  const { profile, gained } = recordDuel(freshProfile(), { arena: 3, won: false, xp: 150, rival: "computer" });
-  assert.equal(gained.xp, 225);
-  assert.equal(profile.xp, 225);
+  const { profile, gained } = recordDuel(freshProfile(), { arena: 3, won: false, xp: 300, rival: "computer" });
+  assert.equal(gained.xp, 450);
+  assert.equal(profile.xp, 450);
   assert.equal(profile.level, 2);
   assert.equal(gained.levels, 1);
   assert.equal(profile.duels, 1);
@@ -67,7 +67,7 @@ test("recordDuel leaves the profile it was given alone", () => {
 });
 
 test("a level gives a skill point, to put in a skill of a unit type", () => {
-  const p = withXp(300); // level 3: two points
+  const p = withXp(900); // level 3: two points
   assert.equal(pointsFree(p), 2);
   assert.equal(pointsSpent(p), 0);
 
@@ -85,7 +85,7 @@ test("a level gives a skill point, to put in a skill of a unit type", () => {
 });
 
 test("points can be taken back and put elsewhere, at no cost", () => {
-  const p = assignPoint(withXp(300), "tank", "damage").profile;
+  const p = assignPoint(withXp(900), "tank", "damage").profile;
   const back = removePoint(p, "tank", "damage");
   assert.equal(back.ok, true);
   assert.deepEqual(back.profile.points, {});
@@ -95,7 +95,7 @@ test("points can be taken back and put elsewhere, at no cost", () => {
 });
 
 test("a skill takes five points at most", () => {
-  let p = withXp(10500); // level 15: fourteen points
+  let p = withXp(31500); // level 15: fourteen points
   for (let i = 0; i < 5; i++) p = assignPoint(p, "rocket", "range").profile;
   assert.equal(p.points.rocket.range, 5);
   assert.deepEqual(assignPoint(p, "rocket", "range"), { ok: false, reason: "max" });
@@ -104,7 +104,7 @@ test("a skill takes five points at most", () => {
 
 test("against the computer a profile starts with its money and its free levels", () => {
   assert.deepEqual(startOf(freshProfile()), { money: 100, free: {} });
-  let p = withXp(600); // level 4
+  let p = withXp(1800); // level 4
   p = assignPoint(p, "tank", "damage").profile;
   p = assignPoint(p, "tank", "damage").profile;
   const start = startOf(p);
@@ -146,8 +146,8 @@ test("three wins against the computer in the highest league reached promote", ()
 });
 
 test("a duel against a player gives its experience", () => {
-  const { profile, gained } = recordDuel(freshProfile(), { arena: 5, won: true, xp: 100, rival: "player" });
-  assert.equal(gained.xp, 200);
+  const { profile, gained } = recordDuel(freshProfile(), { arena: 5, won: true, xp: 150, rival: "player" });
+  assert.equal(gained.xp, 300);
   assert.equal(profile.level, 2);
   assert.equal(profile.league, 1);
 });
@@ -190,7 +190,7 @@ test("a missing or broken saved profile is a new one", () => {
 
 test("a saved profile with silly values is put right", () => {
   const cleaned = cleanProfile({
-    xp: 350,
+    xp: 950,
     level: 99, // the level is what the experience says
     league: 12,
     leagueWins: -4,
@@ -200,7 +200,7 @@ test("a saved profile with silly values is put right", () => {
     wins: 3.9,
     extra: true,
   });
-  assert.equal(cleaned.xp, 350);
+  assert.equal(cleaned.xp, 950);
   assert.equal(cleaned.level, 3);
   assert.equal(cleaned.league, 5);
   assert.equal(cleaned.leagueWins, 0);

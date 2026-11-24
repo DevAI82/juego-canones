@@ -67,7 +67,9 @@ test("there are five grades, each starting with more than the one before", () =>
     const s = createDuelState({ right: start });
     assert.equal(s.sides.right.money, start.money);
   }
-  assert.deepEqual(gradeStart(1, 3), { money: 100, free: {} }, "the first grade starts as a new player does");
+  assert.deepEqual(gradeStart(1, 3), { money: 95, free: {} }, "the first grade starts with a little less than a new player");
+  assert.deepEqual(DUEL_GRADES.map((g) => g.money), [95, 135, 165, 190, 220]);
+  assert.deepEqual(DUEL_GRADES.map((g) => g.freeLevels), [0, 3, 5, 7, 10]);
   assert.deepEqual(gradeStart(4, 9), gradeStart(4, 9));
 });
 
@@ -182,4 +184,34 @@ test("the top grade beats the first one most of the time, and every duel ends", 
     if (s.winner === top) wins++;
   }
   assert.ok(wins >= duels * 0.8, `grade 5 won ${wins} of ${duels}`);
+});
+
+// ------------------------------------------------------------ the grades, tuned
+
+test("against rockets the top grade sends fast units, and no tanks", () => {
+  for (let seed = 1; seed <= 10; seed++) {
+    const rockets = secondRound(["rocket", "rocket", "rocket"], 200);
+    const buys = bought(planTurn(duelView(rockets, "left"), "left", 5, dice(seed)));
+    assert.ok(buys.includes("motorcycle") || buys.includes("buggy"), `seed ${seed}: fast units against rockets (${buys})`);
+    assert.ok(!buys.includes("tank"), `seed ${seed}: no tanks against rockets (${buys})`);
+  }
+});
+
+test("each grade beats the one before it more often than not", () => {
+  for (let grade = 2; grade <= 5; grade++) {
+    let wins = 0;
+    const duels = 20;
+    for (let seed = 1; seed <= duels; seed++) {
+      const top = seed % 2 ? "left" : "right";
+      const low = top === "left" ? "right" : "left";
+      const s = createDuelState({ arena: 1 + (seed % 5), seed, [top]: gradeStart(grade, seed), [low]: gradeStart(grade - 1, seed) });
+      while (s.phase !== "over") {
+        playTurn(s, top, grade);
+        playTurn(s, low, grade - 1);
+        finishRound(s);
+      }
+      if (s.winner === top) wins++;
+    }
+    assert.ok(wins > duels / 2, `grade ${grade} won ${wins} of ${duels} against grade ${grade - 1}`);
+  }
 });

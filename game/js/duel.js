@@ -34,26 +34,34 @@ export const STEP = 1 / 30; // s of a tick of the fight
 // The shop, cheapest first: the attack mode's units at its prices
 // (duel.test.js holds them together). Their other numbers are the duel's
 // own: the attack mode's are meant against towers, and unit against unit
-// ten soldiers would roll over two tanks. Each unit has a part to play:
-//   soldier     cheap and many; falls fast to splash damage
-//   motorcycle  very fast: soon among the rival's back line; little health
-//   buggy       the all-rounder: good rate of fire and speed
-//   tank        armoured: light weapons (the three above) do it half damage
-//   rocket      long range and splash damage; slow, and frail up close
+// ten soldiers would roll over two tanks. Each unit has a part to play,
+// and no kind beats every other:
+//   soldier     cheap and many: the first round's army; falls to splash
+//   motorcycle  very fast: under a rocket truck's guns before it reloads
+//   buggy       the all-rounder among the light units
+//   tank        armoured: light weapons (the three above) do it less damage
+//   rocket      long range, splash, and a warhead for armour; slow, and
+//               blind to what is right on top of it
 // hp, speed (px/s), range (px), damage a shot, cooldown (s between shots),
 // radius (px, how much room it takes: about half the length of its picture,
 // so that units stand apart on screen as they do in the fight), splash (px
-// round its target).
+// round its target), antiArmor (times its damage on an armoured unit),
+// minRange (px: nearer than this it can't shoot).
+//
+// Tuned with simulated fights between armies of one kind of unit at the
+// same money (docs/2026-11-24-duelo-equilibrio-plan.md; duel.test.js keeps
+// the outcome): tanks beat anything light, rockets beat tanks, motorcycles
+// and buggies beat rockets, and ten soldiers hold their own in round 1.
 export const DUEL_ORDER = ["soldier", "motorcycle", "buggy", "tank", "rocket"];
 export const DUEL_UNITS = {
-  soldier: { price: 10, hp: 30, speed: 45, range: 90, damage: 3, cooldown: 1.0, radius: 8, light: true },
-  motorcycle: { price: 15, hp: 34, speed: 110, range: 80, damage: 4, cooldown: 0.8, radius: 11, light: true },
-  buggy: { price: 20, hp: 55, speed: 80, range: 110, damage: 5, cooldown: 0.7, radius: 16, light: true },
-  tank: { price: 50, hp: 220, speed: 38, range: 130, damage: 16, cooldown: 2.0, radius: 22, armored: true },
-  rocket: { price: 70, hp: 90, speed: 34, range: 260, damage: 26, cooldown: 3.0, radius: 22, splash: 45 },
+  soldier: { price: 10, hp: 34, speed: 45, range: 90, damage: 3.5, cooldown: 1.0, radius: 8, light: true },
+  motorcycle: { price: 15, hp: 40, speed: 120, range: 80, damage: 5, cooldown: 0.8, radius: 11, light: true },
+  buggy: { price: 20, hp: 55, speed: 80, range: 110, damage: 5, cooldown: 0.8, radius: 16, light: true },
+  tank: { price: 50, hp: 180, speed: 38, range: 130, damage: 14, cooldown: 2.0, radius: 22, armored: true },
+  rocket: { price: 70, hp: 90, speed: 34, range: 260, damage: 26, cooldown: 3.0, radius: 22, splash: 45, antiArmor: 2.5, minRange: 80 },
 };
-export const LIGHT_VS_ARMOR = 0.5; // a light weapon's damage on an armoured unit
-export const SPLASH_SHARE = 0.6; // of a splash weapon's damage, to the others near its target
+export const LIGHT_VS_ARMOR = 0.65; // a light weapon's damage on an armoured unit (tuned)
+export const SPLASH_SHARE = 0.4; // of a splash weapon's damage, to the others near its target (tuned)
 
 // Five skills a unit type, five levels each, the attack mode's effects.
 // Level k costs baseCost x k and multiplies one number once more: armour
@@ -458,12 +466,30 @@ function heading(u, target, obstacles) {
   return { x: tx * u.swerve, y: ty * u.swerve };
 }
 
-// A hit lands. The shooter's side is paid for the health it takes.
+// The nearest enemy this unit can shoot right now -- in range, outside its
+// weapon's blind spot, the line clear -- or null.
+function withinReach(u, living, obstacles, blind) {
+  let best = null;
+  let bestD = Infinity;
+  for (const v of living) {
+    if (v.side === u.side) continue;
+    const d = Math.hypot(v.x - u.x, v.y - u.y);
+    if (d >= blind && d <= u.range && d < bestD && !lineBlocked(obstacles, u, v)) {
+      best = v;
+      bestD = d;
+    }
+  }
+  return best;
+}
+
+// A hit lands. The shooter's side is paid for the health it takes. Armour
+// takes less from a light weapon and more from one made for it.
 function land(state, hit) {
   const victim = hit.victim;
   if (!victim.alive) return;
-  const armoured = DUEL_UNITS[victim.type].armored && DUEL_UNITS[hit.type].light;
-  const taken = Math.min(victim.hp, hit.amount * (armoured ? LIGHT_VS_ARMOR : 1));
+  const weapon = DUEL_UNITS[hit.type];
+  const onArmour = weapon.light ? LIGHT_VS_ARMOR : weapon.antiArmor || 1;
+  const taken = Math.min(victim.hp, hit.amount * (DUEL_UNITS[victim.type].armored ? onArmour : 1));
   victim.hp -= taken;
   const price = DUEL_UNITS[victim.type].price;
   const paid = (price * KILL_SHARE * taken) / victim.maxHp;
@@ -498,25 +524,34 @@ function combatTick(state) {
     const target = pickTarget(u, units, byId);
     if (!target) continue;
     u.targetId = target.id;
-    const distance = Math.hypot(target.x - u.x, target.y - u.y);
-    u.aim = Math.atan2(target.y - u.y, target.x - u.x);
-    if (distance <= u.range && !lineBlocked(obstacles, u, target)) {
+    // What it shoots at: its target, or -- when that one is inside its
+    // weapon's blind spot -- the nearest enemy it can reach that isn't. With
+    // none, it holds where it is.
+    const blind = DUEL_UNITS[u.type].minRange || 0;
+    const aimed = Math.hypot(target.x - u.x, target.y - u.y) < blind ? withinReach(u, living, obstacles, blind) : target;
+    if (!aimed) {
+      u.moving = false;
+      continue;
+    }
+    const distance = Math.hypot(aimed.x - u.x, aimed.y - u.y);
+    u.aim = Math.atan2(aimed.y - u.y, aimed.x - u.x);
+    if (distance <= u.range && !lineBlocked(obstacles, u, aimed)) {
       // In range, with a clear line: it stands and shoots.
       u.moving = false;
       u.angle = u.aim;
       if (u.fireTimer <= 0) {
         u.fireTimer = u.cooldown;
-        hits.push({ side: u.side, type: u.type, victim: target, amount: u.damage });
+        hits.push({ side: u.side, type: u.type, victim: aimed, amount: u.damage });
         const splash = DUEL_UNITS[u.type].splash;
         if (splash) {
           for (const v of living) {
-            if (v === target || v.side === u.side) continue;
-            if (Math.hypot(v.x - target.x, v.y - target.y) <= splash) {
+            if (v === aimed || v.side === u.side) continue;
+            if (Math.hypot(v.x - aimed.x, v.y - aimed.y) <= splash) {
               hits.push({ side: u.side, type: u.type, victim: v, amount: u.damage * SPLASH_SHARE });
             }
           }
         }
-        state.shots.push({ from: { x: u.x, y: u.y }, to: { x: target.x, y: target.y }, type: u.type, side: u.side, age: 0 });
+        state.shots.push({ from: { x: u.x, y: u.y }, to: { x: aimed.x, y: aimed.y }, type: u.type, side: u.side, age: 0 });
       }
     } else {
       const dir = heading(u, target, obstacles);

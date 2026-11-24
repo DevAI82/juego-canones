@@ -28,13 +28,19 @@ import { ZONES } from "./duelArenas.js";
 // (0: not at all; 1: fully). upgradeShare: the part of its money it keeps
 // for upgrades from the second round. formation: whether it arranges its
 // army (armour in front, rockets at the back) or leaves it as bought.
-// Starting values: plan C tunes them with simulated duels.
+//
+// Tuned with simulated careers (docs/2026-11-24-duelo-equilibrio-plan.md):
+// a player who buys with some sense, starting each duel with what their
+// profile has earned by then, wins about nine duels in ten in the first
+// league and fewer in each one after -- about seven, six, five and, in the
+// last, four or five; one who buys carelessly, from seven in ten down to
+// three. A whole career, up to champion, is some 25 to 35 duels.
 export const DUEL_GRADES = [
-  { money: 100, freeLevels: 0, counter: 0, upgradeShare: 0, formation: false },
-  { money: 110, freeLevels: 1, counter: 0.3, upgradeShare: 0.1, formation: false },
-  { money: 120, freeLevels: 2, counter: 0.6, upgradeShare: 0.2, formation: true },
-  { money: 135, freeLevels: 4, counter: 0.8, upgradeShare: 0.25, formation: true },
-  { money: 150, freeLevels: 6, counter: 1, upgradeShare: 0.3, formation: true },
+  { money: 95, freeLevels: 0, counter: 0, upgradeShare: 0, formation: false },
+  { money: 135, freeLevels: 3, counter: 0.3, upgradeShare: 0.1, formation: false },
+  { money: 165, freeLevels: 5, counter: 0.6, upgradeShare: 0.2, formation: true },
+  { money: 190, freeLevels: 7, counter: 0.8, upgradeShare: 0.25, formation: true },
+  { money: 220, freeLevels: 10, counter: 1, upgradeShare: 0.3, formation: true },
 ];
 
 const gradeOf = (grade) => DUEL_GRADES[Math.max(1, Math.min(DUEL_GRADES.length, Math.floor(grade) || 1)) - 1];
@@ -98,15 +104,17 @@ function likings(view, side, grade, random) {
     const levels = SKILLS.reduce((sum, skill) => sum + mine.upgrades[type][skill], 0);
     weight[type] = BASE_WEIGHT[type] * (1 + roll * JITTER * (1 - counter)) * (1 + OWN_LEVELS * levels);
   }
-  // Against what the rival fielded: rockets for crowds of soldiers and for
-  // tanks; tanks for anything light; fast units to get at rockets; and
-  // nothing light against armour, which shrugs it off.
+  // Against what the rival fielded, as the units beat each other (duel.js):
+  // tanks for anything light, rockets for tanks (and for crowds of
+  // soldiers), fast units for rockets -- and less of whatever the rival's
+  // army eats: nothing light against armour, no tanks against rockets, few
+  // rockets against fast units.
   const light = rival.motorcycle + rival.buggy;
-  weight.rocket *= 1 + counter * (3 * rival.soldier + 1.5 * rival.tank);
-  weight.tank *= 1 + counter * (1.5 * rival.soldier + 2 * light + rival.tank);
+  weight.rocket *= (1 + counter * (1.5 * rival.soldier + 3 * rival.tank)) * (1 - 0.8 * counter * light);
+  weight.tank *= (1 + counter * 2 * (rival.soldier + light)) * (1 - 0.9 * counter * rival.rocket);
   weight.motorcycle *= (1 + counter * 3 * rival.rocket) * (1 - counter * rival.tank);
-  weight.buggy *= (1 + counter * 1.5 * rival.rocket) * (1 - counter * rival.tank);
-  weight.soldier *= (1 - counter * rival.tank) * (1 - 0.7 * counter * rival.rocket);
+  weight.buggy *= (1 + counter * 2 * rival.rocket) * (1 - counter * rival.tank);
+  weight.soldier *= (1 - counter * rival.tank) * (1 - 0.5 * counter * rival.rocket);
   const total = DUEL_ORDER.reduce((sum, type) => sum + weight[type], 0);
   for (const type of DUEL_ORDER) weight[type] /= total;
   return weight;
