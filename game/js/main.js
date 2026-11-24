@@ -56,6 +56,7 @@ import {
 } from "./attackDraw.js";
 import { initShop, updateShop, initUnitUpgrades, updateUnitUpgrades, attackHudLines, defenderHudLines, attackSummary } from "./attackUI.js";
 import { createDuelScreen } from "./duelScreen.js";
+import { arenaOf } from "./duelArenas.js";
 import { BUILDING_TYPES, BUILDING_ORDER, PHASE_COUNT, SHEET_COLS, buildingProgress, constructionFrame } from "./buildings.js";
 import { RTS_UNIT_TYPES } from "./rtsUnits.js";
 import { entrySafePoints, reachesEntryRoad } from "./entryRoads.js";
@@ -218,10 +219,15 @@ function positionNavControls() {
 let state = null;
 let menu = null;
 const isRtsGame = () => Boolean(state && (state.isRts || state.mode === "rts"));
-// The duel minigame: `state` is duel.js's while it lasts.
-const dueling = () => Boolean(state && state.mode === "duel");
+// The duel minigame (duelScreen.js): against the computer it runs in this
+// browser, even on the home server's page (localDuel); against another
+// player the home server holds it, as it does «Uno contra otro» (netDuel).
+// Either way `state` is duel.js's while it lasts.
+let localDuel = false;
+const netDuel = () => networked && !localDuel && net.kind === "duel" && Boolean(state && state.mode === "duel");
+const dueling = () => localDuel || netDuel();
 // The games that run in this browser even on the home server's page.
-const localGame = () => isRtsGame() || dueling();
+const localGame = () => isRtsGame() || localDuel;
 
 function resizeGame() {
   const winW = window.innerWidth;
@@ -2102,12 +2108,12 @@ muteBtn.addEventListener("click", () => {
 
 const pauseBtn = document.getElementById("pause-btn");
 pauseBtn.addEventListener("click", async () => {
-  if (dueling()) {
+  if (localDuel) {
     state.paused = !state.paused;
     return;
   }
   if (state.gameOver || state.win || state.levelComplete) return;
-  if (!versusGame()) return actions.pause();
+  if (!versusGame() && !netDuel()) return actions.pause();
   // One against the other, only the side that paused carries on (versus.js).
   const result = await askServer({ type: "pause" });
   if (result.reason === "not-yours") showToast(`Solo ${SIDE_NAMES[net.pausedBy] || "el otro jugador"} puede reanudar la partida`);
@@ -2195,6 +2201,34 @@ function duel() {
   return duelScreen;
 }
 
+// The duel's own shop and unit panel in the attack mode's elements, and
+// those elements as a duel wants them.
+function showDuelPanels() {
+  duel().mount();
+  duelPanels = true;
+  buildMenuEl.classList.add("hidden");
+  attackShopEl.classList.remove("hidden");
+  unitUpgradeEl.classList.add("hidden");
+  skipWaveBtn.classList.add("hidden");
+  upgradePanelEl.classList.add("hidden");
+  resizeGame();
+}
+
+// A duel against the computer is left: on the home server's page the
+// house's game, whose news were set aside meanwhile, is this tab's again.
+function leaveLocalDuel() {
+  if (!localDuel) return;
+  localDuel = false;
+  duel().leave();
+  if (!networked) return;
+  started = true;
+  if (heldSnapshot) {
+    const body = heldSnapshot;
+    heldSnapshot = null;
+    receiveSnapshot(body);
+  }
+}
+
 function enterGame() {
   menu.close();
   selectedId = null;
@@ -2210,8 +2244,7 @@ function enterGame() {
   showGameEndOverlay(false);
   gameEndShown = false;
   if (dueling()) {
-    duel().mount();
-    duelPanels = true;
+    showDuelPanels();
   } else if (duelPanels) {
     duel().leave();
     mountAttackPanels();
@@ -2268,6 +2301,17 @@ const GAME_IN_PROGRESS = "Hay una partida uno contra otro en marcha: solo sus do
 // at home -- this tab takes `side`, the other is left for the second player;
 // { mode: "rts", submode: "campaign"|"survival" } for RTS mode.
 async function startNewGame(level, { mode = "defense", difficulty = "normal", side = "defense", money = "normal", submode = "campaign" } = {}) {
+  if (mode === "duelNet") {
+    // A duel against another player: the home server's game from now on
+    // (`level` is the arena); it comes with the server's next news.
+    const result = await askServer({ type: "newDuel", arena: level });
+    if (!result.ok) return showToast(result.reason === "game-in-progress" ? GAME_IN_PROGRESS : "No se ha podido empezar el duelo");
+    leaveLocalDuel();
+    started = true;
+    enterGame();
+    return;
+  }
+  if (mode !== "duel") leaveLocalDuel();
   if (networked && mode !== "rts" && mode !== "duel") {
     const result = await askServer(mode === "versus" ? { type: "newVersus", level, side, money } : { type: "restart", level });
     if (!result.ok) return showToast(result.reason === "game-in-progress" ? GAME_IN_PROGRESS : "No se ha podido empezar la partida");
@@ -2284,6 +2328,7 @@ async function startNewGame(level, { mode = "defense", difficulty = "normal", si
     };
   } else if (mode === "duel") {
     // `level` is the arena (duelArenas.js); against the computer.
+    localDuel = true;
     state = duel().start(level);
   } else if (mode === "attack") {
     state = createAttackState(level, difficulty);
@@ -2311,6 +2356,7 @@ async function joinSide(side) {
 }
 
 async function loadSlot(slot) {
+  leaveLocalDuel();
   if (networked) {
     const result = await askServer({ type: "load", slot });
     if (!result.ok) return showToast(result.reason === "game-in-progress" ? GAME_IN_PROGRESS : "No se puede cargar esta partida");
@@ -2350,7 +2396,7 @@ function openPauseMenu() {
     if (!started) return;
     pausedBeforeMenu = state.paused;
     state.paused = true;
-  } else if (versusGame() && net.you) {
+  } else if ((versusGame() || netDuel()) && net.you) {
     pausedBeforeMenu = state.paused;
     postAction({ type: "pause", on: true });
   }
@@ -2365,6 +2411,7 @@ function backToNewGame() {
   showGameEndOverlay(false);
   gameEndShown = false;
   if (!networked || localGame()) started = false;
+  leaveLocalDuel();
   menu.openNewGame();
   resizeGame();
 }
@@ -2385,7 +2432,7 @@ menu = createMenu(document.getElementById("menu"), {
   onLoad: loadSlot,
   onSave: saveToSlot,
   onRecords: openStatsModal,
-  renderDuel: (el, start) => duel().renderLobby(el, start),
+  renderDuel: (el, start, options) => duel().renderLobby(el, start, options),
   onQuitToMain: () => {
     if (!networked || localGame()) started = false;
     const bMenu = document.getElementById("build-menu");
@@ -2393,6 +2440,7 @@ menu = createMenu(document.getElementById("menu"), {
     const aShop = document.getElementById("attack-shop");
     if (aShop) aShop.classList.add("hidden");
     if (dueling()) duel().leave();
+    leaveLocalDuel();
     if (cncSidebarEl) cncSidebarEl.classList.add("hidden");
     if (rtsContextPanelEl) rtsContextPanelEl.classList.add("hidden");
     const nav = document.getElementById("nav-controls");
@@ -2402,7 +2450,7 @@ menu = createMenu(document.getElementById("menu"), {
   },
   onResume: () => {
     if (!networked || localGame()) state.paused = pausedBeforeMenu;
-    else if (versusGame() && net.you && !pausedBeforeMenu) postAction({ type: "pause", on: false });
+    else if ((versusGame() || netDuel()) && net.you && !pausedBeforeMenu) postAction({ type: "pause", on: false });
   },
   onSettingsChange: (next) => {
     settings = next;
@@ -4823,8 +4871,14 @@ function unpackView(body) {
 let prevSnapshot = null;
 let snapshotAt = 0;
 
+// The house's latest news while this tab plays a game of its own.
+let heldSnapshot = null;
+
 function receiveSnapshot(body) {
-  if (localGame()) return;
+  if (localGame()) {
+    heldSnapshot = body;
+    return;
+  }
   const view = unpackView(body);
   const before = { you: net.you, kind: net.kind, over: state.gameOver };
   prevSnapshot = { state, at: snapshotAt };
@@ -4850,17 +4904,19 @@ function resetLocalView() {
 let lastSeatInfo = null;
 function checkSeat() {
   if (localGame()) return;
-  if (!versusGame() || net.you) {
+  if (!(versusGame() || netDuel()) || net.you) {
     if (menu.isSeatScreen()) menu.close();
     lastSeatInfo = null;
     return;
   }
   if (menu.isOpen() && !menu.isSeatScreen()) return; // (choosing something else)
-  const info = {
-    level: state.level,
-    money: state.attack?.difficulty,
-    free: ["defense", "attack"].filter((side) => !net.sides[side].connected),
-  };
+  const info = netDuel()
+    ? { kind: "duel", league: arenaOf(state.arena).league, free: Object.keys(net.sides).filter((side) => !net.sides[side].connected) }
+    : {
+        level: state.level,
+        money: state.attack?.difficulty,
+        free: ["defense", "attack"].filter((side) => !net.sides[side].connected),
+      };
   const key = JSON.stringify(info);
   if (key === lastSeatInfo && menu.isSeatScreen()) return;
   lastSeatInfo = key;
@@ -4963,15 +5019,29 @@ function loop(now) {
 
   if (dueling()) {
     // A duel has the frame to itself (duelScreen.js): its own step, its
-    // own drawing, its own panels. It stands still behind a menu.
+    // own drawing, its own panels. It stands still behind a menu. One the
+    // home server holds comes as its news do, whoever started it.
+    if (!duelPanels) showDuelPanels();
+    if (netDuel()) checkSeat();
     ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-    duel().frame(dt, { running: started && !menu.isOpen() });
+    duel().frame(dt, {
+      running: started && !menu.isOpen(),
+      remote: netDuel() ? { state, net, ask: askServer, address: homeAddress() } : null,
+    });
     syncMusicToPause();
     pauseBtn.textContent = state.paused ? "▶" : "⏸";
     pauseBtn.title = state.paused ? "Reanudar" : "Pausar";
     pauseBtn.classList.toggle("active", Boolean(state.paused));
     requestAnimationFrame(loop);
     return;
+  }
+  if (duelPanels) {
+    // The duel is over for this tab (the house's game is another now):
+    // the attack mode's shop and unit panel are its own again.
+    duel().leave();
+    mountAttackPanels();
+    duelPanels = false;
+    resizeGame();
   }
 
   if ((!networked || localGame()) && started) {

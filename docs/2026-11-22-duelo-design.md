@@ -1,7 +1,7 @@
 # Duelo: minijuego de uno contra uno — Diseño
 
 Fecha: 2026-11-22
-Estado: aprobado por el usuario (2026-11-22). Hecho: el núcleo (plan A), la pantalla (plan B), el equilibrio y las cinco arenas (plan C). Pendiente: la red de casa (plan D).
+Estado: aprobado por el usuario (2026-11-22). Hecho (2026-11-24): el núcleo (plan A), la pantalla (plan B), el equilibrio y las cinco arenas (plan C) y la red de casa (plan D), probada con dos pestañas contra un servidor de prueba: crear, unirse, comprar sin ver al rival, combate, pausa, final, revancha, recarga y duelo contra la máquina desde la página del servidor. Queda la segunda fase: duelos en línea (§13).
 
 ## 1. Contexto
 
@@ -118,7 +118,7 @@ Se guarda en cada aparato (en el navegador, como los ajustes). No hay cuentas ni
 ## 9. El menú
 
 - **Jugando solo** (también en la web publicada): «Nueva partida» añade una cuarta opción, **Duelo**, junto a Defender, Atacar y RTS. Lleva a la pantalla del perfil: nivel, experiencia, liga, puntos de habilidad por asignar y las cinco arenas, con las no alcanzadas cerradas. Elegir una arena empieza un duelo contra la máquina.
-- **En la red de casa:** «Nueva partida» añade **Duelo** junto a «Defender juntos» y «Uno contra otro». Quien lo crea elige la arena (las cinco están abiertas) y ve la pantalla de espera con la dirección que debe abrir el otro, como en «Uno contra otro».
+- **En la red de casa:** «Nueva partida» añade **Duelo** junto a «Defender juntos» y «Uno contra otro», y pregunta contra quién: **otro jugador** o **la máquina** (esta última, en ese navegador y con el perfil, como jugando solo). Contra otro jugador, quien lo crea elige la arena (las cinco están abiertas), es el bando izquierdo y ve en pantalla la dirección que debe abrir el otro; puede ir comprando, y el reloj no corre hasta que llega. Al segundo aparato que abre la dirección se le ofrece «Unirse al duelo».
 - «Cargar partida» no cambia: un duelo no se guarda a medias (§14).
 
 ## 10. La pantalla del duelo

@@ -1,8 +1,13 @@
-// A duel against the computer, run in the browser (docs/2026-11-22-duelo-
-// design.md §9, §10): this holds the duel under way and is the go-between
-// of the page and the game -- duel.js plays it, duelAI.js takes the rival's
-// turns, duelDraw.js paints it, duelUI.js fills its panels, duelProfile.js
-// remembers what the player gained.
+// A duel, run in the browser (docs/2026-11-22-duelo-design.md §9-§11):
+// the go-between of the page and the game. It runs a duel in one of two
+// ways:
+//   - against the computer: it holds the duel itself -- duel.js plays it,
+//     duelAI.js takes the rival's turns;
+//   - against another player at home: the home server holds it (host.js).
+//     The screen draws what the server last sent and posts the player's
+//     actions; what they do shows with the server's next news.
+// Either way duelDraw.js paints it, duelUI.js fills its panels and
+// duelProfile.js remembers what the player gained.
 //
 // main.js hands it every frame and every press of the pointer while a
 // duel is on (the game's mode is "duel"); it never looks at the page
@@ -31,10 +36,11 @@ import {
   showDuelResult,
   hideDuelResult,
   duelResult,
+  duelNotice,
 } from "./duelUI.js";
 import { drawDuel, BURST_TIME } from "./duelDraw.js";
 
-// The player is always the left-hand side against the computer.
+// Against the computer the player is always the left-hand side.
 const PLAYER = "left";
 const RIVAL = "right";
 
@@ -49,24 +55,37 @@ const REFUSED = {
   blocked: "Ahí no cabe",
   max: "Esa mejora está al máximo",
   "empty-army": "Compra al menos una unidad",
+  network: "No hay conexión con el servidor de casa",
 };
 const GRAB = 12; // px round a unit within which a press takes it (a finger is wide)
 const DRAG_AFTER = 6; // px the pointer moves before a press is a drag, not a tap
+const NEWS_EVERY = 0.12; // s between the home server's news (main.js's POLL_MS)
+const SETTLE = 0.5; // s a unit just dropped stays where it was dropped, until the server says
 
 // ctx: the canvas's. shopEl, panelEl: the elements the shop and the unit
-// panel go in (the attack mode's, see mount()).
-// resultEl: where the duel's result shows. drawUnit(unit, target): main.js's
-// drawing of a unit off its sheets. resetVisuals(): forget how units
-// looked (a new duel's units reuse the last one's ids). onRematch(arena),
-// onExit(): the result's two buttons.
+// panel go in (the attack mode's, see mount()). resultEl: where the duel's
+// result shows. drawUnit(unit, target): main.js's drawing of a unit off its
+// sheets. resetVisuals(): forget how units looked (a new duel's units reuse
+// the last one's ids). onRematch(arena), onExit(): the result's two buttons
+// after a duel against the computer.
 export function createDuelScreen({ ctx, shopEl, panelEl, resultEl, drawUnit, resetVisuals, playSound, showToast, onRematch, onExit, storage }) {
+  // --- a duel against the computer
   let state = null;
   let arena = 1;
   let grade = 1;
   let profile = null;
+  // --- a duel the home server holds: what main.js gave with the last frame
+  // ({ state, net, ask, address }), or null against the computer
+  let remote = null;
+  let lastNews = null; // the server's latest state
+  let prevNews = null; // the one before it, to draw the units between the two
+  let newsAt = 0; // s, when the latest arrived
+  // --- either way
+  let clock = 0; // s of frames drawn
   let selectedId = null;
   let press = null; // { id, x, y, offX, offY, moved }: a unit under the pointer, held
   let drag = null; // { id, x, y, ok }: where the held unit would go
+  let settle = null; // { id, x, y, ok, until }: a unit dropped, waiting for the server's word
   let bursts = [];
   let scorch = [];
   let seenShots = new WeakSet();
@@ -90,20 +109,18 @@ export function createDuelScreen({ ctx, shopEl, panelEl, resultEl, drawUnit, res
   }
   const loaded = (img) => (img && img.complete && img.naturalWidth > 0 ? img : null);
 
-  // A new duel in this arena against the computer of its league. Returns
-  // the duel's state: main.js's game while it lasts.
-  function start(arenaId) {
-    profile = loadProfile(storage);
-    // An arena of a league not reached yet is not played (the menu doesn't
-    // offer it either).
-    arena = Math.min(arenaOf(arenaId).id, profile.league);
-    grade = arena;
-    const seed = Math.floor(Math.random() * 0x7fffffff);
-    state = createDuelState({ arena, seed, left: startOf(profile), right: gradeStart(grade, seed) });
-    state.paused = false;
+  // The duel on screen and the side this player has in it (null: watching
+  // two others, on the home network).
+  const duel = () => (remote ? remote.state : state);
+  const mySide = () => (remote ? remote.net.you : PLAYER);
+  // What this player may see of it.
+  const seen = () => (remote || state.phase !== "buy" ? duel() : duelView(state, PLAYER));
+
+  function forget() {
     selectedId = null;
     press = null;
     drag = null;
+    settle = null;
     bursts = [];
     scorch = [];
     seenShots = new WeakSet();
@@ -112,33 +129,75 @@ export function createDuelScreen({ ctx, shopEl, panelEl, resultEl, drawUnit, res
     recorded = false;
     hideDuelResult(resultEl);
     resetVisuals();
+  }
+
+  // A new duel in this arena against the computer of its league. Returns
+  // the duel's state: main.js's game while it lasts.
+  function start(arenaId) {
+    remote = null;
+    profile = loadProfile(storage);
+    // An arena of a league not reached yet is not played (the menu doesn't
+    // offer it either).
+    arena = Math.min(arenaOf(arenaId).id, profile.league);
+    grade = arena;
+    const seed = Math.floor(Math.random() * 0x7fffffff);
+    state = createDuelState({ arena, seed, left: startOf(profile), right: gradeStart(grade, seed) });
+    state.paused = false;
+    forget();
     picturesOf(arena);
     playTurn(state, RIVAL, grade); // the computer shops first, and waits
     return state;
   }
+
+  // ---------------------------------------------------------- the actions
+  // Against the computer they are done at once; on the home network they
+  // are posted, and the server's answer says whether they were accepted.
+
+  function refuse(reason) {
+    playSound("error");
+    showToast(REFUSED[reason] || "No se puede");
+  }
+
+  // local(): does it here; body: what to post to the server instead.
+  // then(result): with the accepted action's result.
+  function act(local, body, then = () => {}) {
+    const settleIt = (result) => {
+      if (result && result.ok) then(result);
+      else refuse(result ? result.reason : "network");
+    };
+    if (remote) remote.ask(body).then(settleIt);
+    else settleIt(local());
+  }
+
+  const shopping = () => {
+    const d = duel();
+    const side = mySide();
+    return Boolean(d && side && d.phase === "buy" && !d.sides[side].ready);
+  };
+  const army = () => (mySide() ? duel().sides[mySide()].army : []);
+  const picked = () => (duel().phase === "buy" ? army().find((u) => u.id === selectedId) : null) || null;
 
   // Puts the duel's shop and unit panel in their elements. They are the
   // attack mode's: main.js puts that mode's back when the duel is left.
   function mount() {
     mountDuelShop(shopEl, {
       onBuy(type) {
-        const result = buyUnit(state, PLAYER, type);
-        if (result.ok) selectedId = result.unit.id;
-        else refuse(result.reason);
+        act(() => buyUnit(state, PLAYER, type), { type: "duelBuy", unitType: type }, (result) => {
+          selectedId = result.unit.id;
+        });
       },
       onReady: ready,
     });
     mountDuelUnitPanel(panelEl, {
       onUpgrade(skill) {
         const unit = picked();
-        if (!unit) return;
-        const result = upgradeUnit(state, PLAYER, unit.type, skill);
-        if (!result.ok) refuse(result.reason);
+        if (unit) act(() => upgradeUnit(state, PLAYER, unit.type, skill), { type: "duelUpgrade", unitType: unit.type, skill });
       },
       onSell() {
-        const result = sellUnit(state, PLAYER, selectedId);
-        if (result.ok) selectedId = null;
-        else refuse(result.reason);
+        const id = selectedId;
+        act(() => sellUnit(state, PLAYER, id), { type: "duelSell", id }, () => {
+          if (selectedId === id) selectedId = null;
+        });
       },
       onClose() {
         selectedId = null;
@@ -147,47 +206,46 @@ export function createDuelScreen({ ctx, shopEl, panelEl, resultEl, drawUnit, res
     shopEl.classList.remove("hidden");
   }
 
-  function refuse(reason) {
-    playSound("error");
-    showToast(REFUSED[reason] || "No se puede");
-  }
-
-  const shopping = () => state.phase === "buy" && !state.sides[PLAYER].ready;
-  const picked = () => (state.phase === "buy" ? state.sides[PLAYER].army.find((u) => u.id === selectedId) : null) || null;
-
   // «¡Listo!»
   function ready() {
-    if (!state || !shopping()) return;
-    if (state.sides[PLAYER].army.length === 0) return refuse("empty-army");
+    if (!shopping()) return;
+    if (army().length === 0) return refuse("empty-army");
     selectedId = null;
-    setReady(state, PLAYER);
-    watch();
+    act(() => setReady(state, PLAYER), { type: "duelReady" }, () => {
+      if (!remote) watch();
+    });
   }
 
-  // What changed since the last look: a phase begun, shots fired, units
-  // fallen. Sounds, marks on the ground and the rival's next turn hang on
-  // it.
+  // ---------------------------------------------------------- what changed
+  // A phase begun, shots fired, units fallen: sounds, marks on the ground,
+  // the computer's next turn and the end of the duel hang on it.
+
   function watch() {
-    if (state.phase !== lastPhase) {
-      if (state.phase === "combat") {
+    const d = duel();
+    if (d.phase !== lastPhase) {
+      if (d.phase === "combat") {
         fallen = new Set();
         scorch = [];
         press = null;
         drag = null;
-      } else if (state.phase === "buy") {
-        playTurn(state, RIVAL, grade);
-        showToast(`Asalto ${state.round}`);
-      } else if (state.phase === "over") {
+        settle = null;
+      } else if (d.phase === "buy") {
+        if (lastPhase === "over") forget(); // a rematch (on the home network)
+        if (!remote) playTurn(state, RIVAL, grade);
+        if (d.round > 1) showToast(`Asalto ${d.round}`);
+      } else if (d.phase === "over") {
         finish();
       }
-      lastPhase = state.phase;
+      lastPhase = d.phase;
     }
-    for (const shot of state.shots) {
-      if (seenShots.has(shot)) continue;
+    for (const shot of d.shots) {
+      // The server sends its shots anew with every piece of news: one is
+      // new if it was fired since the last.
+      if (remote ? shot.age >= NEWS_EVERY : seenShots.has(shot)) continue;
       seenShots.add(shot);
       playSound(SHOT_SOUND[shot.type]);
     }
-    for (const u of state.units) {
+    for (const u of d.units) {
       if (u.alive || fallen.has(u.id)) continue;
       fallen.add(u.id);
       bursts.push({ x: u.x, y: u.y, age: 0, size: u.radius * 2.2 });
@@ -197,49 +255,118 @@ export function createDuelScreen({ ctx, shopEl, panelEl, resultEl, drawUnit, res
   }
 
   // The duel is over: the profile takes what it brought, and the result
-  // shows.
+  // shows. Between two players it is counted once, by the duel's dice: a
+  // reload of the page after the end doesn't count it again.
   function finish() {
     if (recorded) return;
     recorded = true;
-    const outcome = recordDuel(profile, { arena, won: state.winner === PLAYER, xp: state.sides[PLAYER].xp, rival: "computer" });
-    profile = outcome.profile;
-    saveProfile(profile, storage);
-    showDuelResult(resultEl, duelResult(state, PLAYER, outcome.gained, profile), {
-      onRematch: () => onRematch(arena),
+    const d = duel();
+    const side = mySide();
+    if (!side) return; // watching: nothing to gain, nothing to show
+    const rival = remote ? "player" : "computer";
+    let gained = { xp: 0, levels: 0, promoted: false, champion: false };
+    let mine = loadProfile(storage);
+    const mark = `${d.arena}:${d.rng}`;
+    let counted = false;
+    try {
+      counted = Boolean(remote) && sessionStorage.getItem("td_duel_counted") === mark;
+    } catch {
+      // (no sessionStorage: it is counted)
+    }
+    if (!counted) {
+      const outcome = recordDuel(mine, { arena: d.arena, won: d.winner === side, xp: d.sides[side].xp, rival });
+      mine = outcome.profile;
+      gained = outcome.gained;
+      saveProfile(mine, storage);
+      try {
+        if (remote) sessionStorage.setItem("td_duel_counted", mark);
+      } catch {
+        // (as above)
+      }
+    }
+    profile = mine;
+    const ask = remote && remote.ask;
+    showDuelResult(resultEl, duelResult(d, side, gained, mine, rival), {
+      onRematch: () => (ask ? ask({ type: "rematch" }).then((r) => r.ok || refuse(r.reason)) : onRematch(arena)),
       onExit,
     });
   }
 
-  // One frame: the duel moves on (unless it is paused or behind a menu:
-  // `running`), then everything is drawn and the panels brought up to date.
-  function frame(dt, { running = true } = {}) {
-    if (!state) return;
-    const live = running && !state.paused;
-    if (live) {
+  // ---------------------------------------------------------- a frame
+
+  // The server's news, as it comes: main.js replaces its state several
+  // times a second.
+  function takeNews() {
+    if (remote.state === lastNews) return;
+    prevNews = lastNews;
+    lastNews = remote.state;
+    newsAt = clock;
+    if (selectedId != null && !army().some((u) => u.id === selectedId)) selectedId = null;
+    watch();
+  }
+
+  // The latest news with the fight's units drawn partway from where they
+  // were in the news before it, and the shots aged on: between two pieces
+  // of news nothing would move otherwise.
+  function between() {
+    const d = lastNews;
+    const since = clock - newsAt;
+    if (d.phase !== "combat" || d.paused) return d;
+    const k = Math.min(1, since / NEWS_EVERY);
+    const before = new Map((prevNews && prevNews.phase === "combat" ? prevNews.units : []).map((u) => [u.id, u]));
+    return {
+      ...d,
+      units: d.units.map((u) => {
+        const was = before.get(u.id);
+        return was && was.alive && u.alive ? { ...u, x: was.x + (u.x - was.x) * k, y: was.y + (u.y - was.y) * k } : u;
+      }),
+      shots: d.shots.map((shot) => ({ ...shot, age: shot.age + since })).filter((shot) => shot.age < 0.4),
+    };
+  }
+
+  // One frame. Against the computer the duel moves on here (unless it is
+  // paused or behind a menu: `running`); on the home network (`remote`: {
+  // state, net, ask, address } from main.js) the server's news is taken.
+  // Then everything is drawn and the panels brought up to date.
+  function frame(dt, { running = true, remote: news = null } = {}) {
+    if (news && !remote) forget(); // from a duel of this screen's to the server's
+    remote = news;
+    const d = duel();
+    if (!d) return;
+    clock += dt;
+    if (remote) takeNews();
+    else if (running && !d.paused) {
       stepDuel(state, dt);
       watch();
+    }
+    if (remote ? !d.paused : running && !d.paused) {
       for (const burst of bursts) burst.age += dt;
       bursts = bursts.filter((burst) => burst.age < BURST_TIME);
     }
-    // While shopping, what the player may see of the rival; in a fight
-    // nothing is hidden, and the duel itself serves.
-    const view = state.phase === "buy" ? duelView(state, PLAYER) : state;
-    const art = picturesOf(arena);
+    if (settle && clock > settle.until) settle = null;
+
+    const side = mySide();
+    const view = remote ? between() : seen();
+    const art = picturesOf(d.arena);
     drawDuel(ctx, {
       view,
-      side: PLAYER,
+      side: side || PLAYER,
+      watching: !side,
       map: loaded(art.map),
       foreground: loaded(art.foreground),
       drawUnit,
       selectedId,
-      drag,
+      drag: drag || settle,
       scorch,
       bursts,
-      paused: Boolean(state.paused),
+      notice: remote ? duelNotice(remote.net, remote.address) : "",
+      // (On the home network a duel is also stopped while it waits for a
+      // player: the notice says so, not «PAUSA».)
+      paused: Boolean(d.paused) && !(remote && (remote.net.waiting || remote.net.gone)),
     });
-    updateDuelShop(shopEl, view, PLAYER);
+    updateDuelShop(shopEl, view, side || PLAYER, { watching: !side });
     // The panel gets out of the way of a unit being dragged.
-    updateDuelUnitPanel(panelEl, view, PLAYER, drag ? null : picked());
+    updateDuelUnitPanel(panelEl, view, side || PLAYER, drag ? null : picked());
   }
 
   // ---------------------------------------------------------- the pointer
@@ -249,7 +376,7 @@ export function createDuelScreen({ ctx, shopEl, panelEl, resultEl, drawUnit, res
   function unitAt(pos) {
     let best = null;
     let bestD = Infinity;
-    for (const u of state.sides[PLAYER].army) {
+    for (const u of army()) {
       const d = Math.hypot(u.x - pos.x, u.y - pos.y);
       if (d <= DUEL_UNITS[u.type].radius + GRAB && d < bestD) {
         best = u;
@@ -260,7 +387,7 @@ export function createDuelScreen({ ctx, shopEl, panelEl, resultEl, drawUnit, res
   }
 
   function pointerDown(pos) {
-    if (!state || !shopping()) return;
+    if (!shopping()) return;
     const unit = unitAt(pos);
     selectedId = unit ? unit.id : null;
     press = unit ? { id: unit.id, x: pos.x, y: pos.y, offX: unit.x - pos.x, offY: unit.y - pos.y, moved: false } : null;
@@ -268,54 +395,68 @@ export function createDuelScreen({ ctx, shopEl, panelEl, resultEl, drawUnit, res
   }
 
   function pointerMove(pos) {
-    if (!state || !press || !shopping()) return;
+    if (!press || !shopping()) return;
     if (!press.moved && Math.hypot(pos.x - press.x, pos.y - press.y) < DRAG_AFTER) return;
     press.moved = true;
-    const unit = state.sides[PLAYER].army.find((u) => u.id === press.id);
+    const unit = army().find((u) => u.id === press.id);
     if (!unit) return;
     const x = pos.x + press.offX;
     const y = pos.y + press.offY;
-    drag = { id: unit.id, x, y, ok: canPlace(state, PLAYER, x, y, DUEL_UNITS[unit.type].radius, unit.id) };
+    drag = { id: unit.id, x, y, ok: canPlace(duel(), mySide(), x, y, DUEL_UNITS[unit.type].radius, unit.id) };
   }
 
   function pointerUp() {
-    if (!state) return;
     if (press && drag && shopping()) {
-      const result = moveUnit(state, PLAYER, drag.id, drag.x, drag.y);
-      if (!result.ok) refuse(result.reason);
+      const { id, x, y, ok } = drag;
+      if (remote && !ok) {
+        // A drop the server would refuse isn't even sent.
+        refuse("blocked");
+      } else {
+        // On the home network the unit stays where it was dropped until
+        // the server's word comes.
+        if (remote) settle = { id, x, y, ok: true, until: clock + SETTLE };
+        act(() => moveUnit(state, PLAYER, id, x, y), { type: "duelMove", id, x, y });
+      }
     }
     press = null;
     drag = null;
   }
 
   // The duel is left (another game, or the main menu): its result and its
-  // button go.
+  // panel go.
   function leave() {
     hideDuelResult(resultEl);
     panelEl.classList.add("hidden");
     selectedId = null;
     press = null;
     drag = null;
+    settle = null;
   }
 
-  // The profile's screen in the menu, in `el`; start(arena) is called for
-  // the arena picked.
-  function renderLobby(el, startDuel) {
+  // The duel's screen in the menu, in `el`: the profile and its arenas, or
+  // (versus: against another player at home) the five arenas, all open.
+  // startDuel(arena) is called for the arena picked.
+  function renderLobby(el, startDuel, { versus = false } = {}) {
     const now = loadProfile(storage);
-    const again = () => renderLobby(el, startDuel);
-    renderDuelLobby(el, now, {
-      onStart: startDuel,
-      onAssign(type, skill) {
-        const result = assignPoint(now, type, skill);
-        if (!result.ok) return;
-        saveProfile(result.profile, storage);
-        again();
+    const again = () => renderLobby(el, startDuel, { versus });
+    renderDuelLobby(
+      el,
+      now,
+      {
+        onStart: startDuel,
+        onAssign(type, skill) {
+          const result = assignPoint(now, type, skill);
+          if (!result.ok) return;
+          saveProfile(result.profile, storage);
+          again();
+        },
+        onReset() {
+          saveProfile({ ...now, points: {} }, storage);
+          again();
+        },
       },
-      onReset() {
-        saveProfile({ ...now, points: {} }, storage);
-        again();
-      },
-    });
+      { versus },
+    );
   }
 
   return { start, mount, frame, ready, pointerDown, pointerMove, pointerUp, leave, renderLobby };

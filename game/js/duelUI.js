@@ -154,8 +154,9 @@ function leagueLine(profile) {
 }
 
 // The end of a duel, for the player on `side`: `gained` and `profile` are
-// what duelProfile.js's recordDuel gave back.
-export function duelResult(state, side, gained, profile) {
+// what duelProfile.js's recordDuel gave back; `rival`, whom it was against
+// ("computer" or "player").
+export function duelResult(state, side, gained, profile, rival = "computer") {
   const won = state.winner === side;
   const destroyed = Object.values(state.sides[side].destroyed).reduce((sum, n) => sum + n, 0);
   const news = [];
@@ -174,8 +175,20 @@ export function duelResult(state, side, gained, profile) {
       ["Nivel", String(profile.level)],
     ],
     news,
-    league: leagueLine(profile),
+    league: rival === "player" ? "Duelo entre jugadores: no cuenta para la liga" : leagueLine(profile),
   };
+}
+
+// What to tell the player over a duel on the home network, from where
+// their tab stands in it (host.js's `net`): who is awaited, whose pause it
+// is. `address`: what the other player must open to join. "" when there
+// is nothing to tell.
+export function duelNotice(net, address) {
+  if (!net.you) return "Estás viendo el duelo de otros dos jugadores";
+  if (net.waiting) return `Esperando al otro jugador: que abra ${address} en su aparato`;
+  if (net.gone && net.gone !== net.you) return "El rival se ha desconectado. Esperando a que vuelva…";
+  if (net.pausedBy && net.pausedBy !== net.you) return "Pausa: el rival ha parado el duelo";
+  return "";
 }
 
 // The profile's screen: the level and its bar, the league, the skill
@@ -238,16 +251,18 @@ export function mountDuelShop(container, { onBuy, onReady }) {
   container._duelReady = ready;
 }
 
-export function updateDuelShop(container, view, side) {
+// `watching`: this tab plays neither side (the home network): nothing to buy.
+export function updateDuelShop(container, view, side, { watching = false } = {}) {
   for (const entry of duelShopEntries(view, side)) {
     const { btn, label } = container._duelShop[entry.type];
-    btn.disabled = entry.disabled;
-    btn.title = entry.title;
+    btn.disabled = entry.disabled || watching;
+    btn.title = watching ? "Estás viendo el duelo" : entry.title;
     label.textContent = entry.stars ? `${entry.label} ★${entry.stars}` : entry.label;
   }
   const mine = view.sides[side];
   const ready = container._duelReady;
-  ready.disabled = Boolean(shopShut(view, side));
+  ready.disabled = watching || Boolean(shopShut(view, side));
+  ready.classList.toggle("hidden", watching);
   ready.textContent = view.phase === "buy" && mine.ready ? "✔ Listo" : "✔ ¡Listo!";
   // It calls for a press once there is an army to send.
   ready.classList.toggle("pulse", !ready.disabled && mine.army.length > 0);
@@ -313,10 +328,28 @@ export function updateDuelUnitPanel(container, view, side, unit) {
 
 // The profile's screen, in the menu. onStart(arena), onAssign(type, skill)
 // and onReset() are called for the player's clicks; the screen is drawn
-// again by calling this again.
-export function renderDuelLobby(container, profile, handlers) {
+// again by calling this again. `versus`: for a duel against another player
+// at home -- the five arenas, all open, and no profile: both start alike.
+export function renderDuelLobby(container, profile, handlers, { versus = false } = {}) {
   const info = lobbyInfo(profile);
   container.innerHTML = "";
+  if (versus) {
+    const arenas = el("div", "duel-arenas");
+    for (const arena of info.arenas) {
+      const btn = el("button", "duel-arena");
+      const picture = arenaOf(arena.id).image;
+      if (picture) btn.style.backgroundImage = `linear-gradient(rgba(6, 10, 12, 0.35), rgba(6, 10, 12, 0.8)), url(${picture})`;
+      btn.append(el("span", "duel-arena-name", arena.name));
+      btn.addEventListener("click", () => handlers.onStart(arena.id));
+      arenas.appendChild(btn);
+    }
+    container.append(
+      el("div", "duel-league", "Duelo contra otro jugador: los dos empezáis igual, con 100 $ y sin ventajas del perfil"),
+      el("div", "menu-subtitle", "Elige arena"),
+      arenas,
+    );
+    return;
+  }
 
   const head = el("div", "duel-profile");
   const bar = el("div", "duel-xp");

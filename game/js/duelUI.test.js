@@ -9,6 +9,7 @@ import {
   roundBanner,
   duelResult,
   lobbyInfo,
+  duelNotice,
 } from "./duelUI.js";
 import { createDuelState, buyUnit, upgradeUnit, setReady, stepDuel, duelView, STEP, ROUND_END_TIME } from "./duel.js";
 import { freshProfile, recordDuel, assignPoint, xpProgress } from "./duelProfile.js";
@@ -219,4 +220,27 @@ test("the profile's screen: level, league, points and which arenas are open", ()
   ]);
   assert.equal(lobbyInfo({ ...p, league: 5, leagueWins: 1 }).league, "Liga Oro · 1/3 victorias para ser campeón");
   assert.equal(lobbyInfo({ ...p, league: 5, leagueWins: 3, champion: true }).league, "Campeón de la liga Oro");
+});
+
+// ------------------------------------------------------------ between two players
+
+test("a duel between players says so in its result: it doesn't count for the league", () => {
+  const s = wonDuel();
+  const { profile, gained } = recordDuel(freshProfile(), { arena: 2, won: true, xp: s.sides.left.xp, rival: "player" });
+  const result = duelResult(s, "left", gained, profile, "player");
+  assert.equal(result.title, "¡VICTORIA!");
+  assert.equal(result.league, "Duelo entre jugadores: no cuenta para la liga");
+  assert.deepEqual(result.rows[1], ["Experiencia", "+38"]);
+  assert.equal(duelResult(s, "left", gained, profile).league, "Liga Arena · 0/3 victorias para ascender");
+});
+
+test("the notice over a duel on the home network: who is awaited, and whose pause it is", () => {
+  const net = (over) => ({ kind: "duel", you: "left", waiting: false, gone: null, pausedBy: null, ...over });
+  assert.equal(duelNotice(net({ waiting: true }), "http://192.168.1.20:8421"), "Esperando al otro jugador: que abra http://192.168.1.20:8421 en su aparato");
+  assert.equal(duelNotice(net({ gone: "right", pausedBy: "right" }), "x"), "El rival se ha desconectado. Esperando a que vuelva…");
+  assert.equal(duelNotice(net({ pausedBy: "right" }), "x"), "Pausa: el rival ha parado el duelo");
+  assert.equal(duelNotice(net({ pausedBy: "left" }), "x"), "", "one's own pause needs no telling (the screen says PAUSA)");
+  assert.equal(duelNotice(net({}), "x"), "");
+  assert.equal(duelNotice(net({ you: null }), "x"), "Estás viendo el duelo de otros dos jugadores");
+  assert.equal(duelNotice(net({ you: null, waiting: true }), "x"), "Estás viendo el duelo de otros dos jugadores");
 });

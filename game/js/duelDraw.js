@@ -43,8 +43,9 @@ function drawPlainGround(ctx, arena) {
 }
 
 // While shopping: each side's zone, so that it's plain where units may be
-// placed and where the rival's will appear.
-function drawZones(ctx, side) {
+// placed and where the rival's will appear. (`watching`: somebody who plays
+// neither side.)
+function drawZones(ctx, side, watching) {
   ctx.save();
   ctx.lineWidth = 2;
   ctx.setLineDash([10, 8]);
@@ -66,7 +67,8 @@ function drawZones(ctx, side) {
   for (const s of SIDES) {
     const z = ZONES[s];
     ctx.fillStyle = SIDE_COLOR[s];
-    ctx.fillText(s === side ? "TU ZONA" : "ZONA RIVAL", (z.x0 + z.x1) / 2, z.y1 - 12);
+    const name = watching ? (s === "left" ? "ZONA AZUL" : "ZONA ROJA") : s === side ? "TU ZONA" : "ZONA RIVAL";
+    ctx.fillText(name, (z.x0 + z.x1) / 2, z.y1 - 12);
   }
   ctx.restore();
 }
@@ -257,7 +259,7 @@ function drawHud(ctx, scene) {
   ctx.fillStyle = "#fff";
   ctx.font = "20px sans-serif";
   ctx.fillText(hud.head, 20, 30);
-  ctx.fillText(`${hud.money}   ·   ${hud.army}`, 20, 55);
+  if (!scene.watching) ctx.fillText(`${hud.money}   ·   ${hud.army}`, 20, 55);
 
   // The score: a pip a round to win, each side's filled as it wins them.
   const mid = ARENA.width / 2;
@@ -274,10 +276,10 @@ function drawHud(ctx, scene) {
   ctx.font = "bold 16px sans-serif";
   ctx.textAlign = "right";
   ctx.fillStyle = SIDE_COLOR[side];
-  ctx.fillText("TÚ", mid - 24 - hud.toWin * 24, 30);
+  ctx.fillText(scene.watching ? "AZUL" : "TÚ", mid - 24 - hud.toWin * 24, 30);
   ctx.textAlign = "left";
   ctx.fillStyle = SIDE_COLOR[rival];
-  ctx.fillText("RIVAL", mid + 24 + hud.toWin * 24, 30);
+  ctx.fillText(scene.watching ? "ROJO" : "RIVAL", mid + 24 + hud.toWin * 24, 30);
   for (let i = 0; i < hud.toWin; i++) {
     pip(mid - 26 - i * 24, i < hud.mine, SIDE_COLOR[side]);
     pip(mid + 26 + i * 24, i < hud.theirs, SIDE_COLOR[rival]);
@@ -291,7 +293,8 @@ function drawHud(ctx, scene) {
     ctx.fillText(hud.clock, mid, y);
     y += 28;
   }
-  const hint = duelHint(view, side);
+  // On the home network, what the server's seats have to say comes first.
+  const hint = scene.notice || (scene.watching ? "" : duelHint(view, side));
   if (hint) {
     ctx.font = "bold 18px sans-serif";
     ctx.fillStyle = "#ffe27a";
@@ -341,6 +344,8 @@ function drawBanner(ctx, banner) {
 //   drawUnit(unit, target)   draws a unit off its 3D model's sheets (main.js);
 //                            false if they aren't loaded yet. unit.paint is
 //                            its side's colour, "blue" or "red"
+//   watching  true for somebody who plays neither side (the home network)
+//   notice    what the home server's seats have to say (duelUI.js's duelNotice), or ""
 //   selectedId, drag         the unit picked, and { id, x, y, ok } while one is dragged
 //   scorch, bursts           marks of the fallen: [{ x, y, r }], [{ x, y, age, size }]
 //   paused
@@ -352,7 +357,7 @@ export function drawDuel(ctx, scene) {
   else drawPlainGround(ctx, arena);
 
   if (view.phase === "buy") {
-    drawZones(ctx, scene.side);
+    drawZones(ctx, scene.side, scene.watching);
     drawArmies(ctx, scene);
   } else {
     drawFight(ctx, scene);

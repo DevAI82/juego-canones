@@ -64,6 +64,7 @@ export function createMenu(root, handlers) {
   let chosenMode = "defense";
   let chosenLevel = null;
   let chosenSide = null;
+  let duelVersus = false; // a duel against another player at home, not the computer
 
   function open(ctx, screen) {
     context = ctx;
@@ -214,13 +215,19 @@ export function createMenu(root, handlers) {
 
   // The duel minigame's own screen: the profile and its arenas. main.js
   // fills it (duelScreen.js); picking an arena starts a duel there.
+  // (duelVersus: against another player at home rather than the computer.)
   function renderDuel() {
-    if (handlers.renderDuel) handlers.renderDuel(root.querySelector(".duel-lobby"), chooseDuel);
+    if (handlers.renderDuel) handlers.renderDuel(root.querySelector(".duel-lobby"), chooseDuel, { versus: duelVersus });
   }
 
   // A duel is never saved, so it takes no saved game's place: only a game
-  // under way is asked about.
+  // under way is asked about. One against another player is the house's
+  // game, as any other at home.
   async function chooseDuel(arena) {
+    if (duelVersus) {
+      if (!(await confirm("Esto empezará una partida nueva para todos los jugadores. ¿Seguir?"))) return;
+      return handlers.onNewGame(arena, { mode: "duelNet" });
+    }
     if (handlers.hasGame() && !(await confirm("Dejarás la partida en curso. ¿Empezar el duelo?"))) return;
     handlers.onNewGame(arena, { mode: "duel" });
   }
@@ -239,6 +246,24 @@ export function createMenu(root, handlers) {
     current = join ? "join" : "full";
     root.classList.remove("home"); // (the start screen's own layout)
     if (!join) return;
+    if (info.kind === "duel") {
+      // A duel waiting for its second player: one side to take.
+      root.querySelector(".join-info").textContent = `Duelo · Arena de la liga ${info.league}`;
+      const sides = root.querySelector(".join-sides");
+      sides.textContent = "";
+      const button = document.createElement("button");
+      button.className = "menu-choice";
+      button.dataset.joinSide = info.free[0];
+      const name = document.createElement("span");
+      name.className = "menu-choice-name";
+      name.textContent = "Unirse al duelo";
+      const desc = document.createElement("span");
+      desc.className = "menu-choice-desc";
+      desc.textContent = "Tu ejército contra el suyo";
+      button.append(name, desc);
+      sides.append(button);
+      return;
+    }
     const money = MONEY_NAMES[info.money] || MONEY_NAMES.normal;
     const yours = info.free.length === 1 ? ` · Te toca ${info.free[0] === "attack" ? "atacar" : "defender"}` : "";
     root.querySelector(".join-info").textContent = `Mapa ${info.level}${yours} · Dinero de la defensa: ${money}`;
@@ -316,8 +341,17 @@ export function createMenu(root, handlers) {
       if (chosenMode === "rts") {
         return show("rts-mode");
       }
-      if (chosenMode === "duel") return show("duel");
+      if (chosenMode === "duel") {
+        // At home, first against whom; solo, it is against the computer.
+        duelVersus = false;
+        return show(handlers.networked ? "duel-rival" : "duel");
+      }
       return show("levels");
+    }
+    const duelRivalBtn = target.closest("[data-duel-rival]");
+    if (duelRivalBtn) {
+      duelVersus = duelRivalBtn.dataset.duelRival === "player";
+      return show("duel");
     }
     const rtsSubmodeBtn = target.closest("[data-rts-submode]");
     if (rtsSubmodeBtn) {
