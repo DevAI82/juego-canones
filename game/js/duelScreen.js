@@ -571,5 +571,11 @@ export function createDuelScreen({ ctx, shopEl, panelEl, resultEl, drawUnit, res
     );
   }
 
-  return { start, mount, frame, ready, key, keyUp, pointerDown, pointerMove, pointerUp, leave, renderLobby };
+  // The page is out of sight (no frames will come): a song is not left
+  // playing by itself.
+  function hush() {
+    if (music) music.stop();
+  }
+
+  return { start, mount, frame, ready, key, keyUp, pointerDown, pointerMove, pointerUp, leave, hush, renderLobby };
 }

@@ -1,6 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { LANES, ARROWS, DIGITS, MAX_LOOPS, songOf, chartOf, fightChart } from "./duelSongs.js";
+import { TRACKS } from "./duelTracks.js";
+
+// These tests are about the song written as notes: a recording made for
+// its league since (duelTracks.js) is put aside while they run.
+for (const id of Object.keys(TRACKS)) delete TRACKS[id];
 
 const near = (a, b) => Math.abs(a - b) < 1e-6;
 

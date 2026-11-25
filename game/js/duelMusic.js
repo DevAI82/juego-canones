@@ -280,6 +280,13 @@ export function createDuelMusic({ audioContext, audible, fetchFile = (path) => f
     }
     const kept = tapes.get(song.audio);
     if (!kept || !kept.buffer) return null;
+    // A browser that isn't letting sound out (no press of the player's yet,
+    // or it took the sound away): nothing is heard, so there is nothing to
+    // follow -- the fight keeps its own time until the sound is back.
+    if (ac.state !== "running") {
+      stopTape();
+      return null;
+    }
     if (!tape || tape.file !== song.audio) {
       startTape(song.audio, kept.buffer, now);
       return 0;

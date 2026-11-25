@@ -29,6 +29,15 @@ En «Nueva partida» hay una entrada nueva, **🎵 Duelo musical (prueba)**: un 
 
 No es un archivo de sonido: está escrita nota a nota en `game/js/duelSongs.js` y el navegador la toca con osciladores (`game/js/duelMusic.js`). Así la música y las teclas no pueden desajustarse, se pausa con el juego y no pesa nada. **Las teclas son la propia melodía**: cada nota de la melodía tiene siempre la misma flecha, y la nota que abre cada compás es un número (1, 2, 3 y vuelta a empezar). 92 teclas por pasada, casi todas a una por pulso.
 
+## 2 bis. Lo que el usuario dijo al probarla (2026-11-25) y lo que se hizo
+
+- **«Añade también pulsaciones largas, no solo un tecleo rápido.»** Hecho: una tecla con cola se mantiene pulsada hasta que la cola se acaba (se puede soltar hasta 0,2 s antes). Soltarla antes es un fallo, con su descarga. En la canción escrita son las notas de dos pulsos o más.
+- **«La canción es mega horrible… ¿podríamos incorporar una canción real de Suno y ajustar con los bajos o el ritmo las teclas?»** Sí, y el juego ya está preparado: una liga puede tener una **canción grabada** (un mp3) con las teclas escritas para ella. Falta la canción: el usuario la genera en Suno (pidió y se le dio un prompt, con un juego de ritmo de batallas musicales como referencia de estilo) y dice dónde está el archivo.
+  - `python tools/duel/chart_from_audio.py <archivo> <liga> --name "…"` escucha la grabación: encuentra el tempo, los pulsos y los compases, y pone las teclas donde suenan el bombo, el bajo y la melodía — números en los golpes graves (1 en el primer pulso del compás, 3 en el tercero, 2 entre medias), flechas en la melodía (cada nota, siempre la misma flecha) y teclas largas donde una nota se sostiene. Copia la canción a `game/assets/music/` y escribe `game/js/duelTracks.js`. Imprime cuánto se fía del pulso que ha encontrado.
+  - Comprobada con canciones fabricadas de tempo conocido (`tools/duel/test_chart_from_audio.py`): acierta el tempo a la centésima y coloca las teclas a menos de 10 ms del pulso. **Con una canción de verdad aún no se ha probado**: habrá que escuchar el resultado y ajustar.
+  - Con una canción grabada es el combate el que sigue a la música (avanza lo que se ha oído), cada asalto empieza más adelante en la canción, y si la canción se acaba el asalto se decide como un combate sin tiempo.
+  - Mientras una liga no tenga grabación, suena la canción escrita a notas.
+
 ## 3. Decisiones mías, para poder probar
 
 | Decisión | Por qué | Si no es lo que se quería |
@@ -51,8 +60,8 @@ No es un archivo de sonido: está escrita nota a nota en `game/js/duelSongs.js` 
 
 ## 5. Cómo está hecho
 
-- `game/js/duelSongs.js` — las canciones como notas y las teclas que salen de ellas (sin página ni sonido; probado).
-- `game/js/duelRhythm.js` — las reglas: `createMusicalDuel`, `pressKey`, `stepMusicalDuel` sobre el estado del duelo, con una parte `musical` (sin página; probado). Lo demás del duelo sigue en `duel.js`, que ahora exporta `landHit`, `damageOn` y `settleFight`.
-- `game/js/duelMusic.js` — toca la canción con Web Audio, siguiendo el reloj del combate.
+- `game/js/duelSongs.js` — las canciones y sus teclas: las grabadas (de `game/js/duelTracks.js`, que escribe la herramienta) o, si no hay, la escrita como notas (sin página ni sonido; probado).
+- `game/js/duelRhythm.js` — las reglas: `createMusicalDuel`, `pressKey`, `releaseKey`, `stepMusicalDuel` sobre el estado del duelo, con una parte `musical` (sin página; probado). Lo demás del duelo sigue en `duel.js`, que ahora exporta `landHit`, `damageOn` y `settleFight`.
+- `game/js/duelMusic.js` — toca la canción con Web Audio: la escrita, siguiendo el reloj del combate; la grabada, marcándoselo.
 - `game/js/duelRhythmDraw.js` — el carril de teclas sobre la arena.
 - `game/js/duelScreen.js` — lo engancha: `start(arena, { musical })`, `key(code)`, la música y el dibujo; `main.js` le pasa el teclado y calla la música del juego mientras dura.

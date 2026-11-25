@@ -242,18 +242,19 @@ export function drawRhythm(ctx, scene) {
     }
   }
 
-  // The player's own latest key, by the line.
+  // The player's own latest key, under the line (clear of the keys coming).
+  const said = TRACK.line + KEY / 2 + 30;
   const last = [...m.events].reverse().find((e) => e.side === side);
   const good = last && (last.kind === "hit" || last.kind === "held");
   if ((m.held[side] || []).length > 0) {
     ctx.font = "bold 24px sans-serif";
     ctx.fillStyle = "#ffe27a";
-    ctx.fillText("¡MANTÉN!", mid, TRACK.line - 44);
+    ctx.fillText("¡MANTÉN!", mid, said);
   } else if (last && last.age < 0.45) {
     ctx.globalAlpha = 1 - last.age / 0.45;
     ctx.font = "bold 24px sans-serif";
     ctx.fillStyle = good ? "#7dff8e" : "#ff4d3d";
-    ctx.fillText(good ? "¡BIEN!" : last.kind === "drop" ? "¡SOLTASTE!" : "FALLO", mid, TRACK.line - 44 - 14 * (last.age / 0.45));
+    ctx.fillText(good ? "¡BIEN!" : last.kind === "drop" ? "¡SOLTASTE!" : "FALLO", mid, said);
     ctx.globalAlpha = 1;
   }
 

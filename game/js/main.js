@@ -3140,6 +3140,11 @@ document.addEventListener("mouseout", (evt) => {
   if (!evt.relatedTarget) attackControls.pointerAt(canvasPoint(evt));
 });
 window.addEventListener("blur", () => attackControls.pointerAt(null));
+// A tab nobody is looking at draws no frames, so its game stands still: a
+// musical duel's song must not play on by itself meanwhile.
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && duelScreen) duelScreen.hush();
+});
 
 canvas.addEventListener("pointerdown", (evt) => {
   if (dueling()) {

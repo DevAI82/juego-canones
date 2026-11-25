@@ -6,6 +6,11 @@ import { LANES, songOf, chartOf, fightChart } from "./duelSongs.js";
 import { TRACKS } from "./duelTracks.js";
 import { HIT_WINDOW, RELEASE_SLACK, LEAD_IN, createMusicalDuel, stepMusicalDuel, pressKey, releaseKey, songClock } from "./duelRhythm.js";
 
+// The long presses are tried on the song written as notes: the recordings
+// made since (duelTracks.js) are put aside, and back for their own test.
+const RECORDED = { ...TRACKS };
+for (const id of Object.keys(TRACKS)) delete TRACKS[id];
+
 function fight({ song = 1, bots = { right: 1 }, seed = 7 } = {}) {
   const s = createMusicalDuel({ arena: 1, song, seed, bots, left: { money: 2000 }, right: { money: 2000 } });
   assert.ok(buyUnit(s, "left", "tank").ok);
@@ -18,7 +23,10 @@ const run = (s, seconds) => {
   for (let i = 0; i < Math.round(seconds / STEP); i++) stepMusicalDuel(s, STEP);
 };
 const runTo = (s, t) => {
-  while (songClock(s) < t - STEP / 2) stepMusicalDuel(s, STEP);
+  for (let i = 0; songClock(s) < t - STEP / 2; i++) {
+    assert.ok(i < 1e5 && s.phase === "combat", `the fight never got to ${t} s`);
+    stepMusicalDuel(s, STEP);
+  }
 };
 const hurt = (s, side) => s.units.filter((u) => u.side === side).reduce((sum, u) => sum + u.maxHp - u.hp, 0);
 
@@ -177,6 +185,15 @@ function withTape(run) {
 }
 
 test("every recorded song there is can be played", () => {
+  Object.assign(TRACKS, RECORDED);
+  try {
+    everyRecording();
+  } finally {
+    for (const id of Object.keys(TRACKS)) delete TRACKS[id];
+  }
+});
+
+function everyRecording() {
   for (const id of Object.keys(TRACKS)) {
     const song = songOf(Number(id));
     const chart = chartOf(Number(id));
@@ -190,8 +207,12 @@ test("every recorded song there is can be played", () => {
       if (i > 0) assert.ok(note.t > chart[i - 1].t);
     });
     for (const start of song.starts) assert.ok(start >= 0 && start < song.length - 20);
+    // A long key is let go before the next key comes.
+    chart.forEach((note, i) => {
+      if (note.hold && chart[i + 1]) assert.ok(note.t + note.hold <= chart[i + 1].t - 0.2);
+    });
   }
-});
+}
 
 test("a recorded song is its sound file and the keys written for it, played once", () => {
   withTape(() => {

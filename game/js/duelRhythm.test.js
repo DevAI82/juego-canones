@@ -2,7 +2,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { STEP, DUEL_UNITS, LIGHT_VS_ARMOR, ROUND_END_TIME, buyUnit, moveUnit, upgradeUnit, setReady, stepDuel, createDuelState } from "./duel.js";
 import { fightChart } from "./duelSongs.js";
+import { TRACKS } from "./duelTracks.js";
 import { HIT_WINDOW, VOLLEY_RELOAD, createMusicalDuel, stepMusicalDuel, pressKey, songClock } from "./duelRhythm.js";
+
+// These tests are about the song written as notes: a recording made for
+// its league since (duelTracks.js) is put aside while they run.
+for (const id of Object.keys(TRACKS)) delete TRACKS[id];
 
 // A musical duel with these armies, both sides ready: the fight is on.
 // `bots`: the sides the computer plays, and how often it hits (0 to 1).
@@ -20,7 +25,10 @@ const run = (s, seconds) => {
 };
 // On to the moment this key of the fight is on the line (to within a tick).
 const runTo = (s, t) => {
-  while (songClock(s) < t - STEP / 2) stepMusicalDuel(s, STEP);
+  for (let i = 0; songClock(s) < t - STEP / 2; i++) {
+    assert.ok(i < 1e5 && s.phase === "combat", `the fight never got to ${t} s`);
+    stepMusicalDuel(s, STEP);
+  }
 };
 // On to the end of the fight.
 const fightOut = (s) => {
