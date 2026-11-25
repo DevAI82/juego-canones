@@ -232,6 +232,13 @@ export function createMenu(root, handlers) {
     handlers.onNewGame(arena, { mode: "duel" });
   }
 
+  // The musical duel (duelRhythm.js) has one song so far, the first
+  // league's: it starts there, against the computer.
+  async function chooseMusicalDuel() {
+    if (handlers.hasGame() && !(await confirm("Dejarás la partida en curso. ¿Empezar el duelo?"))) return;
+    handlers.onNewGame(1, { mode: "duel", musical: true });
+  }
+
   function renderLevels() {
     root.querySelector('[data-screen="levels"] .menu-subtitle').textContent =
       chosenMode === "attack" ? "Elige el mapa que atacarás" : chosenMode === "versus" ? "Elige el mapa" : "Elige nivel";
@@ -341,6 +348,8 @@ export function createMenu(root, handlers) {
       if (chosenMode === "rts") {
         return show("rts-mode");
       }
+      // The musical duel, on trial: one league, against the computer.
+      if (chosenMode === "duelMusic") return chooseMusicalDuel();
       if (chosenMode === "duel") {
         // At home, first against whom; solo, it is against the computer.
         duelVersus = false;

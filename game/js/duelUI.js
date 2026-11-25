@@ -103,7 +103,7 @@ export function duelHud(view, side) {
   const mine = view.sides[side];
   const timed = view.phase === "combat" || (view.phase === "buy" && view.clock !== null);
   return {
-    head: `Duelo · Liga ${arenaOf(view.arena).league} · Asalto ${view.round}`,
+    head: `${view.musical ? "Duelo musical" : "Duelo"} · Liga ${arenaOf(view.arena).league} · Asalto ${view.round}`,
     money: `$${Math.floor(mine.money)}`,
     army: `Unidades ${mine.army.length}/${UNIT_CAP}`,
     clock: timed ? clock(view.clock) : null,
@@ -119,6 +119,7 @@ export function duelHint(view, side) {
   const mine = view.sides[side];
   if (mine.ready) return "Esperando al rival…";
   if (mine.army.length === 0) return "Compra tu ejército en la tienda";
+  if (view.musical) return "Coloca delante a los que más aguantan y pulsa «¡Listo!»: empieza la música";
   return "Arrastra tus unidades para colocarlas y pulsa «¡Listo!»";
 }
 

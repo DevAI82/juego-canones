@@ -36,6 +36,9 @@ export const VOLLEY_RELOAD = 0.5;
 // Times a unit's shot, in a volley. (A first figure: with 1, an army of
 // the first round stands some ten volleys of one like it.)
 export const VOLLEY_POWER = 1;
+// How often the computer hits a key, by its league's grade (the first one
+// first). First figures: nobody has played against them yet.
+export const BOT_ACCURACY = [0.72, 0.8, 0.86, 0.91, 0.95, 0.98];
 
 const SHOT_SHOWN = 0.4; // s a shot stays in state.shots for the screen (as duel.js's)
 const EVENT_SHOWN = 0.8; // s a hit or a mistake stays in musical.events for the screen

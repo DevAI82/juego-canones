@@ -33,6 +33,15 @@ export function setMuted(value) {
 export function isMuted() {
   return muted;
 }
+// For music that is made here rather than read from a file (the musical
+// duel's songs, duelMusic.js): the context to play it in, and whether music
+// is to be heard at all right now.
+export function audioContext() {
+  return getCtx();
+}
+export function musicAudible() {
+  return !muted && musicOn;
+}
 export function toggleMuted() {
   return setMutedReturning(!muted);
 }

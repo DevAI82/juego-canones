@@ -31,7 +31,7 @@ import { pickTowerTarget } from "./ai.js";
 import { lerpAngle, isTypingTarget } from "./util.js";
 import { createEffects, clearEffects, stepEffects, hitFlash, drawGroundEffects, drawAirEffects } from "./effects.js";
 import { minimapRect, minimapToWorld, drawMinimap } from "./minimap.js";
-import { playSound, toggleMuted, startMusic, pauseMusic, resumeMusic, setMusicOn, setEffectsOn } from "./audio.js";
+import { playSound, toggleMuted, startMusic, pauseMusic, resumeMusic, setMusicOn, setEffectsOn, audioContext, musicAudible } from "./audio.js";
 import { clampCameraPosition, zoomAt, pinchZoom } from "./camera.js";
 import { createAutoArmy } from "./autoArmy.js";
 import { resolveControls, browserControlsEnv } from "./inputMode.js";
@@ -56,6 +56,7 @@ import {
 } from "./attackDraw.js";
 import { initShop, updateShop, initUnitUpgrades, updateUnitUpgrades, attackHudLines, defenderHudLines, attackSummary } from "./attackUI.js";
 import { createDuelScreen } from "./duelScreen.js";
+import { createDuelMusic } from "./duelMusic.js";
 import { arenaOf } from "./duelArenas.js";
 import { BUILDING_TYPES, BUILDING_ORDER, PHASE_COUNT, SHEET_COLS, buildingProgress, constructionFrame } from "./buildings.js";
 import { RTS_UNIT_TYPES } from "./rtsUnits.js";
@@ -685,7 +686,9 @@ let soundedIds = new Set();
 // three, but never touched audio on its own.
 let lastMusicPaused = false;
 function syncMusicToPause() {
-  const shouldPause = state.paused || state.gameOver || state.win || state.levelComplete;
+  // (A musical duel has its own song, duelMusic.js: the game's gives way to
+  // it for as long as that duel lasts.)
+  const shouldPause = state.paused || state.gameOver || state.win || state.levelComplete || Boolean(state.musical);
   if (shouldPause === lastMusicPaused) return;
   lastMusicPaused = shouldPause;
   if (shouldPause) pauseMusic();
@@ -2191,7 +2194,8 @@ function duel() {
       resetVisuals: () => unitVisuals.keepOnly([]),
       playSound,
       showToast,
-      onRematch: (arena) => startNewGame(arena, { mode: "duel" }),
+      music: createDuelMusic({ audioContext, audible: musicAudible }),
+      onRematch: (arena, options = {}) => startNewGame(arena, { mode: "duel", ...options }),
       onExit: () => {
         duel().leave();
         backToNewGame();
@@ -2307,8 +2311,13 @@ const GAME_IN_PROGRESS = "Hay una partida uno contra otro en marcha: solo sus do
 // options (menu.js): { mode: "attack", difficulty } for an attack against
 // the computer; { mode: "versus", side, money } for one against the other
 // at home -- this tab takes `side`, the other is left for the second player;
-// { mode: "rts", submode: "campaign"|"survival" } for RTS mode.
-async function startNewGame(level, { mode = "defense", difficulty = "normal", side = "defense", money = "normal", submode = "campaign" } = {}) {
+// { mode: "rts", submode: "campaign"|"survival" } for RTS mode;
+// { mode: "duel", musical } for a duel against the computer (musical: its
+// fights are played on the keyboard, to music).
+async function startNewGame(
+  level,
+  { mode = "defense", difficulty = "normal", side = "defense", money = "normal", submode = "campaign", musical = false } = {},
+) {
   if (mode === "duelNet") {
     // A duel against another player: the home server's game from now on
     // (`level` is the arena); it comes with the server's next news.
@@ -2337,7 +2346,7 @@ async function startNewGame(level, { mode = "defense", difficulty = "normal", si
   } else if (mode === "duel") {
     // `level` is the arena (duelArenas.js); against the computer.
     localDuel = true;
-    state = duel().start(level);
+    state = duel().start(level, { musical });
   } else if (mode === "attack") {
     state = createAttackState(level, difficulty);
   } else if (mode === "versus") {
@@ -3455,7 +3464,12 @@ window.addEventListener("keydown", (evt) => {
     return;
   }
   if (dueling()) {
-    // A duel has no shortcuts of its own: Esc is the menu's.
+    // A duel has no shortcuts of its own, but a musical one is played on
+    // the arrows and the numbers; Esc is the menu's.
+    if (started && !menu.isOpen() && duel().key(evt.code, evt.repeat)) {
+      evt.preventDefault(); // (an arrow would scroll the page)
+      return;
+    }
     if (key === "escape") {
       if (menu.isOpen()) menu.back();
       else openPauseMenu();
