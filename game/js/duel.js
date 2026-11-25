@@ -486,14 +486,21 @@ function withinReach(u, living, obstacles, blind) {
   return best;
 }
 
-// A hit lands. The shooter's side is paid for the health it takes. Armour
-// takes less from a light weapon and more from one made for it.
-function land(state, hit) {
+// What a weapon of this type's `amount` of damage does to a unit of that
+// type: armour takes less from a light weapon and more from one made for it.
+export function damageOn(type, victimType, amount) {
+  const weapon = DUEL_UNITS[type];
+  const onArmour = weapon.light ? LIGHT_VS_ARMOR : weapon.antiArmor || 1;
+  return amount * (DUEL_UNITS[victimType].armored ? onArmour : 1);
+}
+
+// A hit lands ({ side, type: the shooter's; victim: a fight's unit; amount
+// }). The shooter's side is paid for the health it takes. (Exported for the
+// musical duel's volleys, duelRhythm.js.)
+export function landHit(state, hit) {
   const victim = hit.victim;
   if (!victim.alive) return;
-  const weapon = DUEL_UNITS[hit.type];
-  const onArmour = weapon.light ? LIGHT_VS_ARMOR : weapon.antiArmor || 1;
-  const taken = Math.min(victim.hp, hit.amount * (DUEL_UNITS[victim.type].armored ? onArmour : 1));
+  const taken = Math.min(victim.hp, damageOn(hit.type, victim.type, hit.amount));
   victim.hp -= taken;
   const price = DUEL_UNITS[victim.type].price;
   const paid = (price * KILL_SHARE * taken) / victim.maxHp;
@@ -620,16 +627,23 @@ function combatTick(state) {
 
   // 4. The shots land, all together: a unit destroyed in this tick has
   // still fired its own shot.
-  for (const hit of hits) land(state, hit);
+  for (const hit of hits) landHit(state, hit);
 
   // 5. The end of the fight.
   state.clock -= STEP;
+  settleFight(state, state.clock <= 1e-9);
+}
+
+// Ends the round if the fight is over: an army destroyed, or its time up
+// (`timeUp`). (Exported for the musical duel, whose time is its song's.)
+export function settleFight(state, timeUp) {
+  const units = state.units;
   const left = units.some((u) => u.alive && u.side === "left");
   const right = units.some((u) => u.alive && u.side === "right");
   if (left && !right) endRound(state, "left", "wipe");
   else if (right && !left) endRound(state, "right", "wipe");
   else if (!left && !right) endRound(state, ...byDamage(state));
-  else if (state.clock <= 1e-9) {
+  else if (timeUp) {
     // Time: the side with more army left, each unit's health counted by
     // its price.
     const worth = (side) =>
