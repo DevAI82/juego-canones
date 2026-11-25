@@ -171,6 +171,9 @@ function recorded(id, track) {
     audio: track.file,
     first: track.first,
     starts: track.starts && track.starts.length ? [...track.starts] : [0],
+    // Its beats one by one, from the first bar line on, when its tempo
+    // wanders (a recording's often does); null when they are even.
+    beats: track.beats && track.beats.length ? [...track.beats] : null,
   };
 }
 
@@ -191,6 +194,25 @@ function made(id, what, make) {
 export function songOf(id) {
   const known = TRACKS[id] || WRITTEN[id] ? id : 1;
   return made(known, "song", (source) => (source === TRACKS[known] ? recorded(known, source) : build(known, source)));
+}
+
+// The song's beats from `from` to `to` (s into it), for the screen to draw:
+// [{ t, bar }] -- bar: whether the beat opens a bar. From its first bar
+// line on: a recording that gives its beats one by one has those and no
+// more; any other song's are even.
+export function beatLines(id, from, to) {
+  const song = songOf(id);
+  const lines = [];
+  if (song.beats) {
+    song.beats.forEach((t, k) => {
+      if (t >= from && t < to) lines.push({ t, bar: k % BEATS === 0 });
+    });
+    return lines;
+  }
+  for (let k = Math.max(0, Math.ceil((from - song.first) / song.beat - 1e-9)); song.first + k * song.beat < to; k++) {
+    lines.push({ t: song.first + k * song.beat, bar: k % BEATS === 0 });
+  }
+  return lines;
 }
 
 // The keys of one playing of a song, in order: [{ t, lane, hold }] --

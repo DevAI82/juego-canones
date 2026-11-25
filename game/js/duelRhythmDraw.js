@@ -8,7 +8,7 @@
 // frames and changes nothing in the duel.
 import { ARENA, ZONES } from "./duelArenas.js";
 import { SIDES, otherSide } from "./duel.js";
-import { LANES, ARROWS, fightChart, songOf } from "./duelSongs.js";
+import { LANES, ARROWS, fightChart, beatLines } from "./duelSongs.js";
 import { songClock } from "./duelRhythm.js";
 import { SIDE_COLOR } from "./duelDraw.js";
 
@@ -125,10 +125,9 @@ export function drawRhythm(ctx, scene) {
     ctx.fillRect(laneX(i) - LANE / 2 + 2, TRACK.top - 14, LANE - 4, TRACK.bottom - TRACK.top + 24);
   });
   ctx.globalAlpha = 1;
-  const { beat, first } = songOf(m.song);
-  for (let k = Math.max(0, Math.ceil((now - first) / beat)); first + k * beat < now + APPROACH; k++) {
-    const y = keyY(first + k * beat, now);
-    ctx.fillStyle = k % 4 === 0 ? "rgba(255, 255, 255, 0.28)" : "rgba(255, 255, 255, 0.1)";
+  for (const line of beatLines(m.song, now, now + APPROACH)) {
+    const y = keyY(line.t, now);
+    ctx.fillStyle = line.bar ? "rgba(255, 255, 255, 0.28)" : "rgba(255, 255, 255, 0.1)";
     ctx.fillRect(TRACK.x0, y - 1, WIDTH, 2);
   }
 

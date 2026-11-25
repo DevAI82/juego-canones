@@ -38,9 +38,6 @@ FPS = SR / HOP
 LATE = 0.012
 
 ARROWS = ["left", "down", "up", "right"]
-# The number a low stroke gets, by its beat of the bar: the hand on the
-# numbers drums the bar -- 1 on its first beat, 3 on its third, 2 between.
-DIGIT_OF_BEAT = ["1", "2", "3", "2"]
 
 # By league: keys a beat where the song is at its usual loudness; the share
 # of them that may fall between beats; the share that are long.
@@ -134,51 +131,134 @@ def find_tempo(env, hint=None):
     return best[1], best[2]
 
 
-def follow_beat(env, period, phase):
-    """The beats' frames: the even grid, nudged where the song strays from it
-    (a recording's tempo is steady, but seldom to the millisecond). Returns
-    them with the most it had to nudge, in s."""
+def track_grid(env, bpm):
+    """The frames of the song's quarter-beats (four to a beat), all along it.
+
+    A recording's tempo is seldom one number: a song from a generator may
+    play half a minute a little slow and then settle. So the grid is not
+    laid out evenly from one end: the song is listened to six seconds at a
+    time, each time asking where its quarter-beats fall against an even
+    ruler at `bpm` (every start of a sound on the grid pulls the same way,
+    whichever quarter it is on), and the answers, followed along the song,
+    say how far the ruler has to slide at each moment.
+
+    Returns (frames, strength): strength, 0 to 1, is how much of the song's
+    starts agree on the grid (the median of the windows')."""
     n = len(env)
-    beats = np.arange(phase, n, period)
-    reach = int(0.07 * FPS)
-    shifts = np.arange(-reach, reach + 1)
-    span = 16
-    centres, moved = [], []
-    for start in range(0, len(beats), span // 2):
-        part = beats[start:start + span]
-        if len(part) < span // 2:
-            break
-        scores = [at(env, part + s).sum() for s in shifts]
-        centres.append(part.mean())
-        moved.append(shifts[int(np.argmax(scores))])
-    if len(moved) >= 3:
-        moved = median_filter(np.array(moved, float), 5, mode="nearest")
-    nudge = np.interp(beats, centres, moved) if len(centres) else np.zeros(len(beats))
-    worst = float(np.max(np.abs(nudge))) / FPS if len(nudge) else 0.0
-    # (A few ms of straying is the measuring, not the song.)
-    if worst < 0.02:
-        nudge = np.zeros(len(beats))
-    return beats + nudge, worst
+    quarter = 60.0 * FPS / bpm / 4  # frames
+    frames = np.arange(n)
+    ruler = np.exp(-2j * np.pi * frames / quarter)
+    win, hop = int(6 * FPS), int(FPS)
+    shape = np.hanning(win)
+    centres, turns, strengths = [], [], []
+    for a in range(0, max(1, n - win + 1), hop):
+        part = env[a:a + win] * shape[: len(env[a:a + win])]
+        pull = (part * ruler[a:a + win]).sum()
+        centres.append(a + win / 2)
+        turns.append(np.angle(pull))
+        strengths.append(abs(pull) / (part.sum() + 1e-9))
+    centres, turns, strengths = np.array(centres), np.array(turns), np.array(strengths)
+    # Where nothing keeps the beat (a break, a held chord) the answer is
+    # noise: the grid goes straight on from the last sure place to the next.
+    sure = strengths >= max(0.08, 0.3 * np.median(strengths))
+    if sure.sum() < 2:
+        sure[:] = True
+    slide = -np.unwrap(turns[sure]) * quarter / (2 * np.pi)  # frames
+    if len(slide) >= 5:
+        slide = median_filter(slide, 3, mode="nearest")
+    # (Before the first window's middle and after the last one's, it goes on
+    # sliding as it was.)
+    where = centres[sure]
+    if len(slide) >= 4:
+        head = np.polyfit(where[:4], slide[:4], 1)
+        tail = np.polyfit(where[-4:], slide[-4:], 1)
+        where = np.concatenate([[0.0], where, [float(n)]])
+        slide = np.concatenate([[np.polyval(head, 0.0)], slide, [np.polyval(tail, float(n))]])
+    slide_at = np.interp(frames, where, slide)
+    # Counting quarter-beats along the song: one falls wherever the count is whole.
+    count = np.maximum.accumulate((frames - slide_at) / quarter)
+    whole = np.arange(np.ceil(count[0]), np.floor(count[-1]) + 1)
+    grid = np.interp(whole, count, frames)
+    # (The ruler's answer is where each start's weight lies, a hair after it
+    # begins: the grid is set on the starts themselves.)
+    shifts = np.arange(-3, 3.01, 0.25)
+    grid = grid + shifts[int(np.argmax([at(env, grid + s).sum() for s in shifts]))]
+    return grid, float(np.median(strengths[sure]))
 
 
-def find_bar(mag, low, beats):
-    """Which beat opens the bars (0 to 3): where the low strokes fall on the
-    first and third beats, and where the harmony changes."""
-    tone = np.log1p(30.0 * mag[:, band(100, 2000)])
-    edges = np.clip(beats.astype(int), 0, len(tone) - 1)
-    per_beat = np.array([tone[a:b].mean(axis=0) if b > a else tone[a] for a, b in zip(edges[:-1], edges[1:])])
-    unit = per_beat / (np.linalg.norm(per_beat, axis=1, keepdims=True) + 1e-9)
-    change = np.concatenate([[0.0], 1.0 - (unit[1:] * unit[:-1]).sum(axis=1)])
-    strokes = peak_near(low, beats[:-1])
+def z(values):
+    values = np.asarray(values, float)
+    return (values - values.mean()) / (values.std() + 1e-9)
 
-    def z(values):
-        values = np.asarray(values, float)
-        return (values - values.mean()) / (values.std() + 1e-9)
 
-    index = np.arange(len(strokes))
-    changes = z([change[index % 4 == r].mean() for r in range(4)])
-    lows = z([strokes[index % 4 == r].mean() + 0.5 * strokes[index % 4 == (r + 2) % 4].mean() for r in range(4)])
-    return int(np.argmax(changes + lows))
+def folded(values, period):
+    """The usual value at each place of a pattern `period` grid points long."""
+    values = np.asarray(values, float)
+    place = np.arange(len(values)) % period
+    return np.array([values[place == r].mean() if (place == r).any() else 0.0 for r in range(period)])
+
+
+def find_beat(mag, pulse, grid):
+    """Which of the grid's quarter-beats are the beats (0 to 3), with how
+    sure (the winner's lead over the next, in the scores' own spread: under
+    0.5 is doubtful).
+
+    Most starts fall on the beats -- but in a song with a tune or a bass
+    off the beat as many may fall between them (the first real song put
+    through this: 1.03 times as many). What tells then is the drums' body
+    (150 to 400 Hz: a kick's punch, a snare's), which keeps to the beats."""
+    body = flux(mag, 150, 400)
+    scores = z(folded(peak_near(pulse, grid, reach=1), 4)) + z(folded(peak_near(body, grid, reach=1), 4))
+    best = int(np.argmax(scores))
+    return best, float(scores[best] - np.delete(scores, best).max())
+
+
+def cells(values, grid):
+    """Each quarter-beat's rows of `values`, as their mean."""
+    edges = np.clip(grid.astype(int), 0, len(values) - 1)
+    total = np.concatenate([np.zeros((1, values.shape[1])), np.cumsum(values, axis=0)])
+    a, b = edges[:-1], np.maximum(edges[1:], edges[:-1] + 1)
+    return (total[b] - total[a]) / (b - a)[:, None]
+
+
+def apart(cell, span):
+    """At each quarter-beat, how unlike the `span` of them from it on are to
+    the `span` before it (0: the same sound)."""
+    total = np.concatenate([np.zeros((1, cell.shape[1])), np.cumsum(cell, axis=0)])
+    out = np.zeros(len(cell))
+    i = np.arange(span, len(cell) - span + 1)
+    if len(i) == 0:
+        return out
+    before, after = total[i] - total[i - span], total[i + span] - total[i]
+    out[i] = 1.0 - (before * after).sum(axis=1) / (np.linalg.norm(before, axis=1) * np.linalg.norm(after, axis=1) + 1e-9)
+    return out
+
+
+def find_bar(mag, low, grid, which):
+    """Which beat opens the bars (0 to 3, counting the beats from the grid's
+    quarter-beat `which`), with how sure (as find_beat).
+
+    A bar opens where the harmony changes and where the song's sections do
+    (a bar before against a bar after) -- or half a beat earlier: a chord
+    is often played ahead of its bar. The low strokes on the first and
+    third beats count too, for less: a bass may not keep to them."""
+    tone = cells(np.log1p(30.0 * mag[:, band(80, 2000)]), grid)
+    tone = tone / (np.linalg.norm(tone, axis=1, keepdims=True) + 1e-9)
+    harmony = folded(apart(tone, 4), 16)
+    sections = folded(apart(cells(np.log1p(30.0 * mag[:, band(40, 9000)]), grid), 16), 16)
+    strokes = folded(peak_near(low, grid, reach=1), 16)
+
+    def ahead(pattern, place):
+        return max(pattern[place % 16], pattern[(place - 1) % 16], pattern[(place - 2) % 16])
+
+    places = [which + 4 * b for b in range(4)]
+    scores = (
+        z([ahead(harmony, p) + 0.5 * ahead(harmony, p + 8) for p in places])
+        + z([ahead(sections, p) for p in places])
+        + 0.5 * z([strokes[p % 16] + 0.5 * strokes[(p + 8) % 16] for p in places])
+    )
+    best = int(np.argmax(scores))
+    return best, float(scores[best] - np.delete(scores, best).max())
 
 
 # ---------------------------------------------------------------- the keys
@@ -243,23 +323,45 @@ def write_keys(mag, envs, beats, first_bar, league, length):
     cut = np.percentile(on_beat, 100 - 100 * min(1.0, 0.32 * len(picked) / max(1, len(on_beat)))) if len(on_beat) else 0.0
     is_digit = lowness >= cut
 
-    # An arrow by the note that sounds: the song's notes, from the lowest up,
-    # take the four arrows in turn, so a phrase that comes back is the same keys.
-    lo_bin, hi_bin = band(180, 1500).start, band(180, 1500).stop
+    # An arrow by the note that starts there (what is new in the sound at
+    # that moment: what is being held under it -- a bass, a chord -- would
+    # give the same arrow for bars on end): the song's notes, from the lowest
+    # up, take the four arrows in turn, so a phrase that comes back is the
+    # same keys.
+    lo_bin, hi_bin = band(250, 3000).start, band(250, 3000).stop
     notes_heard = []
     for i in picked:
-        f = int(frames[i])
-        part = mag[min(f + 1, len(mag) - 1):min(f + 6, len(mag)), lo_bin:hi_bin].mean(axis=0)
-        hz = (lo_bin + int(np.argmax(part))) * SR / N_FFT
+        f = int(np.clip(frames[i], 4, len(mag) - 6))
+        new = np.clip(mag[f + 1:f + 5, lo_bin:hi_bin].mean(axis=0) - mag[f - 4:f - 1, lo_bin:hi_bin].mean(axis=0), 0, None)
+        hz = (lo_bin + int(np.argmax(new))) * SR / N_FFT
         notes_heard.append(int(round(69 + 12 * np.log2(max(hz, 1.0) / 440.0))))
     ladder = sorted(set(n for n, digit in zip(notes_heard, is_digit) if not digit))
 
+    # A number by its beat of the bar, the same one every time. Which beat
+    # gets which is set by the song, so that the three get their share: its
+    # busiest beat is 1, the next 2, the next 3, and the fourth whichever
+    # has had least. (1 on the bar's first beat and 3 on its third would
+    # leave a song that plays its chords ahead of the bar with hardly a 1.)
+    on_beat_of = [int((beat_of[i] - first_bar) % 4) for j, i in enumerate(picked) if is_digit[j]]
+    busy = sorted(range(4), key=lambda b: (-on_beat_of.count(b), b))
+    digit_of = {busy[0]: "1", busy[1]: "2", busy[2]: "3"}
+    share = {d: on_beat_of.count(b) for b, d in digit_of.items()}
+    digit_of[busy[3]] = min("123", key=lambda d: (share[d], d))
+
     keys = []
+    run = 0
     for j, i in enumerate(picked):
         if is_digit[j]:
-            lane = DIGIT_OF_BEAT[(beat_of[i] - first_bar) % 4]
+            lane = digit_of[int((beat_of[i] - first_bar) % 4)]
         else:
-            lane = ARROWS[ladder.index(notes_heard[j]) % 4]
+            at_arrow = ladder.index(notes_heard[j]) % 4
+            # (No more than three of the same arrow running: the fourth is the next one.)
+            previous = [k[1] for k in keys if k[1] in ARROWS]
+            run = run + 1 if previous and previous[-1] == ARROWS[at_arrow] else 1
+            if run > 3:
+                at_arrow = (at_arrow + 1) % 4
+                run = 1
+            lane = ARROWS[at_arrow]
         keys.append([float(times[i]), lane, 0.0, i])
 
     # Long keys: where a note goes on sounding and nothing else starts.
@@ -327,7 +429,7 @@ def round_starts(beats, first_bar, length):
 
 # ---------------------------------------------------------------- the whole of it
 
-def analyse(path, league, bpm_hint=None):
+def analyse(path, league, bpm_hint=None, move=0):
     x = decode(path)
     duration = len(x) / SR
     # (What is played ends where the sound does.)
@@ -336,25 +438,42 @@ def analyse(path, league, bpm_hint=None):
     mag = spectrum(x[: int(length * SR)])
     low, mid, high = flux(mag, 30, 150), flux(mag, 150, 2500), flux(mag, 2500, 9000)
     pulse = low + 0.7 * mid + 0.3 * high
-    bpm, phase = find_tempo(pulse, bpm_hint)
-    period = 60.0 * FPS / bpm
-    beats, strayed = follow_beat(pulse, period, phase)
-    first_bar = find_bar(mag, low, beats)
+    rough, _ = find_tempo(pulse, bpm_hint)
+    grid, strength = track_grid(pulse, rough)
+    which, beat_lead = find_beat(mag, pulse, grid)
+    beats = grid[which::4]
+    first_bar, bar_lead = find_bar(mag, low, grid, which)
+    if move:
+        # (Told to: the bar line moved by so many half-beats.)
+        at_grid = which + 4 * first_bar + 2 * move
+        which, first_bar = at_grid % 4, (at_grid % 16) // 4
+        beats = grid[which::4]
     keys = write_keys(mag, (low, mid, high), beats, first_bar, league, length)
 
-    # How sure: how much more starts on the beats than half-way between them.
-    on = at(pulse, beats).mean()
-    off = at(pulse, beats[:-1] + period / 2).mean()
+    # How sure of the grid: how much more starts on its quarter-beats than
+    # half-way between them.
+    on = at(pulse, grid).mean()
+    off = at(pulse, (grid[:-1] + grid[1:]) / 2).mean()
+    # The tempo, eight beats at a time: the usual one, and how far it goes from it.
+    spans = (beats[8:] - beats[:-8]) / 8
+    tempos = 60.0 * FPS / spans if len(spans) else np.array([rough])
+    bpm = float(np.median(tempos))
     return {
-        "bpm": round(float(bpm), 3),
+        "bpm": round(bpm, 3),
         "first": round(float(beats[first_bar] / FPS + LATE), 3),
         "length": round(float(length), 3),
         "starts": round_starts(beats, first_bar, length),
+        # Every beat from the first bar line on (four to a bar): the tempo
+        # may wander, so they are given one by one.
+        "beats": [round(float(b / FPS + LATE), 3) for b in beats[first_bar:] if b / FPS < length],
         "notes": keys,
         "report": {
             "seconds": round(duration, 1),
-            "beat_contrast": round(float(on / (off + 1e-9)), 2),
-            "strayed_ms": round(1000 * strayed),
+            "grid_contrast": round(float(on / (off + 1e-9)), 2),
+            "grid_strength": round(strength, 2),
+            "beat_lead": round(beat_lead, 2),
+            "bar_lead": round(bar_lead, 2),
+            "tempo_from_to": [round(float(tempos.min()), 2), round(float(tempos.max()), 2)],
             "keys": len(keys),
             "long": sum(1 for k in keys if k[2] > 0),
             "numbers": sum(1 for k in keys if k[1] in "123"),
@@ -371,8 +490,9 @@ def write_module(game):
     lines = ["export const TRACKS = {"]
     for league, t in sorted(tracks.items()):
         lines.append(f"  {league}: {{")
-        for field in ("name", "file", "bpm", "first", "length", "starts"):
-            lines.append(f"    {field}: {json.dumps(t[field], ensure_ascii=False)},")
+        for field in ("name", "file", "bpm", "first", "length", "starts", "beats"):
+            if field in t:
+                lines.append(f"    {field}: {json.dumps(t[field], ensure_ascii=False)},")
         lines.append("    notes: [")
         row = []
         for note in t["notes"]:
@@ -395,6 +515,7 @@ def main():
     parser.add_argument("league", type=int, choices=sorted(LEAGUES))
     parser.add_argument("--name", help="the song's name (the file's, unless told)")
     parser.add_argument("--bpm", type=float, help="its tempo, if the one found is half or twice the real one")
+    parser.add_argument("--move", type=int, default=0, help="half-beats to move the bar line by, if the keys feel off the beat (1: half a beat later; 2, 4, 6: another beat of the same ones)")
     parser.add_argument("--game", type=Path, default=REPO / "game")
     args = parser.parse_args()
 
@@ -407,7 +528,7 @@ def main():
         ["ffmpeg", "-v", "error", "-y", "-i", str(args.audio), "-t", str(MAX_LENGTH), "-vn", "-ac", "2", "-ar", "44100", "-b:a", "160k", str(shipped)],
         check=True,
     )
-    found = analyse(shipped, args.league, args.bpm)
+    found = analyse(shipped, args.league, args.bpm, args.move)
     report = found.pop("report")
     track = {"name": args.name or args.audio.stem, "file": f"assets/music/{shipped.name}", **found}
     TRACKS_DIR.mkdir(exist_ok=True)
@@ -415,7 +536,9 @@ def main():
     leagues = write_module(args.game)
 
     print(f"{track['name']}: {report['seconds']} s, {track['bpm']} beats a minute, first bar at {track['first']} s")
-    print(f"  the beat: {report['beat_contrast']} times more starts on it than between (under 1.5: doubtful); strayed {report['strayed_ms']} ms at most")
+    low_bpm, high_bpm = report["tempo_from_to"]
+    print(f"  the tempo goes from {low_bpm} to {high_bpm}; the grid: {report['grid_contrast']} times more starts on it than between (under 2: doubtful)")
+    print(f"  the beat leads the next best by {report['beat_lead']}, the bar line by {report['bar_lead']} (under 0.5: doubtful -- try --move)")
     print(f"  keys: {report['keys']} ({report['keys_a_beat']} a beat), {report['numbers']} numbers, {report['long']} long")
     print(f"  rounds start at {track['starts']}")
     print(f"  written: {shipped.relative_to(args.game.parent)}, game/js/duelTracks.js (leagues {leagues})")

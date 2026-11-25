@@ -33,10 +33,31 @@ No es un archivo de sonido: está escrita nota a nota en `game/js/duelSongs.js` 
 
 - **«Añade también pulsaciones largas, no solo un tecleo rápido.»** Hecho: una tecla con cola se mantiene pulsada hasta que la cola se acaba (se puede soltar hasta 0,2 s antes). Soltarla antes es un fallo, con su descarga. En la canción escrita son las notas de dos pulsos o más.
 - **«La canción es mega horrible… ¿podríamos incorporar una canción real de Suno y ajustar con los bajos o el ritmo las teclas?»** Sí, y el juego ya está preparado: una liga puede tener una **canción grabada** (un mp3) con las teclas escritas para ella. Falta la canción: el usuario la genera en Suno (pidió y se le dio un prompt, con un juego de ritmo de batallas musicales como referencia de estilo) y dice dónde está el archivo.
-  - `python tools/duel/chart_from_audio.py <archivo> <liga> --name "…"` escucha la grabación: encuentra el tempo, los pulsos y los compases, y pone las teclas donde suenan el bombo, el bajo y la melodía — números en los golpes graves (1 en el primer pulso del compás, 3 en el tercero, 2 entre medias), flechas en la melodía (cada nota, siempre la misma flecha) y teclas largas donde una nota se sostiene. Copia la canción a `game/assets/music/` y escribe `game/js/duelTracks.js`. Imprime cuánto se fía del pulso que ha encontrado.
-  - Comprobada con canciones fabricadas de tempo conocido (`tools/duel/test_chart_from_audio.py`): acierta el tempo a la centésima y coloca las teclas a menos de 10 ms del pulso. **Con una canción de verdad aún no se ha probado**: habrá que escuchar el resultado y ajustar.
+  - `python tools/duel/chart_from_audio.py <archivo> <liga> --name "…"` escucha la grabación: encuentra el tempo, los pulsos y los compases, y pone las teclas donde suenan el bombo, el bajo y la melodía — números en los golpes graves (por su pulso del compás; ver 2 ter), flechas en la melodía (cada nota, siempre la misma flecha) y teclas largas donde una nota se sostiene. Copia la canción a `game/assets/music/` y escribe `game/js/duelTracks.js`. Imprime cuánto se fía del pulso que ha encontrado.
+  - Comprobada con canciones fabricadas de tempo conocido (`tools/duel/test_chart_from_audio.py`): acierta el tempo a la centésima y coloca las teclas a menos de 10 ms del pulso. Con una canción de verdad: ver 2 ter.
   - Con una canción grabada es el combate el que sigue a la música (avanza lo que se ha oído), cada asalto empieza más adelante en la canción, y si la canción se acaba el asalto se decide como un combate sin tiempo.
   - Mientras una liga no tenga grabación, suena la canción escrita a notas.
+
+## 2 ter. La primera canción de verdad (2026-11-25)
+
+El usuario generó en Suno «Duelo en la Arena» (1 min 54 s; su copia está en `musica duelo/`, fuera de git) y ya es la canción de la liga Arena: `game/assets/music/duel1.mp3`, 123 teclas (84 flechas, 39 números, 15 largas), cinco puntos de arranque para los asaltos.
+
+Lo que enseñó a la herramienta:
+
+- **El tempo no es fijo.** La canción va a unos 110 pulsos por minuto durante 35 s y luego se asienta en 111,2. Con un tempo único las teclas del primer medio minuto quedaban hasta un tercio de segundo fuera. Ahora la herramienta sigue el pulso a lo largo de toda la canción y guarda cada pulso (`beats`); el juego dibuja las líneas de compás con ellos.
+- **El pulso no se ve en «dónde empiezan más sonidos».** El bajo va sincopado y suenan tantas cosas entre pulsos como en ellos. El pulso se decide por el cuerpo de la batería (150–400 Hz) y el compás por dónde cambian los acordes y las secciones, admitiendo que un acorde entre medio pulso antes de su compás.
+- **Las flechas** salen de la nota que *empieza* en cada tecla (antes, de la que más sonaba, y eran casi todas la misma).
+- **Los números** van por pulso del compás, el mismo siempre, pero repartidos: el pulso con más golpes graves de la canción es el 1, el siguiente el 2, el siguiente el 3. (Con «1 en el primer pulso» esta canción solo tenía cuatro unos.)
+
+Decisiones mías aquí, y lo que cuestan si están mal:
+
+| Decisión | Si está mal |
+|---|---|
+| Qué golpes son el pulso y cuál abre el compás (no puedo oírlo; la herramienta dice cuánta ventaja saca cada elección: 1,46 y 1,91, donde menos de 0,5 es dudoso) | Las teclas se sentirían «a contratiempo». Se arregla volviendo a pasar la canción con `--move 1` (medio pulso) |
+| Los números repartidos por pulso más usado, no «1 = primer pulso» | Es un cambio de unas líneas en `write_keys` |
+| No más de tres veces seguidas la misma flecha (la cuarta pasa a la siguiente) | Ídem |
+
+Sin comprobar todavía: **cómo se siente jugando con sonido** (si las teclas caen con la música, si son pocas o muchas). En el panel de pruebas solo se pudo ver que la canción carga, el combate la sigue y las teclas y las líneas de compás coinciden.
 
 ## 3. Decisiones mías, para poder probar
 

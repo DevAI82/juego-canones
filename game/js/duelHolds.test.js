@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { STEP, DUEL_UNITS, ROUND_END_TIME, buyUnit, setReady } from "./duel.js";
-import { LANES, songOf, chartOf, fightChart } from "./duelSongs.js";
+import { LANES, songOf, chartOf, fightChart, beatLines } from "./duelSongs.js";
 import { TRACKS } from "./duelTracks.js";
 import { HIT_WINDOW, RELEASE_SLACK, LEAD_IN, createMusicalDuel, stepMusicalDuel, pressKey, releaseKey, songClock } from "./duelRhythm.js";
 
@@ -230,6 +230,38 @@ test("a recorded song is its sound file and the keys written for it, played once
     assert.deepEqual(whole.starts, [0, 20, 40]);
   });
   assert.equal(songOf(90), songOf(1), "gone again");
+});
+
+test("a song's beats are even, from its first bar on, when it says no more", () => {
+  // The song written as notes: a bar every four beats, from its start.
+  const beat = songOf(1).beat;
+  const written = beatLines(1, 0, 4 * beat + 0.01);
+  assert.equal(written.length, 5);
+  assert.deepEqual(written.map((line) => line.bar), [true, false, false, false, true]);
+  assert.ok(Math.abs(written[4].t - 4 * beat) < 1e-9);
+  withTape(() => {
+    // first 0.25, a beat every 0.5 s.
+    const lines = beatLines(90, 1, 3);
+    assert.deepEqual(lines.map((line) => line.t), [1.25, 1.75, 2.25, 2.75]);
+    assert.deepEqual(lines.map((line) => line.bar), [false, false, true, false]);
+    assert.deepEqual(beatLines(90, 0, 0.2), [], "none before the first bar");
+  });
+});
+
+test("a recording whose tempo wanders gives its beats one by one", () => {
+  // (The tool's: every beat from the first bar line on, four to a bar.)
+  TRACKS[90] = { ...TAPE, beats: [0.25, 0.8, 1.35, 1.9, 2.44, 2.97, 3.5, 4.03, 4.56] };
+  try {
+    assert.deepEqual(beatLines(90, 1, 3), [
+      { t: 1.35, bar: false },
+      { t: 1.9, bar: false },
+      { t: 2.44, bar: true },
+      { t: 2.97, bar: false },
+    ]);
+    assert.deepEqual(beatLines(90, 4.5, 30), [{ t: 4.56, bar: true }], "and no more than it gives");
+  } finally {
+    delete TRACKS[90];
+  }
 });
 
 test("each round of a recorded song starts further into it", () => {
