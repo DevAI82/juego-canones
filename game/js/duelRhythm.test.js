@@ -174,7 +174,7 @@ test("what stands in front shields what stands behind", () => {
   for (let i = 0; i < 3; i++) buyUnit(s, "left", "soldier");
   const tank = buyUnit(s, "right", "tank").unit;
   const rocket = buyUnit(s, "right", "rocket").unit;
-  assert.ok(moveUnit(s, "right", tank.id, 780, 200).ok);
+  assert.ok(moveUnit(s, "right", tank.id, 780, 375).ok);
   assert.ok(moveUnit(s, "right", rocket.id, 1100, 600).ok);
   setReady(s, "left");
   setReady(s, "right");
