@@ -38,7 +38,7 @@ import {
   duelNotice,
 } from "./duelUI.js";
 import { drawDuel, BURST_TIME } from "./duelDraw.js";
-import { BOT_ACCURACY, createMusicalDuel, stepMusicalDuel, pressKey, songClock } from "./duelRhythm.js";
+import { BOT_ACCURACY, createMusicalDuel, stepMusicalDuel, pressKey, releaseKey, songClock, beginFight } from "./duelRhythm.js";
 import { drawRhythm, laneAt } from "./duelRhythmDraw.js";
 
 // Against the computer the player is always the left-hand side.
@@ -113,6 +113,8 @@ export function createDuelScreen({ ctx, shopEl, panelEl, resultEl, drawUnit, res
   // the hits and mistakes already heard
   let presses = {};
   let seenEvents = new WeakSet();
+  let fingerLane = null; // the key a finger on the track is holding down
+  let loading = false; // its song's recording hasn't come yet
 
   // The arenas' pictures, fetched when first needed.
   const pictures = new Map();
@@ -150,6 +152,8 @@ export function createDuelScreen({ ctx, shopEl, panelEl, resultEl, drawUnit, res
     recorded = false;
     presses = {};
     seenEvents = new WeakSet();
+    fingerLane = null;
+    loading = false;
     if (music) music.stop();
     hideDuelResult(resultEl);
     resetVisuals();
@@ -168,6 +172,8 @@ export function createDuelScreen({ ctx, shopEl, panelEl, resultEl, drawUnit, res
     const seed = Math.floor(Math.random() * 0x7fffffff);
     const options = { arena, seed, left: startOf(profile), right: gradeStart(grade, seed) };
     state = musical ? createMusicalDuel({ ...options, bots: { [RIVAL]: BOT_ACCURACY[grade - 1] } }) : createDuelState(options);
+    // (A recorded song is fetched while the player shops.)
+    if (musical && music) music.load(state.musical.song);
     state.paused = false;
     forget();
     picturesOf(arena);
@@ -373,15 +379,30 @@ export function createDuelScreen({ ctx, shopEl, panelEl, resultEl, drawUnit, res
     clock += dt;
     if (remote) takeNews();
     else if (running && !d.paused) {
-      stepMusicalDuel(state, dt); // (any duel: only a musical one's fight is its own)
+      // A musical duel's song plays while its fight goes on. One written as
+      // notes follows the game's time; a recorded one leads it: the fight
+      // moves on by as much as has been heard, and waits for the recording
+      // if it hasn't come yet.
+      let step = dt;
+      loading = false;
+      if (state.musical) beginFight(state);
+      if (music && state.musical && state.phase === "combat") {
+        const song = state.musical.song;
+        loading = !music.ready(song);
+        if (loading) step = 0;
+        else {
+          const heard = music.follow(song, songClock(state));
+          if (heard !== null) step = heard;
+        }
+      } else if (music) {
+        music.stop();
+      }
+      if (step > 0) stepMusicalDuel(state, step); // (any duel: only a musical one's fight is its own)
       watch();
+    } else if (music) {
+      music.stop();
     }
-    // A musical duel's song plays while its fight goes on.
-    const playing = Boolean(!remote && d.musical && d.phase === "combat" && d.musical.round === d.round);
-    if (music) {
-      if (playing && running && !d.paused) music.play(d.musical.song, songClock(d));
-      else music.stop();
-    }
+    const playing = Boolean(!remote && d.musical && d.phase === "combat");
     for (const lane of Object.keys(presses)) presses[lane].age += dt;
     if (remote ? !d.paused : running && !d.paused) {
       for (const burst of bursts) burst.age += dt;
@@ -408,7 +429,7 @@ export function createDuelScreen({ ctx, shopEl, panelEl, resultEl, drawUnit, res
       // player: the notice says so, not «PAUSA».)
       paused: Boolean(d.paused) && !(remote && (remote.net.waiting || remote.net.gone)),
     });
-    if (playing) drawRhythm(ctx, { view, side: side || PLAYER, presses, paused: Boolean(d.paused) });
+    if (playing) drawRhythm(ctx, { view, side: side || PLAYER, presses, paused: Boolean(d.paused), loading });
     updateDuelShop(shopEl, view, side || PLAYER, { watching: !side });
     // The panel gets out of the way of a unit being dragged.
     updateDuelUnitPanel(panelEl, view, side || PLAYER, drag ? null : picked());
@@ -439,6 +460,14 @@ export function createDuelScreen({ ctx, shopEl, panelEl, resultEl, drawUnit, res
     presses[lane] = { age: 0, hit: result.hit };
     if (!result.hit) playSound("error");
   }
+  // ...and let go: it matters to a long key.
+  function releaseLane(lane) {
+    const result = releaseKey(state, PLAYER, lane);
+    if (result.ok && result.held === false) {
+      presses[lane] = { age: 0, hit: false };
+      playSound("error");
+    }
+  }
 
   // A key of the keyboard goes down (`code`: the event's; `repeat`: it is
   // being held). True if it was the duel's: one of a musical duel's keys,
@@ -450,11 +479,18 @@ export function createDuelScreen({ ctx, shopEl, panelEl, resultEl, drawUnit, res
     return true;
   }
 
+  // ...and comes up.
+  function keyUp(code) {
+    const lane = KEY_LANE[code];
+    if (lane && playingKeys()) releaseLane(lane);
+  }
+
   function pointerDown(pos) {
     if (playingKeys()) {
       // A finger on the track presses its lane's key.
       const lane = laneAt(pos);
       if (lane) pressLane(lane);
+      fingerLane = lane;
       return;
     }
     if (!shopping()) return;
@@ -476,6 +512,11 @@ export function createDuelScreen({ ctx, shopEl, panelEl, resultEl, drawUnit, res
   }
 
   function pointerUp() {
+    if (fingerLane) {
+      if (playingKeys()) releaseLane(fingerLane);
+      fingerLane = null;
+      return;
+    }
     if (press && drag && shopping()) {
       const { id, x, y, ok } = drag;
       if (remote && !ok) {
@@ -530,5 +571,5 @@ export function createDuelScreen({ ctx, shopEl, panelEl, resultEl, drawUnit, res
     );
   }
 
-  return { start, mount, frame, ready, key, pointerDown, pointerMove, pointerUp, leave, renderLobby };
+  return { start, mount, frame, ready, key, keyUp, pointerDown, pointerMove, pointerUp, leave, renderLobby };
 }

@@ -3612,6 +3612,7 @@ window.addEventListener("keydown", (evt) => {
   if (PAN_KEYS.has(key)) pressedPanKeys.add(key);
 });
 window.addEventListener("keyup", (evt) => {
+  if (dueling()) duel().keyUp(evt.code); // (a musical duel's long keys)
   pressedPanKeys.delete(evt.key.toLowerCase());
 });
 

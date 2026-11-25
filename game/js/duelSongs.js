@@ -1,11 +1,17 @@
-// The musical duel's songs (docs/2026-11-25-duelo-musical-prueba.md): one
-// a league, written here as notes -- there are no sound files. A song is
-// both what is heard (duelMusic.js plays its events) and what is played:
-// the keys that fall down the screen are its own tune (chartOf).
+// The musical duel's songs (docs/2026-11-25-duelo-musical-prueba.md), one a
+// league. A song is both what is heard and what is played. It comes in one
+// of two ways:
+//   - recorded: a sound file, with the keys a tool wrote for it by
+//     listening to it (duelTracks.js);
+//   - written here as notes, for a league that has no recording:
+//     duelMusic.js plays its events with oscillators, and the keys that
+//     fall down the screen are its own tune.
 //
 // Like the duel's other core files this one knows nothing of the page or
 // of sound: it only says what happens when, in seconds from the song's
 // start.
+
+import { TRACKS } from "./duelTracks.js";
 
 // The keys of the game: the four arrows on one hand, numbers on the other,
 // as on a keyboard's arrow keys and number pad.
@@ -13,8 +19,8 @@ export const ARROWS = ["left", "down", "up", "right"];
 export const DIGITS = ["1", "2", "3"];
 export const LANES = [...ARROWS, ...DIGITS];
 
-// A fight plays its song this many times at most (duelRhythm.js then
-// settles it as a fight out of time).
+// A fight plays a written song this many times at most (duelRhythm.js then
+// settles it as a fight out of time); a recorded one, once.
 export const MAX_LOOPS = 2;
 
 const SEMITONE = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
@@ -120,7 +126,7 @@ const BEATS = 4; // a bar
 //           tune), "bass", "pad" (the chords), and the drums "dum", "tek",
 //           "ka" (no midi)
 //   keys    the notes of the tune that are played on the keyboard:
-//           [{ t, midi, first }] -- first: the first note of its bar
+//           [{ t, dur, midi, first }] -- first: the first note of its bar
 function build(id, written) {
   const beat = 60 / written.bpm;
   const events = [];
@@ -140,59 +146,88 @@ function build(id, written) {
       }
       for (const note of lead ? tune(lead) : []) {
         events.push({ t: at(note.beat), dur: note.dur * beat, voice: "lead", midi: note.midi });
-        if (section.keys !== false) keys.push({ t: at(note.beat), midi: note.midi, first: note.beat === 0 });
+        if (section.keys !== false) keys.push({ t: at(note.beat), dur: note.dur * beat, midi: note.midi, first: note.beat === 0 });
       }
       bar++;
     }
   }
   events.sort((a, b) => a.t - b.t);
-  return { id, name: written.name, bpm: written.bpm, beat, bars: bar, length: bar * BEATS * beat, events, keys };
+  return { id, name: written.name, bpm: written.bpm, beat, bars: bar, length: bar * BEATS * beat, events, keys, audio: null, first: 0, starts: [0] };
 }
 
+// A recorded song (duelTracks.js's): the same, with nothing to synthesize
+// and its sound file instead. first: s into it of the first beat of a bar.
+function recorded(id, track) {
+  const beat = 60 / track.bpm;
+  return {
+    id,
+    name: track.name,
+    bpm: track.bpm,
+    beat,
+    bars: Math.floor((track.length - track.first) / (BEATS * beat)),
+    length: track.length,
+    events: [],
+    keys: [],
+    audio: track.file,
+    first: track.first,
+    starts: track.starts && track.starts.length ? [...track.starts] : [0],
+  };
+}
+
+// What has been worked out of each song, for as long as it is the same
+// song: a recording put in duelTracks.js takes the written one's place.
 const SONGS = new Map();
-
-// The song of this league's arena; the first one for a number that has
-// none (the others are still to be written).
-export function songOf(id) {
-  const known = WRITTEN[id] ? id : 1;
-  if (!SONGS.has(known)) SONGS.set(known, build(known, WRITTEN[known]));
-  return SONGS.get(known);
+function made(id, what, make) {
+  const source = TRACKS[id] || WRITTEN[id];
+  let kept = SONGS.get(id);
+  if (!kept || kept.source !== source) SONGS.set(id, (kept = { source }));
+  if (!(what in kept)) kept[what] = make(source);
+  return kept[what];
 }
 
-// The keys of one playing of a song, in order: [{ t, lane }]. Each note of
-// the tune has its own arrow, always the same one (the notes of the song,
-// from the lowest up, take the four arrows in turn), so the hand learns the
-// tune; the note that opens a bar is a number instead, 1, 2, 3 and round
-// again -- the other hand keeps the bars.
-const CHARTS = new Map();
+// The song of this league's arena: its recording if it has one, or the
+// one written here; the first league's for a number that has neither (the
+// others are still to be made).
+export function songOf(id) {
+  const known = TRACKS[id] || WRITTEN[id] ? id : 1;
+  return made(known, "song", (source) => (source === TRACKS[known] ? recorded(known, source) : build(known, source)));
+}
+
+// The keys of one playing of a song, in order: [{ t, lane, hold }] --
+// hold: s the key is to be kept down (0: a tap).
+//
+// A recorded song's are the ones written for it. A written song's are its
+// tune: each note has its own arrow, always the same one (the notes of the
+// song, from the lowest up, take the four arrows in turn), so the hand
+// learns the tune; the note that opens a bar is a number instead, 1, 2, 3
+// and round again -- the other hand keeps the bars. A note of two beats or
+// more is held, and let go half a beat before it ends.
 export function chartOf(id) {
   const song = songOf(id);
-  if (!CHARTS.has(song.id)) {
+  return made(song.id, "chart", (source) => {
+    if (song.audio) return source.notes.map(([t, lane, hold]) => ({ t, lane, hold: hold || 0 }));
     const pitches = [...new Set(song.keys.map((k) => k.midi))].sort((a, b) => a - b);
     let opened = 0;
-    CHARTS.set(
-      song.id,
-      song.keys.map((k) => ({
-        t: k.t,
-        lane: k.first ? DIGITS[opened++ % DIGITS.length] : ARROWS[pitches.indexOf(k.midi) % ARROWS.length],
-      })),
-    );
-  }
-  return CHARTS.get(song.id);
+    return song.keys.map((k) => ({
+      t: k.t,
+      lane: k.first ? DIGITS[opened++ % DIGITS.length] : ARROWS[pitches.indexOf(k.midi) % ARROWS.length],
+      hold: k.dur >= 2 * song.beat - 1e-9 ? k.dur - song.beat / 2 : 0,
+    }));
+  });
 }
 
 // The keys of a whole fight: the song's, again each time it is played.
-// { notes, loop (s a playing lasts), length (s the fight's music lasts) }
-const FIGHTS = new Map();
+// { notes, loop (s a playing lasts), length (s the fight's music lasts),
+//   starts (s into it where a round may start) }
 export function fightChart(id) {
   const song = songOf(id);
-  if (!FIGHTS.has(song.id)) {
+  return made(song.id, "fight", () => {
     const once = chartOf(song.id);
+    const loops = song.audio ? 1 : MAX_LOOPS;
     const notes = [];
-    for (let k = 0; k < MAX_LOOPS; k++) {
-      for (const note of once) notes.push({ t: note.t + k * song.length, lane: note.lane });
+    for (let k = 0; k < loops; k++) {
+      for (const note of once) notes.push({ t: note.t + k * song.length, lane: note.lane, hold: note.hold });
     }
-    FIGHTS.set(song.id, { notes, loop: song.length, length: song.length * MAX_LOOPS });
-  }
-  return FIGHTS.get(song.id);
+    return { notes, loop: song.length, length: song.length * loops, starts: song.starts };
+  });
 }

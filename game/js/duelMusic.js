@@ -1,13 +1,15 @@
-// The musical duel's songs, heard: duelSongs.js says what sounds when, and
-// this plays it with the Web Audio API -- a reed-like lead, a bass, a soft
-// pad for the chords and a hand drum, all made of oscillators and noise.
-// No sound files, so a song is exactly as long and as fast as its notes
-// say: the keys on screen and the music can't drift apart.
+// The musical duel's songs, heard, with the Web Audio API. A song comes in
+// one of two ways (duelSongs.js):
 //
-// The fight's clock is the game's, not the sound card's (it stops with a
-// pause, or behind a menu), so the music follows the game: every frame the
-// screen says how far into the music the fight is, and the notes of the
-// next moment are handed to the browser, each at its own time.
+//   - written as notes: played here with a reed-like lead, a bass, a soft
+//     pad for the chords and a hand drum, all made of oscillators and noise.
+//     The fight's clock is the game's (it stops with a pause, or behind a
+//     menu) and the music follows it: every frame the screen says how far
+//     into the song the fight is, and the notes of the next moment are
+//     handed to the browser, each at its own time.
+//   - recorded: its sound file is played, and it is the fight that follows
+//     the music -- the screen moves the fight on by as much as has been
+//     heard since the last frame, so the keys can't drift from the beat.
 import { songOf } from "./duelSongs.js";
 
 const AHEAD = 0.3; // s of music handed over beyond the moment on screen
@@ -155,31 +157,85 @@ const VOICES = {
   ka: (ac, out, when) => stroke(ac, out, when, { type: "highpass", frequency: 6000, length: 0.035, peak: 0.09 }),
 };
 
+const TAPE_VOLUME = 0.85; // a recorded song's
+
 // audioContext(): the page's AudioContext (audio.js). audible(): whether
 // music is to be heard (the mute button, the settings' music switch): the
 // song goes on in silence otherwise, since the fight needs its time.
-export function createDuelMusic({ audioContext, audible }) {
+// fetchFile(path): a sound file's bytes (an ArrayBuffer); the page's fetch,
+// unless told.
+export function createDuelMusic({ audioContext, audible, fetchFile = (path) => fetch(path).then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(String(r.status))))) }) {
   let ac = null;
   let out = null;
+  // --- a song written as notes
   let playing = null; // the song's id
   let cursor = null; // s of the fight's music handed over so far
+  // --- a recorded song
+  const tapes = new Map(); // file -> { buffer } once decoded, { failed: true }, or { pending: true }
+  let tape = null; // what is playing: { file, source, gain, from (s into the song), at (the context's time) }
 
-  // Call it every frame of a fight that is going on. songId: duelSongs.js's;
-  // now: s into the fight's music (the song starts again when it ends).
-  function play(songId, now) {
-    try {
-      ac = audioContext();
-    } catch {
-      return; // no sound here: the fight goes on without
-    }
+  function context() {
+    ac = audioContext();
     if (!out) {
       out = ac.createGain();
       out.gain.value = 0;
       const squash = ac.createDynamicsCompressor();
       out.connect(squash).connect(ac.destination);
     }
+    return ac;
+  }
+
+  // Fetches a recorded song's file ahead of its fight (a written song needs
+  // nothing).
+  function load(songId) {
+    const { audio } = songOf(songId);
+    if (!audio || tapes.has(audio)) return;
+    tapes.set(audio, { pending: true });
+    Promise.resolve()
+      .then(() => fetchFile(audio))
+      .then((bytes) => context().decodeAudioData(bytes))
+      .then(
+        (buffer) => tapes.set(audio, { buffer }),
+        () => tapes.set(audio, { failed: true }), // the fight goes on without its music
+      );
+  }
+
+  // Whether this song's fight can start: a written song's always can; a
+  // recorded one's once its file has come (or has failed to).
+  function ready(songId) {
+    const { audio } = songOf(songId);
+    if (!audio) return true;
+    if (!tapes.has(audio)) load(songId);
+    return !tapes.get(audio).pending;
+  }
+
+  function stopTape() {
+    if (!tape) return;
+    try {
+      tape.gain.gain.setTargetAtTime(0, ac.currentTime, 0.02);
+      tape.source.stop(ac.currentTime + 0.1);
+    } catch {
+      // (already over)
+    }
+    tape = null;
+  }
+
+  function startTape(file, buffer, from) {
+    stopTape();
+    const source = ac.createBufferSource();
+    source.buffer = buffer;
+    const gain = ac.createGain();
+    gain.gain.value = audible() ? TAPE_VOLUME : 0;
+    source.connect(gain).connect(ac.destination);
+    const at = ac.currentTime + 0.03;
+    source.start(at, Math.max(0, Math.min(from, buffer.duration)));
+    tape = { file, source, gain, from, at };
+  }
+
+  // The notes of a written song from where it has been handed over to a
+  // moment beyond `now`.
+  function hand(song, now) {
     out.gain.setTargetAtTime(audible() ? VOLUME : 0, ac.currentTime, 0.02);
-    const song = songOf(songId);
     // A new fight, or one gone back to its start: from here.
     if (playing !== song.id || cursor === null || now < cursor - AHEAD - 0.1) cursor = now;
     playing = song.id;
@@ -201,11 +257,53 @@ export function createDuelMusic({ audioContext, audible }) {
     cursor = until;
   }
 
+  // Call it every frame of a fight that is going on. songId: duelSongs.js's;
+  // now: s into the song the fight is at.
+  //
+  // A written song is played from there, and null is returned: the fight
+  // moves on by the frame's own time. A recorded song leads instead: the
+  // seconds returned are how far what is being heard has got ahead of
+  // `now`, and the fight moves on by that much -- so the keys on screen
+  // keep to the music, whatever the frames do. (null too when its file
+  // could not be had: the fight goes on in silence.)
+  function follow(songId, now) {
+    const song = songOf(songId);
+    try {
+      context();
+    } catch {
+      return null; // no sound here: the fight goes on without
+    }
+    if (!song.audio) {
+      stopTape();
+      hand(song, now);
+      return null;
+    }
+    const kept = tapes.get(song.audio);
+    if (!kept || !kept.buffer) return null;
+    if (!tape || tape.file !== song.audio) {
+      startTape(song.audio, kept.buffer, now);
+      return 0;
+    }
+    tape.gain.gain.setTargetAtTime(audible() ? TAPE_VOLUME : 0, ac.currentTime, 0.02);
+    // What is heard now left the browser a moment ago.
+    const late = ac.outputLatency || ac.baseLatency || 0;
+    const heard = tape.from + (ac.currentTime - tape.at) - late;
+    const ahead = heard - now;
+    // Too far apart to catch up (the page hung, or the fight went back to
+    // an earlier moment): the recording starts again from where the fight is.
+    if (ahead > 0.5 || ahead < -0.35) {
+      startTape(song.audio, kept.buffer, now);
+      return 0;
+    }
+    return Math.max(0, Math.min(ahead, 0.25));
+  }
+
   // The fight stopped, or is over: what was handed over fades out.
   function stop() {
     cursor = null;
     if (out && ac) out.gain.setTargetAtTime(0, ac.currentTime, 0.04);
+    stopTape();
   }
 
-  return { play, stop };
+  return { load, ready, follow, stop };
 }

@@ -94,6 +94,7 @@ function box(ctx, x, y, size) {
 //   side      the player's side
 //   presses   what the player just pressed: { [lane]: { age (s), hit } }
 //   paused
+//   loading   the song's recording hasn't come yet: the fight waits for it
 // }
 export function drawRhythm(ctx, scene) {
   const { view, side } = scene;
@@ -124,9 +125,9 @@ export function drawRhythm(ctx, scene) {
     ctx.fillRect(laneX(i) - LANE / 2 + 2, TRACK.top - 14, LANE - 4, TRACK.bottom - TRACK.top + 24);
   });
   ctx.globalAlpha = 1;
-  const beat = songOf(m.song).beat;
-  for (let k = Math.max(0, Math.ceil(now / beat)); k * beat < now + APPROACH; k++) {
-    const y = keyY(k * beat, now);
+  const { beat, first } = songOf(m.song);
+  for (let k = Math.max(0, Math.ceil((now - first) / beat)); first + k * beat < now + APPROACH; k++) {
+    const y = keyY(first + k * beat, now);
     ctx.fillStyle = k % 4 === 0 ? "rgba(255, 255, 255, 0.28)" : "rgba(255, 255, 255, 0.1)";
     ctx.fillRect(TRACK.x0, y - 1, WIDTH, 2);
   }
@@ -149,24 +150,40 @@ export function drawRhythm(ctx, scene) {
     drawSign(ctx, lane, x, TRACK.line, lit > 0 ? "#ffffff" : "rgba(255, 255, 255, 0.55)");
   });
 
-  // The keys on their way down: those still to be pressed, and for a
-  // moment, greyed, the ones missed.
-  for (let i = m.from[side] || 0; i < chart.notes.length; i++) {
+  // The keys on their way down: those still to be pressed, the long ones
+  // being held (they stay on the line while their tail runs into it) and,
+  // for a moment, greyed, the ones missed. A long key has a tail as long
+  // as it is to be kept down.
+  for (let i = Math.max(0, (m.from[side] || 0) - 8); i < chart.notes.length; i++) {
     const note = chart.notes[i];
     if (note.t > now + APPROACH) break;
     const mark = marks[i];
     if (mark === 1) continue;
-    const y = keyY(note.t, now);
-    if (y > TRACK.bottom + KEY) continue;
+    const holding = mark === 3;
+    const lost = mark === 2;
+    const y = holding ? TRACK.line : keyY(note.t, now);
+    const end = keyY(note.t + note.hold, now); // where its tail ends, above it
+    if (Math.min(y, end) > TRACK.bottom + KEY) continue;
     const x = laneX(LANES.indexOf(note.lane));
-    box(ctx, x, y, KEY);
-    ctx.globalAlpha = mark === 2 ? 0.35 : 1;
-    ctx.fillStyle = mark === 2 ? "#555b66" : COLOR[note.lane];
+    ctx.globalAlpha = lost ? 0.35 : 1;
+    if (note.hold > 0 && end < y) {
+      ctx.beginPath();
+      ctx.roundRect(x - 9, end, 18, y - end, 9);
+      ctx.fillStyle = lost ? "#555b66" : COLOR[note.lane];
+      ctx.globalAlpha *= holding ? 1 : 0.7;
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = holding ? "#ffffff" : "rgba(0, 0, 0, 0.5)";
+      ctx.stroke();
+      ctx.globalAlpha = lost ? 0.35 : 1;
+    }
+    box(ctx, x, y, holding ? KEY + 6 : KEY);
+    ctx.fillStyle = lost ? "#555b66" : COLOR[note.lane];
     ctx.fill();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = "rgba(0, 0, 0, 0.55)";
+    ctx.lineWidth = holding ? 3 : 2;
+    ctx.strokeStyle = holding ? "#ffffff" : "rgba(0, 0, 0, 0.55)";
     ctx.stroke();
-    drawSign(ctx, note.lane, x, y, mark === 2 ? "#c9ccd2" : "#10141c");
+    drawSign(ctx, note.lane, x, y, lost ? "#c9ccd2" : "#10141c");
     ctx.globalAlpha = 1;
   }
   ctx.restore();
@@ -176,9 +193,14 @@ export function drawRhythm(ctx, scene) {
   ctx.shadowColor = "rgba(0, 0, 0, 0.9)";
   ctx.shadowBlur = 5;
 
-  // Before the first key: what to do.
-  const first = chart.notes[0] ? chart.notes[0].t : 0;
-  if (now < first - 0.3) {
+  // Before the round's first key: what to do.
+  const next = chart.notes[m.from[side] || 0];
+  const nothingYet = m.tally[side].hits + m.tally[side].misses === 0;
+  if (scene.loading) {
+    ctx.font = "bold 22px sans-serif";
+    ctx.fillStyle = "#ffe27a";
+    ctx.fillText("Cargando la música…", mid, TRACK.top + 150);
+  } else if (nothingYet && next && now < next.t - 0.3) {
     ctx.font = "bold 22px sans-serif";
     ctx.fillStyle = "#ffe27a";
     ctx.fillText("¡Prepárate!", mid, TRACK.top + 150);
@@ -186,7 +208,9 @@ export function drawRhythm(ctx, scene) {
     ctx.fillStyle = "#ffffff";
     ctx.fillText("Pulsa cada tecla cuando", mid, TRACK.top + 180);
     ctx.fillText("llegue a la línea de abajo", mid, TRACK.top + 202);
-    ctx.fillText("Si fallas, el rival dispara", mid, TRACK.top + 236);
+    ctx.fillText("Las que traen cola se", mid, TRACK.top + 236);
+    ctx.fillText("mantienen pulsadas", mid, TRACK.top + 258);
+    ctx.fillText("Si fallas, el rival dispara", mid, TRACK.top + 292);
   }
 
   // What each side just did, over its own army; and how it is doing.
@@ -205,7 +229,7 @@ export function drawRhythm(ctx, scene) {
     }
     // The latest thing this side did.
     const event = [...m.events].reverse().find((e) => e.side === s);
-    if (event && event.kind !== "hit" && event.age < 0.7) {
+    if (event && event.kind !== "hit" && event.kind !== "held" && event.age < 0.7) {
       const k = event.age / 0.7;
       ctx.globalAlpha = 1 - k;
       ctx.font = "bold 40px sans-serif";
@@ -220,11 +244,16 @@ export function drawRhythm(ctx, scene) {
 
   // The player's own latest key, by the line.
   const last = [...m.events].reverse().find((e) => e.side === side);
-  if (last && last.age < 0.45) {
+  const good = last && (last.kind === "hit" || last.kind === "held");
+  if ((m.held[side] || []).length > 0) {
+    ctx.font = "bold 24px sans-serif";
+    ctx.fillStyle = "#ffe27a";
+    ctx.fillText("¡MANTÉN!", mid, TRACK.line - 44);
+  } else if (last && last.age < 0.45) {
     ctx.globalAlpha = 1 - last.age / 0.45;
     ctx.font = "bold 24px sans-serif";
-    ctx.fillStyle = last.kind === "hit" ? "#7dff8e" : "#ff4d3d";
-    ctx.fillText(last.kind === "hit" ? "¡BIEN!" : "FALLO", mid, TRACK.line - 44 - 14 * (last.age / 0.45));
+    ctx.fillStyle = good ? "#7dff8e" : "#ff4d3d";
+    ctx.fillText(good ? "¡BIEN!" : last.kind === "drop" ? "¡SOLTASTE!" : "FALLO", mid, TRACK.line - 44 - 14 * (last.age / 0.45));
     ctx.globalAlpha = 1;
   }
 

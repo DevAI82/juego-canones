@@ -2,10 +2,11 @@
 // fight is played on the keyboard. Both sides shop and place their armies
 // as in any duel (duel.js); then the league's song plays (duelSongs.js) and
 // its keys -- arrows and numbers -- come down the screen for both players
-// at once. A key pressed as it crosses the line is a hit. A mistake -- a
-// key let go by, the wrong key, a key with nothing to press -- brings a
-// volley of the rival's army: one shot of each unit it has left. The round
-// is over when an army is destroyed, or the music ends.
+// at once. A key pressed as it crosses the line is a hit; a long one is
+// kept down until its end. A mistake -- a key let go by, the wrong key, a
+// key with nothing to press, a long one let go too soon -- brings a volley
+// of the rival's army: one shot of each unit it has left. The round is
+// over when an army is destroyed, or the music ends.
 //
 // Like duel.js this is the game without a screen: the duel's own state
 // with a `musical` part, actions on it, and a step that moves it on. The
@@ -30,6 +31,11 @@ import { LANES, fightChart, songOf } from "./duelSongs.js";
 // s before or after its moment that a key still counts. (A first figure,
 // wide on purpose for the first league: to be set from how people play.)
 export const HIT_WINDOW = 0.18;
+// s before its end that a long key may be let go.
+export const RELEASE_SLACK = 0.2;
+// A round that starts part-way into its song (a recorded one: each round
+// starts further in) asks for no key in its first seconds.
+export const LEAD_IN = 2;
 // s an army takes to load again after a volley: somebody hammering the
 // keys, or pressing the right one just after the wrong one, pays once.
 export const VOLLEY_RELOAD = 0.5;
@@ -45,8 +51,9 @@ const EVENT_SHOWN = 0.8; // s a hit or a mistake stays in musical.events for the
 const MAX_TICKS = 8; // a call (as duel.js's)
 
 const WAITING = 0;
-const HIT = 1;
+const HIT = 1; // (or, in a round that starts part-way, before its start)
 const MISSED = 2;
+const HOLDING = 3; // a long key, down
 
 const refuse = (reason) => ({ ok: false, reason });
 const both = (value) => ({ left: value(), right: value() });
@@ -66,35 +73,61 @@ export function createMusicalDuel({ song, bots = {}, ...options } = {}) {
     round: 0, // the round whose fight the rest is of
     time: 0, // s of music played in it
     // For each side, each key of the fight (duelSongs.js's fightChart): 0
-    // still to come, 1 hit, 2 missed. `from`: the first one still to come.
+    // still to come, 1 hit, 2 missed, 3 a long one being held. `from`: the
+    // first one still to come. `held`: the ones being held.
     marks: both(() => []),
     from: both(() => 0),
+    held: both(() => []),
     owed: both(() => false), // a mistake made since the last tick
     reload: both(() => 0), // s until this side's army can fire again
     tally: both(() => ({ hits: 0, misses: 0, streak: 0 })),
-    events: [], // for the screen: { side, kind: "hit" | "miss" | "wrong", lane, age }
+    // For the screen: { side, kind, lane, age } -- kind: "hit", "held" (a
+    // long key kept to its end), or a mistake: "miss" (let go by), "wrong"
+    // (not the key asked for), "drop" (a long key let go too soon).
+    events: [],
   };
   return state;
 }
 
-// s into its fight's music a musical duel is, to the frame.
+// s into its song a musical duel's fight is, to the frame. (A fight about
+// to start is where its round starts.)
 export function songClock(state) {
-  return state.musical.time + state.acc;
+  const m = state.musical;
+  if (state.phase === "combat" && m.round !== state.round) return roundStart(fightChart(m.song), state.round);
+  return m.time + state.acc;
 }
 
 const fighting = (state) => Boolean(state.musical) && state.phase === "combat" && state.musical.round === state.round;
 
+// Where in its song this round's fight starts: each round at the song's
+// next start, round again when they run out.
+export function roundStart(chart, round) {
+  return chart.starts[(Math.max(1, round) - 1) % chart.starts.length];
+}
+
 function begin(state) {
   const m = state.musical;
-  const keys = fightChart(m.song).notes.length;
+  const chart = fightChart(m.song);
+  const start = roundStart(chart, state.round);
+  // From the top every key is asked for; part-way in, the ones from a
+  // moment after the start on.
+  const first = start > 0 ? chart.notes.findIndex((note) => note.t >= start + LEAD_IN) : 0;
+  const asked = first < 0 ? chart.notes.length : first;
   m.round = state.round;
-  m.time = 0;
-  m.marks = both(() => new Array(keys).fill(WAITING));
-  m.from = both(() => 0);
+  m.time = start;
+  m.marks = both(() => chart.notes.map((_, i) => (i < asked ? HIT : WAITING)));
+  m.from = both(() => asked);
+  m.held = both(() => []);
   m.owed = both(() => false);
   m.reload = both(() => 0);
   m.tally = both(() => ({ hits: 0, misses: 0, streak: 0 }));
   m.events = [];
+}
+
+// Sets up the fight of a round that has just started, if it isn't yet (the
+// first tick does it too): the screen wants it before any time passes.
+export function beginFight(state) {
+  if (state.musical && state.phase === "combat" && state.musical.round !== state.round) begin(state);
 }
 
 function hit(m, side, lane) {
@@ -130,15 +163,44 @@ export function pressKey(state, side, lane) {
   for (let i = m.from[side]; i < notes.length && notes[i].t <= now + HIT_WINDOW; i++) {
     if (marks[i] !== WAITING || notes[i].t < now - HIT_WINDOW) continue;
     if (notes[i].lane === lane) {
-      marks[i] = HIT;
       hit(m, side, lane);
-      return { ok: true, hit: true, off: now - notes[i].t };
+      if (notes[i].hold > 0) {
+        // A long key: it is to stay down until its end (releaseKey).
+        marks[i] = HOLDING;
+        m.held[side].push(i);
+      } else {
+        marks[i] = HIT;
+      }
+      return { ok: true, hit: true, off: now - notes[i].t, hold: notes[i].hold };
     }
     if (wrong < 0) wrong = i;
   }
   if (wrong >= 0) marks[wrong] = MISSED;
   mistake(m, side, lane, "wrong");
   return { ok: true, hit: false };
+}
+
+// This side lets go of a key. { ok: true, held } -- held: true, a long key
+// was kept to its end (or near enough); false, it was let go too soon, a
+// mistake; null, the key was holding nothing.
+export function releaseKey(state, side, lane) {
+  if (!fighting(state)) return refuse("phase");
+  if (!SIDES.includes(side)) return refuse("side");
+  if (!LANES.includes(lane)) return refuse("lane");
+  const m = state.musical;
+  const notes = fightChart(m.song).notes;
+  const at = m.held[side].findIndex((i) => notes[i].lane === lane);
+  if (at < 0) return { ok: true, held: null };
+  const [index] = m.held[side].splice(at, 1);
+  const note = notes[index];
+  if (songClock(state) >= note.t + note.hold - RELEASE_SLACK) {
+    m.marks[side][index] = HIT;
+    m.events.push({ side, kind: "held", lane, age: 0 });
+    return { ok: true, held: true };
+  }
+  m.marks[side][index] = MISSED;
+  mistake(m, side, lane, "drop");
+  return { ok: true, held: false };
 }
 
 // ------------------------------------------------------------ the fight
@@ -195,8 +257,15 @@ function tick(state) {
   m.time += STEP;
 
   // 1. The keys whose moment has come: the computer plays its own as they
-  // reach the line; a player's are missed once out of reach.
+  // reach the line (a long one as any other); a player's are missed once
+  // out of reach, and the long ones still down at their end are done.
   for (const side of SIDES) {
+    m.held[side] = m.held[side].filter((i) => {
+      if (m.time < notes[i].t + notes[i].hold - 1e-9) return true;
+      m.marks[side][i] = HIT;
+      m.events.push({ side, kind: "held", lane: notes[i].lane, age: 0 });
+      return false;
+    });
     const marks = m.marks[side];
     const accuracy = m.bots[side];
     const due = accuracy === undefined ? m.time - HIT_WINDOW : m.time + 1e-9;
