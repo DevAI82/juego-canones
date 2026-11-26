@@ -397,10 +397,14 @@ export function drawDuelBursts(ctx, scene) {
   for (const burst of scene.bursts) drawBurst(ctx, burst);
 }
 
-export function drawDuelOver(ctx, scene) {
-  drawHud(ctx, scene);
+export function drawDuelBanner(ctx, scene) {
   const banner = scene.view.phase === "roundEnd" ? roundBanner(scene.view, scene.side) : null;
   if (banner) drawBanner(ctx, banner);
+}
+
+export function drawDuelOver(ctx, scene) {
+  drawHud(ctx, scene);
+  drawDuelBanner(ctx, scene);
 }
 
 export function drawDuel(ctx, scene) {

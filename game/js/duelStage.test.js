@@ -5,8 +5,8 @@ import { STEP, buyUnit, setReady, duelView } from "./duel.js";
 import { fightChart } from "./duelSongs.js";
 import { TRACKS } from "./duelTracks.js";
 import { HIT_WINDOW, createMusicalDuel, stepMusicalDuel, songClock } from "./duelRhythm.js";
-import { TRACK } from "./duelRhythmDraw.js";
-import { STAGE, stagePlaces, stagedView, armyHealth, danger } from "./duelStage.js";
+import { TRACK, scaleAtY } from "./duelRhythmDraw.js";
+import { STAGE, PHOTO_SLOTS, BUY_PHOTO_SLOTS, stagePlaces, stagePhotoPlaces, stagedView, armyHealth, danger } from "./duelStage.js";
 
 // (As the musical duel's other tests: on the song written as notes.)
 for (const id of Object.keys(TRACKS)) delete TRACKS[id];
@@ -118,4 +118,41 @@ test("the danger an army is in: none with half its health, all of it with none",
   assert.equal(danger(0.5), 0);
   assert.ok(danger(0.4) > 0 && danger(0.4) < danger(0.2));
   assert.equal(danger(0), 1);
+});
+
+test("photorealistic 2.5D stage places up to 12 units per side mirrored, clear of the perspective highway and stable on death", () => {
+  assert.equal(PHOTO_SLOTS.length, 12);
+  assert.equal(BUY_PHOTO_SLOTS.length, 12);
+  const s = fight({ left: TWELVE, right: TWELVE });
+  const places = stagePhotoPlaces(s.units);
+  assert.equal(places.size, s.units.length);
+  const mid = ARENA.width / 2;
+  for (const u of s.units) {
+    const p = places.get(u.id);
+    const railHalf = 316 * scaleAtY(p.y);
+    if (u.side === "left") {
+      assert.ok(p.x > 60 && p.x < mid - railHalf - 16, `left ${u.type} clear of rail (${p.x} vs ${mid - railHalf})`);
+    } else {
+      assert.ok(p.x < ARENA.width - 60 && p.x > mid + railHalf + 16, `right ${u.type} clear of rail (${p.x} vs ${mid + railHalf})`);
+    }
+    assert.ok(p.y >= 240 && p.y <= 600, `grounded y (${p.y})`);
+    assert.ok(p.scale >= 0.44 && p.scale <= 1.05);
+  }
+  for (const a of s.units) {
+    for (const b of s.units) {
+      if (a.id >= b.id || a.side !== b.side) continue;
+      const pa = places.get(a.id);
+      const pb = places.get(b.id);
+      assert.ok(Math.hypot(pa.x - pb.x, pa.y - pb.y) >= 56, `${a.id} and ${b.id} too close in 2.5D stage`);
+    }
+  }
+  // Buy phase slots stay strictly above the bottom hangar dock (y <= 540).
+  const buyPlaces = stagePhotoPlaces(s.units, { buyPhase: true });
+  for (const p of buyPlaces.values()) {
+    assert.ok(p.y >= 240 && p.y <= 540, `buy slot y (${p.y}) clear of top HUD & bottom hangar`);
+  }
+  // Fallen units never cause survivors to jump slots.
+  firstMiss(s);
+  const after = stagePhotoPlaces(s.units);
+  for (const u of s.units) assert.deepEqual(after.get(u.id), places.get(u.id));
 });

@@ -2189,6 +2189,7 @@ function duel() {
       ctx,
       shopEl: attackShopEl,
       panelEl: unitUpgradeEl,
+      hangarEl: document.getElementById("musical-hangar"),
       resultEl: document.getElementById("duel-result"),
       drawUnit: drawSpriteUnit,
       resetVisuals: () => unitVisuals.keepOnly([]),
@@ -2196,6 +2197,7 @@ function duel() {
       showToast,
       music: createDuelMusic({ audioContext, audible: musicAudible }),
       onRematch: (arena, options = {}) => startNewGame(arena, { mode: "duel", ...options }),
+      onLayoutChange: resizeGame,
       onExit: () => {
         duel().leave();
         backToNewGame();
@@ -2211,7 +2213,7 @@ function showDuelPanels() {
   duel().mount();
   duelPanels = true;
   buildMenuEl.classList.add("hidden");
-  attackShopEl.classList.remove("hidden");
+  attackShopEl.classList.toggle("hidden", Boolean(state && state.musical));
   unitUpgradeEl.classList.add("hidden");
   skipWaveBtn.classList.add("hidden");
   upgradePanelEl.classList.add("hidden");
@@ -2278,9 +2280,9 @@ function enterGame() {
     // Non-RTS modes: restore standard TD / Attack HUD controls!
     if (dueling()) {
       // The duel's shop, with its «¡Listo!», is in the attack's element;
-      // the unit panel comes and goes with what is picked (duelScreen.js).
+      // the musical duel replaces it with its own 3D photorealistic hangar.
       buildMenuEl.classList.add("hidden");
-      attackShopEl.classList.remove("hidden");
+      attackShopEl.classList.toggle("hidden", Boolean(state && state.musical));
       unitUpgradeEl.classList.add("hidden");
       skipWaveBtn.classList.add("hidden");
     } else if (state && state.mode === "attack") {

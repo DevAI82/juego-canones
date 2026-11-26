@@ -7,7 +7,7 @@ import { fightChart } from "./duelSongs.js";
 import { TRACKS } from "./duelTracks.js";
 import { HIT_WINDOW, createMusicalDuel, stepMusicalDuel, pressKey, songClock } from "./duelRhythm.js";
 import { duelHud, duelHint } from "./duelUI.js";
-import { TRACK, APPROACH, laneX, keyY, laneAt, cheer, shakeOf, approachOf } from "./duelRhythmDraw.js";
+import { TRACK, APPROACH, laneX, laneXAt, scaleAtY, perspectiveAt, keyY, laneAt, cheer, shakeOf, approachOf } from "./duelRhythmDraw.js";
 
 // (As the musical duel's other tests: on the song written as notes.)
 for (const id of Object.keys(TRACKS)) delete TRACKS[id];
@@ -30,14 +30,22 @@ test("a key comes in at the top and is on the line at its moment", () => {
   assert.ok(keyY(10, 10.1) > TRACK.line, "and goes on down once past it");
 });
 
-test("a finger on a lane presses its key", () => {
+test("a finger on a lane presses its key (in 3D perspective)", () => {
   LANES.forEach((lane, i) => {
     assert.equal(laneAt({ x: laneX(i), y: TRACK.line }), lane);
-    assert.equal(laneAt({ x: laneX(i) + 12, y: TRACK.top + 5 }), lane);
+    assert.equal(laneAt({ x: laneXAt(i, TRACK.top + 5) + 4, y: TRACK.top + 5 }), lane);
+    assert.equal(laneAt({ x: laneXAt(i, 360), y: 360 }), lane);
   });
   assert.equal(laneAt({ x: TRACK.x0 - 30, y: TRACK.line }), null);
   assert.equal(laneAt({ x: (laneX(3) + laneX(4)) / 2, y: TRACK.line }), null, "between the two hands");
   assert.equal(laneAt({ x: laneX(0), y: TRACK.top - 20 }), null);
+  // Perspective narrows smoothly toward the horizon and expands to 1.0 at the hit line.
+  assert.ok(scaleAtY(TRACK.top) < 0.5 && scaleAtY(TRACK.top) > 0.3);
+  assert.ok(Math.abs(scaleAtY(TRACK.line) - 1) < 1e-9);
+  assert.ok(scaleAtY(TRACK.bottom) > 1);
+  assert.ok(laneXAt(0, TRACK.top) > laneX(0) && laneXAt(6, TRACK.top) < laneX(6), "lanes converge toward vanishing point");
+  assert.equal(perspectiveAt(0).y, TRACK.top);
+  assert.equal(perspectiveAt(1).y, TRACK.line);
 });
 
 test("the HUD and the hint say it is a musical duel", () => {

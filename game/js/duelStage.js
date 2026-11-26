@@ -9,7 +9,7 @@
 // first) nearest the track. It is looks only: the fight goes by where the
 // units really stand (duelRhythm.js).
 //
-// No page here: duelScreen.js draws from it.
+// No page here: duelScreen.js and duelMusicStage.js draw from it.
 import { ARENA } from "./duelArenas.js";
 import { SIDES } from "./duel.js";
 
@@ -83,3 +83,74 @@ export function armyHealth(view, side) {
 // How much danger an army with that health is in, 0 to 1: none while it
 // has half of it; the screen reddens its side by this.
 export const danger = (health) => Math.max(0, Math.min(1, (0.5 - health) / 0.5));
+
+// ------------------------------------------------------------ Photorealistic 2.5D stage slots
+
+// Curated ground-plane contact points on the 1200x750 photorealistic arena
+// (defined for the LEFT side; mirrored horizontally via ARENA.width - x for
+// the RIGHT side). Ordered from heroic foreground front-line back to deep
+// reserve so heavy front-line tanks loom large in front while artillery,
+// buggies, motorcycles and soldiers stagger cleanly into perspective depth
+// beside the central rhythm highway.
+export const PHOTO_SLOTS = [
+  { x: 146, y: 548, scale: 0.98 }, // 0: Hero foreground front-line (cleanly on sand above front barrier!)
+  { x: 178, y: 446, scale: 0.85 }, // 1: Second front-line heavy
+  { x: 258, y: 508, scale: 0.78 }, // 2: Inner foreground flank (right beside highway)
+  { x: 218, y: 360, scale: 0.73 }, // 3: Mid-back artillery / heavy
+  { x: 300, y: 410, scale: 0.68 }, // 4: Inner mid flank
+  { x: 88,  y: 404, scale: 0.72 }, // 5: Outer mid flank
+  { x: 274, y: 310, scale: 0.60 }, // 6: Mid-deep center
+  { x: 350, y: 338, scale: 0.56 }, // 7: Inner deep flank
+  { x: 132, y: 318, scale: 0.60 }, // 8: Outer deep flank
+  { x: 330, y: 262, scale: 0.48 }, // 9: Far rear inner
+  { x: 226, y: 260, scale: 0.48 }, // 10: Far rear center
+  { x: 116, y: 264, scale: 0.46 }, // 11: Far rear outer
+];
+
+// Slightly lifted/centered ground-plane slots for the Buy Phase hangar view
+// so all 12 purchased units stand proudly above the bottom hangar deck
+// (y <= 538) and stay cleanly clear of the top HUD and right upgrade drawer.
+export const BUY_PHOTO_SLOTS = [
+  { x: 195, y: 530, scale: 0.96 }, // 0: Hero foreground
+  { x: 245, y: 438, scale: 0.84 }, // 1: Second front-line
+  { x: 372, y: 500, scale: 0.82 }, // 2: Inner foreground
+  { x: 295, y: 356, scale: 0.72 }, // 3: Mid-back
+  { x: 422, y: 410, scale: 0.70 }, // 4: Inner mid
+  { x: 112, y: 426, scale: 0.76 }, // 5: Outer mid
+  { x: 358, y: 306, scale: 0.60 }, // 6: Mid-deep
+  { x: 468, y: 334, scale: 0.58 }, // 7: Inner deep
+  { x: 162, y: 332, scale: 0.62 }, // 8: Outer deep
+  { x: 432, y: 266, scale: 0.50 }, // 9: Far rear inner
+  { x: 302, y: 264, scale: 0.50 }, // 10: Far rear center
+  { x: 164, y: 268, scale: 0.48 }, // 11: Far rear outer
+];
+
+// Weight used to give heavy armored hulls (tanks, rockets) the heroic front-outer
+// slots cleanly while preserving exact deterministic slot stability during combat.
+const HERO_WEIGHT = { tank: 0, rocket: 1, buggy: 2, motorcycle: 3, soldier: 4 };
+
+// Each unit's photorealistic 2.5D stage placement:
+// Map of id -> { x, y, scale, side, slotIndex }.
+// Fallen units stay counted so survivors never shift when one falls.
+export function stagePhotoPlaces(units, { buyPhase = false } = {}) {
+  const places = new Map();
+  const table = buyPhase ? BUY_PHOTO_SLOTS : PHOTO_SLOTS;
+  const mid = ARENA.width / 2;
+  for (const side of SIDES) {
+    const army = units
+      .filter((u) => u.side === side)
+      .sort((a, b) => {
+        // In buy phase & combat, sort tanks/heavies to the iconic heroic front slots first,
+        // breaking ties by actual front-line closeness and id (never by alive status!).
+        const hw = (HERO_WEIGHT[a.type] ?? 5) - (HERO_WEIGHT[b.type] ?? 5);
+        if (hw !== 0) return hw;
+        return Math.abs(a.x - mid) - Math.abs(b.x - mid) || a.y - b.y || a.id - b.id;
+      });
+    army.forEach((u, i) => {
+      const slot = table[i % table.length];
+      const x = side === "left" ? slot.x : ARENA.width - slot.x;
+      places.set(u.id, { x, y: slot.y, scale: slot.scale, side, slotIndex: i });
+    });
+  }
+  return places;
+}

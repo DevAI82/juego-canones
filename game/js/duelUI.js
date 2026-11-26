@@ -27,6 +27,13 @@ const UNIT_ICON = {
   tank: "assets/units3d/tank_icon.webp",
   rocket: "assets/units3d/rocket_icon.webp",
 };
+const MUSICAL_UNIT_PHOTO = {
+  soldier: "assets/duel_music/unit_soldier_blue.webp",
+  motorcycle: "assets/duel_music/unit_motorcycle_blue.webp",
+  buggy: "assets/duel_music/unit_buggy_blue.webp",
+  tank: "assets/duel_music/unit_tank_blue.webp",
+  rocket: "assets/duel_music/unit_rocket_blue.webp",
+};
 const SKILL_ICON = {
   damage: "assets/ui_icon_damage.png",
   range: "assets/ui_icon_range.png",
@@ -429,4 +436,161 @@ export function showDuelResult(container, result, { onRematch, onExit }) {
 export function hideDuelResult(container) {
   container.classList.add("hidden");
   container.innerHTML = "";
+}
+
+// ------------------------------------------------------------ Musical Duel 3D Hangar UI
+// Photorealistic 3D metallic vehicle selection & upgrade overlay matching the
+// Musical Duel's 3D perspective combat HUD and receptor dock aesthetic.
+// Shown ONLY during Musical Duel `phase === "buy"`; regular Duel keeps its
+// original left sidebar untouched.
+
+export function mountMusicalHangar(container, { onBuy, onReady, onUpgrade, onSell, onClose }) {
+  container.innerHTML = "";
+
+  // 1. Floating 3D Metallic Upgrade & Sell Drawer (right side of battlefield)
+  const drawer = el("div", "mh-drawer hidden");
+  const drawerHead = el("div", "mh-drawer-head");
+  const thumb = document.createElement("img");
+  thumb.className = "mh-drawer-thumb";
+  thumb.alt = "";
+  const titleWrap = el("div", "mh-drawer-title-wrap");
+  const nameEl = el("div", "mh-drawer-name");
+  const subEl = el("div", "mh-drawer-sub", "MEJORAS PARA TODAS LAS UNIDADES DE ESTE TIPO");
+  titleWrap.append(nameEl, subEl);
+  const sellBtn = el("button", "mh-sell-btn");
+  sellBtn.addEventListener("click", () => onSell());
+  const closeBtn = el("button", "mh-close-btn", "✕");
+  closeBtn.title = "Cerrar";
+  closeBtn.addEventListener("click", () => onClose());
+  drawerHead.append(thumb, titleWrap, sellBtn, closeBtn);
+
+  const skillGrid = el("div", "mh-skill-grid");
+  const skillRefs = {};
+  for (const skill of SKILLS) {
+    const card = el("div", "mh-skill-card");
+    const head = el("div", "mh-skill-head");
+    const icon = document.createElement("img");
+    icon.className = "mh-skill-icon";
+    icon.src = SKILL_ICON[skill];
+    icon.alt = "";
+    const sName = el("span", "mh-skill-name", SKILL_NAMES[skill]);
+    head.append(icon, sName);
+
+    const pips = el("div", "mh-skill-pips");
+    const pipEls = [];
+    for (let i = 0; i < DUEL_UPGRADES[skill].levels; i++) {
+      const pip = el("span", "mh-skill-pip");
+      pips.appendChild(pip);
+      pipEls.push(pip);
+    }
+    const levelEl = el("div", "mh-skill-lvl");
+    const btn = el("button", "mh-skill-btn");
+    btn.addEventListener("click", () => onUpgrade(skill));
+    card.append(head, pips, levelEl, btn);
+    skillGrid.appendChild(card);
+    skillRefs[skill] = { levelEl, btn, pipEls };
+  }
+  drawer.append(drawerHead, skillGrid);
+
+  // 2. Subtle tactical hint strip floating above the hangar dock
+  const hintEl = el("div", "mh-hint");
+
+  // 3. Bottom 3D Metallic Tactical Hangar Deck (5 photorealistic unit cards + Launch button)
+  const dock = el("div", "mh-dock");
+  const cardsWrap = el("div", "mh-cards");
+  const cardRefs = {};
+  for (const type of DUEL_ORDER) {
+    const card = el("button", "mh-card");
+    const countBadge = el("span", "mh-card-count hidden");
+    const starBadge = el("span", "mh-card-stars hidden");
+    const stage = el("div", "mh-card-stage");
+    const img = document.createElement("img");
+    img.className = "mh-card-img";
+    img.src = MUSICAL_UNIT_PHOTO[type];
+    img.alt = UNIT_NAMES[type];
+    stage.appendChild(img);
+    const meta = el("div", "mh-card-meta");
+    const unitName = el("span", "mh-card-name", UNIT_NAMES[type]);
+    const priceEl = el("span", "mh-card-price", `$${DUEL_UNITS[type].price}`);
+    meta.append(unitName, priceEl);
+    card.append(countBadge, starBadge, stage, meta);
+    card.addEventListener("click", () => onBuy(type));
+    cardsWrap.appendChild(card);
+    cardRefs[type] = { card, countBadge, starBadge };
+  }
+
+  const launchWrap = el("div", "mh-launch-wrap");
+  const statusEl = el("div", "mh-status");
+  const readyBtn = el("button", "mh-ready-btn");
+  readyBtn.title = "Empezar el combate musical";
+  readyBtn.addEventListener("click", () => onReady());
+  launchWrap.append(statusEl, readyBtn);
+
+  dock.append(cardsWrap, launchWrap);
+  container.append(drawer, hintEl, dock);
+  container._musicalHangar = {
+    drawer,
+    thumb,
+    nameEl,
+    sellBtn,
+    skillRefs,
+    hintEl,
+    cardRefs,
+    statusEl,
+    readyBtn,
+  };
+}
+
+export function updateMusicalHangar(container, view, side, unit) {
+  const ui = container._musicalHangar;
+  if (!ui) return;
+  const mine = view.sides[side];
+  const counts = {};
+  for (const u of mine.army) counts[u.type] = (counts[u.type] || 0) + 1;
+
+  for (const entry of duelShopEntries(view, side)) {
+    const { card, countBadge, starBadge } = ui.cardRefs[entry.type];
+    card.disabled = entry.disabled;
+    card.title = entry.title;
+    card.classList.toggle("selected-type", Boolean(unit && unit.type === entry.type));
+    const n = counts[entry.type] || 0;
+    countBadge.textContent = `×${n}`;
+    countBadge.classList.toggle("hidden", n === 0);
+    starBadge.textContent = `★${entry.stars}`;
+    starBadge.classList.toggle("hidden", entry.stars === 0);
+  }
+
+  ui.statusEl.textContent = `$${Math.floor(mine.money)}  ·  ${mine.army.length}/${UNIT_CAP}`;
+  const shut = Boolean(shopShut(view, side));
+  ui.readyBtn.disabled = shut || mine.army.length === 0;
+  ui.readyBtn.innerHTML =
+    view.phase === "buy" && mine.ready
+      ? `<span class="mh-ready-main">✔ LISTO</span><span class="mh-ready-sub">Esperando…</span>`
+      : `<span class="mh-ready-main">▶ ¡A LA BATALLA!</span><span class="mh-ready-sub">Empezar la música</span>`;
+  ui.readyBtn.classList.toggle("pulse", !ui.readyBtn.disabled && mine.army.length > 0);
+
+  // Subtle guidance pill
+  if (mine.army.length === 0) {
+    ui.hintEl.textContent = "Elige vehículos en el hangar para desplegar tu ejército en la arena";
+  } else if (!unit) {
+    ui.hintEl.textContent = "Toca cualquier vehículo en la arena para mejorarlo o venderlo · Pulsa «¡A la batalla!» cuando estés listo";
+  } else {
+    ui.hintEl.textContent = "Las mejoras se aplican a todas las unidades del mismo tipo durante todo el duelo";
+  }
+
+  // Upgrade & sell drawer
+  ui.drawer.classList.toggle("hidden", !unit);
+  if (!unit) return;
+  ui.thumb.src = MUSICAL_UNIT_PHOTO[unit.type];
+  ui.nameEl.textContent = UNIT_NAMES[unit.type].toUpperCase();
+  ui.sellBtn.textContent = `Vender +$${duelRefund(view, unit)}`;
+  ui.sellBtn.disabled = shut;
+  for (const row of duelUpgradeRows(view, side, unit.type)) {
+    const { levelEl, btn, pipEls } = ui.skillRefs[row.skill];
+    levelEl.textContent = `Nv. ${row.level}/${row.levels}`;
+    btn.textContent = row.maxed ? "MÁX" : `$${row.cost}`;
+    btn.disabled = !row.affordable;
+    btn.classList.toggle("maxed", row.maxed);
+    pipEls.forEach((pip, i) => pip.classList.toggle("filled", i < row.level));
+  }
 }
