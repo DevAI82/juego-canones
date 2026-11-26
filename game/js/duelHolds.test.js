@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { STEP, DUEL_UNITS, ROUND_END_TIME, buyUnit, setReady } from "./duel.js";
 import { LANES, songOf, chartOf, fightChart, beatLines, songList, drawSong } from "./duelSongs.js";
 import { TRACKS } from "./duelTracks.js";
-import { HIT_WINDOW, RELEASE_SLACK, LEAD_IN, createMusicalDuel, stepMusicalDuel, pressKey, releaseKey, songClock } from "./duelRhythm.js";
+import { HIT_WINDOW, RELEASE_SLACK, LEAD_IN, streakPower, createMusicalDuel, stepMusicalDuel, pressKey, releaseKey, songClock } from "./duelRhythm.js";
 
 // The long presses are tried on the song written as notes: the recordings
 // made since (duelTracks.js) are put aside, and back for their own test.
@@ -100,12 +100,15 @@ test("a long key let go too soon is a mistake", () => {
   const released = releaseKey(s, "left", note.lane);
   assert.deepEqual(released, { ok: true, held: false });
   assert.equal(s.musical.marks.left[index], 2);
+  // (The rival, who misses nothing, is on a streak by now: its volley is
+  // as heavy as that makes it.)
+  const volley = DUEL_UNITS.tank.damage * streakPower(s.musical.tally.right.streak);
   stepMusicalDuel(s, STEP);
-  assert.ok(Math.abs(hurt(s, "left") - DUEL_UNITS.tank.damage) < 1e-9, "the rival's volley");
+  assert.ok(Math.abs(hurt(s, "left") - volley) < 1e-9, "the rival's volley");
   assert.equal(s.musical.tally.left.streak, 0);
   // Once, not again when its time ends.
   run(s, note.hold);
-  assert.ok(Math.abs(hurt(s, "left") - DUEL_UNITS.tank.damage) < 1e-9);
+  assert.ok(Math.abs(hurt(s, "left") - volley) < 1e-9);
 });
 
 test("a long key may be let go a little before its end", () => {
@@ -124,10 +127,11 @@ test("a long key never pressed is one mistake, not two", () => {
   const s = fight();
   const index = firstHold();
   const note = playUpTo(s, index);
+  const volley = DUEL_UNITS.tank.damage * streakPower(s.musical.tally.right.streak);
   run(s, HIT_WINDOW + 3 * STEP);
   assert.equal(s.musical.marks.left[index], 2);
   const once = hurt(s, "left");
-  assert.ok(Math.abs(once - DUEL_UNITS.tank.damage) < 1e-9);
+  assert.ok(Math.abs(once - volley) < 1e-9);
   run(s, note.hold);
   assert.equal(hurt(s, "left"), once);
 });

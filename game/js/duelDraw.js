@@ -154,6 +154,19 @@ function drawArmies(ctx, scene) {
   for (const u of [...mine].sort((a, b) => a.y - b.y)) drawUnit(ctx, scene, u, side);
 }
 
+// Draws about a unit that is shown bigger than it stands (u.scale: a
+// musical duel's stage, duelStage.js), so much bigger.
+function sized(ctx, u, draw) {
+  const k = u.scale || 1;
+  if (k === 1) return draw();
+  ctx.save();
+  ctx.translate(u.x, u.y);
+  ctx.scale(k, k);
+  ctx.translate(-u.x, -u.y);
+  draw();
+  ctx.restore();
+}
+
 // The fight: what is left of the fallen, then the living, each with its
 // ring and its health.
 function drawFight(ctx, scene) {
@@ -169,9 +182,9 @@ function drawFight(ctx, scene) {
   }
   const living = view.units.filter((u) => u.alive);
   const byId = new Map(living.map((u) => [u.id, u]));
-  for (const u of living) drawRing(ctx, u, u.side);
-  for (const u of [...living].sort((a, b) => a.y - b.y)) drawUnit(ctx, scene, u, u.side, byId.get(u.targetId) || null);
-  for (const u of living) drawBar(ctx, u, u.side);
+  for (const u of living) sized(ctx, u, () => drawRing(ctx, u, u.side));
+  for (const u of [...living].sort((a, b) => a.y - b.y)) sized(ctx, u, () => drawUnit(ctx, scene, u, u.side, byId.get(u.targetId) || null));
+  for (const u of living) sized(ctx, u, () => drawBar(ctx, u, u.side));
 }
 
 // ------------------------------------------------------------ shots and blasts
@@ -350,7 +363,12 @@ function drawBanner(ctx, banner) {
 //   scorch, bursts           marks of the fallen: [{ x, y, r }], [{ x, y, age, size }]
 //   paused
 // }
-export function drawDuel(ctx, scene) {
+//
+// drawDuel paints the whole of it. Its parts, in order, are there for a
+// screen that puts something between them (a musical duel's track of keys
+// goes over the armies and under the shots): the ground with the armies,
+// the shots, the fallen's blasts, and what is written over everything.
+export function drawDuelGround(ctx, scene) {
   const { view } = scene;
   const arena = arenaOf(view.arena);
   if (scene.map) ctx.drawImage(scene.map, 0, 0, ARENA.width, ARENA.height);
@@ -368,13 +386,28 @@ export function drawDuel(ctx, scene) {
     ctx.drawImage(scene.foreground, 0, 0, ARENA.width, ARENA.height);
     ctx.restore();
   }
-  // Over the foreground: a shot behind a palisade still shows.
-  for (const shot of view.shots) drawShot(ctx, shot);
-  for (const burst of scene.bursts) drawBurst(ctx, burst);
+}
 
+// Over the foreground: a shot behind a palisade still shows.
+export function drawDuelShots(ctx, scene) {
+  for (const shot of scene.view.shots) drawShot(ctx, shot);
+}
+
+export function drawDuelBursts(ctx, scene) {
+  for (const burst of scene.bursts) drawBurst(ctx, burst);
+}
+
+export function drawDuelOver(ctx, scene) {
   drawHud(ctx, scene);
-  const banner = view.phase === "roundEnd" ? roundBanner(view, scene.side) : null;
+  const banner = scene.view.phase === "roundEnd" ? roundBanner(scene.view, scene.side) : null;
   if (banner) drawBanner(ctx, banner);
+}
+
+export function drawDuel(ctx, scene) {
+  drawDuelGround(ctx, scene);
+  drawDuelShots(ctx, scene);
+  drawDuelBursts(ctx, scene);
+  drawDuelOver(ctx, scene);
 }
 
 export { BURST_TIME };

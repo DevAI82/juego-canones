@@ -59,6 +59,35 @@ Decisiones mías aquí, y lo que cuestan si están mal:
 
 Sin comprobar todavía: **cómo se siente jugando con sonido** (si las teclas caen con la música, si son pocas o muchas). En el panel de pruebas solo se pudo ver que la canción carga, el combate la sigue y las teclas y las líneas de compás coinciden.
 
+## 2 quater. Seis canciones más y la pantalla del combate (2026-11-26)
+
+**Canciones.** El usuario pidió cinco canciones más «para que cuando le demos a revancha o partida nueva se genere otra canción», de dos estilos (electrónico; piano y batería). Hizo cuatro en Suno, dos de ellas en dos versiones, y están las seis: Circuito Arcade, Neón a Tope, Neón a Tope II, Jefe Final, Jefe Final II y Teclas en Guerra (falta «Martillos y Baquetas», que no llegó a la carpeta). Con la primera son siete. Ya no van una por liga: **cada duelo musical coge otra**, de una ronda barajada, y ninguna se repite hasta que han sonado todas.
+
+La herramienta aprendió dos cosas más: hay canciones cuyo tempo sube poco a poco todo el rato (las dos «Neón»: de 120 a 126), y la sigue; y hay canciones que empiezan sin ritmo («Jefe Final»), donde ya no pone teclas, y el primer asalto arranca un par de compases antes de la primera tecla.
+
+**Pantalla del combate** (lo que pidió el usuario, y cómo quedó):
+
+| Pidió | Quedó |
+|---|---|
+| El carril de teclas el doble de grande | 600 px de ancho (antes 300) y casi todo el alto |
+| Vehículos más grandes, y que se vea el daño que haces y recibes | Los ejércitos se muestran **a los lados del carril**, entre 1,5 y 2 veces más grandes, en filas; los de delante (a los que se dispara primero), junto al carril. Cada ejército tiene su barra de vida arriba. Es solo cómo se ve: el combate sigue contando por dónde se colocaron |
+| Que los cañonazos se vean por encima del carril | Cada disparo es un proyectil del color de su ejército que cruza el carril y estalla en su objetivo; el lado que lo recibe se ilumina |
+| «BIEN» en cada acierto, «MUY BIEN» al pasar de 5, y EXCELLENT, SUPER!, QUÉ PASADA para animar | Por racha: ¡BIEN! (1–4), ¡MUY BIEN! (5–9), SUPER! (11–14), EXCELLENT! (15–24), ¡QUÉ PASADA! (26 o más) |
+| A los 10 y a los 25 seguidos, GREAT o WELL DONE, y que la ráfaga quite más vida | GREAT! a los 10 y WELL DONE! a los 25, en grande; desde 10 seguidos las descargas de ese ejército pegan ×1,5 y desde 25 ×2, mientras dure la racha |
+| En un fallo, FALLO en rojo y que tiemble la pantalla en rojo | ¡FALLO! en grande sobre el carril, la pantalla tiembla 0,4 s y se tiñe de rojo |
+| Con poca vida, tu lado de la pantalla en tonos rojos, y lo mismo el otro | Cada lado enrojece desde que su ejército baja de la mitad de la vida, más cuanto menos queda, y late cuando queda menos de un cuarto |
+| Con la racha, las teclas un poco más rápidas cada vez | Cada acierto seguido les quita un 1,5 % del tiempo de bajada (de 1,8 s hasta un mínimo de 1,05 s); llegan a la línea en su momento de siempre, solo se ven más tarde |
+
+Decisiones mías aquí:
+
+| Decisión | Si está mal |
+|---|---|
+| Los números ×1,5 y ×2, y que el premio dure mientras dura la racha (no una descarga de regalo al llegar a 10) | Dos números en `duelRhythm.js` (`STREAK_POWER`) |
+| El premio de la racha vale también para la máquina | Una condición en `volley` |
+| Qué palabra va con cada racha | La función `cheer` de `duelRhythmDraw.js` |
+| Las teclas más rápidas son solo cómo se ven: el margen para acertar no cambia | `approachOf`; estrechar el margen sería otra regla |
+| Los ejércitos se recolocan en filas al empezar el combate (no se ven donde se pusieron) | `duelStage.js`; con el carril a 600 px no caben donde están |
+
 ## 3. Decisiones mías, para poder probar
 
 | Decisión | Por qué | Si no es lo que se quería |

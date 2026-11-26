@@ -37,9 +37,10 @@ import {
   duelResult,
   duelNotice,
 } from "./duelUI.js";
-import { drawDuel, BURST_TIME } from "./duelDraw.js";
+import { drawDuelGround, drawDuelShots, drawDuelBursts, drawDuelOver, BURST_TIME } from "./duelDraw.js";
 import { BOT_ACCURACY, createMusicalDuel, stepMusicalDuel, pressKey, releaseKey, songClock, beginFight } from "./duelRhythm.js";
-import { drawRhythm, laneAt } from "./duelRhythmDraw.js";
+import { APPROACH, approachOf, shakeOf, drawRhythm, drawRhythmSides, drawVolleys, drawRhythmFlash, laneAt } from "./duelRhythmDraw.js";
+import { stagePlaces, stagedView } from "./duelStage.js";
 import { drawSong } from "./duelSongs.js";
 
 // Against the computer the player is always the left-hand side.
@@ -115,6 +116,7 @@ export function createDuelScreen({ ctx, shopEl, panelEl, resultEl, drawUnit, res
   let presses = {};
   let seenEvents = new WeakSet();
   let fingerLane = null; // the key a finger on the track is holding down
+  let approach = APPROACH; // s the keys are taking down the track, as drawn
   let loading = false; // its song's recording hasn't come yet
 
   // The arenas' pictures, fetched when first needed.
@@ -295,8 +297,11 @@ export function createDuelScreen({ ctx, shopEl, panelEl, resultEl, drawUnit, res
     for (const u of d.units) {
       if (u.alive || fallen.has(u.id)) continue;
       fallen.add(u.id);
-      bursts.push({ x: u.x, y: u.y, age: 0, size: u.radius * 2.2 });
-      scorch.push({ x: u.x, y: u.y, r: u.radius });
+      // (A musical duel's armies are shown beside the track, bigger.)
+      const shown = d.musical ? stagePlaces(d.units).get(u.id) : null;
+      const at = shown || { x: u.x, y: u.y, scale: 1 };
+      bursts.push({ x: at.x, y: at.y, age: 0, size: u.radius * 2.2 * at.scale });
+      scorch.push({ x: at.x, y: at.y, r: u.radius * at.scale });
       playSound("cannon");
     }
   }
@@ -421,8 +426,11 @@ export function createDuelScreen({ ctx, shopEl, panelEl, resultEl, drawUnit, res
     const side = mySide();
     const view = remote ? between() : seen();
     const art = picturesOf(d.arena);
-    drawDuel(ctx, {
-      view,
+    // A musical duel's fight has its own stage: the armies beside the
+    // track of keys (and they stay there while the round's result shows).
+    const staged = Boolean(!remote && d.musical && (d.phase === "combat" || d.phase === "roundEnd"));
+    const scene = {
+      view: staged ? stagedView(view) : view,
       side: side || PLAYER,
       watching: !side,
       map: loaded(art.map),
@@ -436,8 +444,32 @@ export function createDuelScreen({ ctx, shopEl, panelEl, resultEl, drawUnit, res
       // (On the home network a duel is also stopped while it waits for a
       // player: the notice says so, not «PAUSA».)
       paused: Boolean(d.paused) && !(remote && (remote.net.waiting || remote.net.gone)),
-    });
-    if (playing) drawRhythm(ctx, { view, side: side || PLAYER, presses, paused: Boolean(d.paused), loading });
+    };
+    if (playing) {
+      // The keys come faster as the player's streak grows: eased, so that
+      // they don't jump when it does (or when it is lost).
+      const pace = approachOf(d.musical.tally[scene.side].streak);
+      approach += (pace - approach) * Math.min(1, dt * 4);
+      const rhythm = { view: scene.view, side: scene.side, presses, loading, approach };
+      // The player's mistake shakes all of it.
+      const shake = shakeOf(d, scene.side);
+      ctx.save();
+      ctx.translate(shake.x, shake.y);
+      drawDuelGround(ctx, scene);
+      drawRhythmSides(ctx, rhythm);
+      drawRhythm(ctx, rhythm);
+      drawVolleys(ctx, rhythm);
+      drawDuelBursts(ctx, scene);
+      drawDuelOver(ctx, scene);
+      ctx.restore();
+      drawRhythmFlash(ctx, shake);
+    } else {
+      approach = APPROACH;
+      drawDuelGround(ctx, scene);
+      drawDuelShots(ctx, scene);
+      drawDuelBursts(ctx, scene);
+      drawDuelOver(ctx, scene);
+    }
     updateDuelShop(shopEl, view, side || PLAYER, { watching: !side });
     // The panel gets out of the way of a unit being dragged.
     updateDuelUnitPanel(panelEl, view, side || PLAYER, drag ? null : picked());

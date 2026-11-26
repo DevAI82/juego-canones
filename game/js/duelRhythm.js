@@ -55,6 +55,19 @@ const HIT = 1; // (or, in a round that starts part-way, before its start)
 const MISSED = 2;
 const HOLDING = 3; // a long key, down
 
+// So many hits in a row make an army's volleys so many times heavier, the
+// longest streak first: playing well is how an army hits hard. (The user's,
+// 2026-11-26: "at 10 in a row, or 25, the volley should take more life";
+// the figures are mine.)
+export const STREAK_POWER = [
+  [25, 2],
+  [10, 1.5],
+];
+export function streakPower(streak) {
+  const reached = STREAK_POWER.find(([from]) => streak >= from);
+  return reached ? reached[1] : 1;
+}
+
 const refuse = (reason) => ({ ok: false, reason });
 const both = (value) => ({ left: value(), right: value() });
 
@@ -133,7 +146,8 @@ export function beginFight(state) {
 function hit(m, side, lane) {
   m.tally[side].hits += 1;
   m.tally[side].streak += 1;
-  m.events.push({ side, kind: "hit", lane, age: 0 });
+  // (streak: how many in a row this one makes -- the screen cheers by it.)
+  m.events.push({ side, kind: "hit", lane, age: 0, streak: m.tally[side].streak });
 }
 
 function mistake(m, side, lane, kind) {
@@ -227,8 +241,9 @@ function volley(state, side, hits) {
   };
   for (const u of shooters) {
     const target = targets.find((v) => left.get(v) > 1e-9) || targets[0];
-    // A gun that shoots faster puts more into a volley.
-    const amount = u.damage * (DUEL_UNITS[u.type].cooldown / u.cooldown) * VOLLEY_POWER;
+    // A gun that shoots faster puts more into a volley, and so does an
+    // army whose player is on a streak.
+    const amount = u.damage * (DUEL_UNITS[u.type].cooldown / u.cooldown) * VOLLEY_POWER * streakPower(state.musical.tally[side].streak);
     take(u, target, amount);
     const splash = DUEL_UNITS[u.type].splash;
     if (splash) {
@@ -239,7 +254,8 @@ function volley(state, side, hits) {
     u.targetId = target.id;
     u.aim = Math.atan2(target.y - u.y, target.x - u.x);
     u.angle = u.aim;
-    state.shots.push({ from: { x: u.x, y: u.y }, to: { x: target.x, y: target.y }, type: u.type, side, age: 0 });
+    // (fromId, toId: the screen shows the armies elsewhere than they stand.)
+    state.shots.push({ from: { x: u.x, y: u.y }, to: { x: target.x, y: target.y }, type: u.type, side, age: 0, fromId: u.id, toId: target.id });
   }
 }
 

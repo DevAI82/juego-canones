@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { STEP, DUEL_UNITS, LIGHT_VS_ARMOR, ROUND_END_TIME, buyUnit, moveUnit, upgradeUnit, setReady, stepDuel, createDuelState } from "./duel.js";
 import { fightChart } from "./duelSongs.js";
 import { TRACKS } from "./duelTracks.js";
-import { HIT_WINDOW, VOLLEY_RELOAD, createMusicalDuel, stepMusicalDuel, pressKey, songClock } from "./duelRhythm.js";
+import { HIT_WINDOW, VOLLEY_RELOAD, STREAK_POWER, streakPower, createMusicalDuel, stepMusicalDuel, pressKey, songClock } from "./duelRhythm.js";
 
 // These tests are about the song written as notes: a recording made for
 // its league since (duelTracks.js) is put aside while they run.
@@ -270,4 +270,60 @@ test("a long freeze doesn't play the music it missed", () => {
   const s = fight({ bots: { left: 1, right: 1 } });
   stepMusicalDuel(s, 30);
   assert.ok(songClock(s) < 1);
+});
+
+// ---------------------------------------------------------------- streaks
+
+test("a hit says how many in a row it makes; a mistake starts the count again", () => {
+  const s = fight();
+  const all = notes();
+  for (let i = 0; i < 3; i++) {
+    runTo(s, all[i].t);
+    assert.equal(pressKey(s, "left", all[i].lane).hit, true);
+    const said = s.musical.events.filter((e) => e.side === "left" && e.kind === "hit").at(-1);
+    assert.equal(said.streak, i + 1);
+  }
+  runTo(s, all[3].t + HIT_WINDOW + 3 * STEP); // the fourth goes by
+  assert.equal(s.musical.tally.left.streak, 0);
+  runTo(s, all[4].t);
+  pressKey(s, "left", all[4].lane);
+  assert.equal(s.musical.events.filter((e) => e.side === "left" && e.kind === "hit").at(-1).streak, 1);
+});
+
+test("ten hits in a row, and twenty-five, make an army's volleys heavier", () => {
+  assert.equal(streakPower(0), 1);
+  assert.equal(streakPower(9), 1);
+  assert.ok(streakPower(10) > 1);
+  assert.equal(streakPower(24), streakPower(10));
+  assert.ok(streakPower(25) > streakPower(10));
+  assert.equal(streakPower(400), streakPower(25));
+  assert.deepEqual(STREAK_POWER.map(([streak]) => streak), [25, 10]);
+});
+
+test("a volley is as heavy as its army's streak makes it", () => {
+  // The left side has hit so many in a row when the right lets a key go by.
+  const lost = (streak) => {
+    const s = fight();
+    runTo(s, notes()[0].t);
+    assert.equal(pressKey(s, "left", notes()[0].lane).hit, true);
+    s.musical.tally.left.streak = streak;
+    run(s, HIT_WINDOW + 3 * STEP);
+    return whole(s, "right") - health(s, "right");
+  };
+  assert.ok(Math.abs(lost(1) - DUEL_UNITS.tank.damage) < 1e-9);
+  assert.ok(Math.abs(lost(10) - DUEL_UNITS.tank.damage * streakPower(10)) < 1e-9);
+  assert.ok(Math.abs(lost(25) - DUEL_UNITS.tank.damage * streakPower(25)) < 1e-9);
+});
+
+test("a shot says which unit fired it and which it was for", () => {
+  const s = fight({ left: ["tank"], right: ["soldier", "soldier"], bots: { left: 1 } });
+  runTo(s, notes()[0].t + HIT_WINDOW + 3 * STEP);
+  assert.equal(s.shots.length, 1);
+  const [shot] = s.shots;
+  const shooter = s.units.find((u) => u.id === shot.fromId);
+  const target = s.units.find((u) => u.id === shot.toId);
+  assert.equal(shooter.side, "left");
+  assert.equal(target.side, "right");
+  assert.deepEqual(shot.from, { x: shooter.x, y: shooter.y });
+  assert.deepEqual(shot.to, { x: target.x, y: target.y });
 });
