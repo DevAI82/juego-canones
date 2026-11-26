@@ -98,15 +98,18 @@ test("it starts easy and gets harder: the first level has no carrying, the last 
   assert.ok(mean(0) < mean(2) && mean(2) < mean(QUIZ_LEVELS - 1));
 });
 
-test("a round is played to its song: from one of the song's starts, for a minute and a half at most, with time for it", () => {
+test("a round lasts three minutes at most, from one of its song's starts -- a different one each round", () => {
+  assert.equal(QUIZ_ROUND_TIME, 180, "the user's: up to three minutes");
   for (const song of songList()) {
     const chart = fightChart(song);
+    const starts = new Set();
     for (let round = 1; round <= 5; round++) {
       const span = quizSpan(song, round);
       assert.ok(chart.starts.includes(span.start), `song ${song}, round ${round}: starts at ${span.start}`);
-      assert.ok(span.end <= chart.length + 1e-9 && span.end - span.start <= QUIZ_ROUND_TIME + 1e-9);
-      const most = Math.min(QUIZ_ROUND_TIME, chart.length - chart.starts[0]);
-      assert.ok(span.end - span.start >= Math.min(60, most) - 1e-9, `song ${song}, round ${round}: ${span.end - span.start} s`);
+      // (The song is shorter than that as often as not: it plays round again under the round.)
+      assert.ok(Math.abs(span.end - span.start - QUIZ_ROUND_TIME) < 1e-9);
+      starts.add(span.start);
     }
+    assert.equal(starts.size, Math.min(5, chart.starts.length));
   }
 });

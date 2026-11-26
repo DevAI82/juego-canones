@@ -49,13 +49,26 @@ export const VOLLEY_RELOAD = 0.5;
 // Times a unit's shot, in a volley. (A first figure: with 1, an army of
 // the first round stands some ten volleys of one like it.)
 export const VOLLEY_POWER = 1;
-// Times a unit's shot, again, in a Duelo Matemático: a question takes ten
-// times as long as a key, so a mistake costs somewhat more. (A first
-// figure: an army stands six or seven mistakes against one like it, and
-// three against one that is its match -- at 2.5 a tank fell to a rocket
-// truck's first volley, which is no game for a child. A round that nobody
-// loses so goes to its time, and to whoever has more army left.)
-export const QUIZ_VOLLEY = 1.5;
+// A Duelo Matemático's volleys (the user's, 2026-11-27: "if you are on a
+// streak it should fire, and if you fail you get shot at; set the damage
+// so that a round lasts two or three minutes -- shorter for somebody who
+// fails a lot -- and no shot kills the army at once"). Times a unit's shot:
+//   - a mistake's, the rival's army's: an army stands some eight from one
+//     like it, and three from one that is its match (rocket trucks on
+//     tanks: a third of the army a mistake, the worst there is);
+//   - a right answer's, one's own army's, once its player has so many in
+//     a row: lighter, and no more often than the army reloads, however
+//     fast its player answers -- so a grown-up's army fires hardly more
+//     often than a child's; what a grown-up has over a child is not
+//     failing.
+// Set with simulated rounds (tools/duel/quiz_rounds.mjs, which prints
+// them): two children who answer alike, 154 s a round, two in three ended
+// by an army destroyed; a grown-up against a child, 93 s; somebody who
+// answers nothing, 104 s.
+export const QUIZ_VOLLEY = 1.6;
+export const QUIZ_STREAK_FROM = 3;
+export const QUIZ_STREAK_VOLLEY = 1;
+export const QUIZ_STREAK_RELOAD = 8;
 // How often the computer hits a key, by its league's grade (the first one
 // first). First figures: nobody has played against them yet.
 export const BOT_ACCURACY = [0.72, 0.8, 0.86, 0.91, 0.95, 0.98];
@@ -133,8 +146,12 @@ export function createMusicalDuel({ song, bots = {}, slack = 0, quiz = false, ..
     // questions it has been asked this round, the last one the one to
     // answer -- { n, level, open (s into the song it starts coming down),
     // t (s it reaches the line) }; marks[side] says what became of each.
+    // shoots: a side's right answer on a streak, since the last tick: its
+    // army fires. loaded: s until that army can fire so again.
     state.musical.quiz = { seed: state.rng };
     state.musical.asks = both(() => []);
+    state.musical.shoots = both(() => false);
+    state.musical.loaded = both(() => 0);
   }
   return state;
 }
@@ -218,6 +235,8 @@ function beginQuiz(state) {
   m.tally = both(() => ({ hits: 0, misses: 0, streak: 0 }));
   m.events = [];
   m.asks = both(() => []);
+  m.shoots = both(() => false);
+  m.loaded = both(() => 0);
   for (const side of SIDES) ask(state, side, span.start + QUIZ_FIRST);
 }
 
@@ -247,6 +266,8 @@ function settleAsk(state, side, kind, lane, now) {
   if (kind === "hit") {
     m.marks[side][index] = HIT;
     hit(m, side, lane);
+    // On a streak, its army fires.
+    if (m.tally[side].streak >= QUIZ_STREAK_FROM) m.shoots[side] = true;
   } else {
     m.marks[side][index] = MISSED;
     mistake(m, side, lane, kind);
@@ -391,8 +412,8 @@ function inFront(a, b) {
 // This side's army fires: each unit it has left, one shot. Every shot goes
 // to the first enemy in front that the shots before it won't have
 // destroyed already. The hits are added to `hits`, to land with the
-// tick's others.
-function volley(state, side, hits) {
+// tick's others. `power`: times a unit's shot.
+function volley(state, side, hits, power = VOLLEY_POWER) {
   const shooters = state.units.filter((u) => u.alive && u.side === side).sort((a, b) => a.slot - b.slot);
   const targets = state.units.filter((u) => u.alive && u.side !== side).sort(inFront);
   if (shooters.length === 0 || targets.length === 0) return;
@@ -405,7 +426,6 @@ function volley(state, side, hits) {
     const target = targets.find((v) => left.get(v) > 1e-9) || targets[0];
     // A gun that shoots faster puts more into a volley, and so does an
     // army whose player is on a streak.
-    const power = VOLLEY_POWER * (state.musical.quiz ? QUIZ_VOLLEY : 1);
     const amount = u.damage * (DUEL_UNITS[u.type].cooldown / u.cooldown) * power * streakPower(state.musical.tally[side].streak);
     take(u, target, amount);
     const splash = DUEL_UNITS[u.type].splash;
@@ -472,18 +492,25 @@ function tick(state) {
   const end = m.quiz ? quizKeys(state) : songKeys(state);
 
   // 2. A side that made a mistake takes the other army's volley, if that
-  // army is loaded. Both volleys are worked out before either lands.
+  // army is loaded; and in a Duelo Matemático an army whose player gave a
+  // right answer on a streak fires too, if it has loaded again since its
+  // last such volley. All volleys are worked out before any lands.
   const hits = [];
   for (const side of SIDES) {
     m.reload[side] = Math.max(0, m.reload[side] - STEP);
+    if (m.quiz) m.loaded[side] = Math.max(0, m.loaded[side] - STEP);
   }
   for (const side of SIDES) {
     const rival = otherSide(side);
-    if (m.owed[side] && m.reload[rival] <= 1e-9) {
-      volley(state, rival, hits);
-      m.reload[rival] = VOLLEY_RELOAD;
+    const punishes = m.owed[rival] && m.reload[side] <= 1e-9;
+    const rewards = Boolean(m.quiz) && m.shoots[side] && m.loaded[side] <= 1e-9;
+    if (punishes || rewards) {
+      volley(state, side, hits, VOLLEY_POWER * (!m.quiz ? 1 : punishes ? QUIZ_VOLLEY : QUIZ_STREAK_VOLLEY));
+      if (punishes) m.reload[side] = VOLLEY_RELOAD;
+      if (rewards) m.loaded[side] = QUIZ_STREAK_RELOAD;
     }
-    m.owed[side] = false;
+    m.owed[rival] = false;
+    if (m.quiz) m.shoots[side] = false;
   }
   for (const landed of hits) landHit(state, landed);
 

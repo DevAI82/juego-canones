@@ -90,7 +90,7 @@ export function mirrored(view) {
           owed: across(m.owed),
           reload: across(m.reload),
           tally: across(m.tally),
-          ...(m.asks ? { asks: across(m.asks) } : {}),
+          ...(m.asks ? { asks: across(m.asks), shoots: across(m.shoots), loaded: across(m.loaded) } : {}),
           events: m.events.map((event) => ({ ...event, side: OTHER[event.side] || event.side })),
         }
       : m,

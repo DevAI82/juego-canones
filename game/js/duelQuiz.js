@@ -37,9 +37,10 @@ export const quizTime = (level) => TIME[Math.max(0, Math.min(TIME.length - 1, le
 export const QUIZ_BREAK = 1.4;
 // s into a round before its first question.
 export const QUIZ_FIRST = 3;
-// s a round lasts at most (or its song's end, if that comes first).
-export const QUIZ_ROUND_TIME = 90;
-const ROUND_LEAST = 60; // s of song a round wants ahead of where it starts
+// s a round lasts at most (the user's, 2026-11-27: "up to three minutes").
+// Most songs are shorter: the song plays round again under the round
+// (duelMusic.js).
+export const QUIZ_ROUND_TIME = 180;
 
 // A small generator of numbers from a seed (mulberry32), so a question is
 // the same wherever it is worked out: the server and both browsers.
@@ -179,14 +180,11 @@ export function quizQuestion(seed, round, n, level) {
   return MADE.get(key);
 }
 
-// When a round is played, by its song's time (the song plays under it):
-// { start, end } -- from one of the song's own starts, a different one
-// each round among those with enough song ahead, for QUIZ_ROUND_TIME at
-// most.
+// When a round is played, by its song's time (the song plays under it,
+// and round again when it ends): { start, end } -- from one of the song's
+// own starts, a different one each round, for QUIZ_ROUND_TIME.
 export function quizSpan(songId, round) {
-  const chart = fightChart(songId);
-  const roomy = chart.starts.filter((start) => chart.length - start >= ROUND_LEAST);
-  const from = roomy.length ? roomy : [chart.starts[0]];
-  const start = from[(Math.max(1, round) - 1) % from.length];
-  return { start, end: Math.min(chart.length, start + QUIZ_ROUND_TIME) };
+  const { starts } = fightChart(songId);
+  const start = starts[(Math.max(1, round) - 1) % starts.length];
+  return { start, end: start + QUIZ_ROUND_TIME };
 }

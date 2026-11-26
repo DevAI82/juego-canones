@@ -3,7 +3,19 @@ import assert from "node:assert/strict";
 import { STEP, buyUnit, setReady } from "./duel.js";
 import { TRACKS } from "./duelTracks.js";
 import { QUIZ_LANES, QUIZ_BREAK, QUIZ_FIRST, quizLevel, quizTime, quizQuestion, quizSpan } from "./duelQuiz.js";
-import { MARK, QUIZ_VOLLEY, createMusicalDuel, stepMusicalDuel, pressKey, releaseKey, songClock, questionOf } from "./duelRhythm.js";
+import {
+  MARK,
+  QUIZ_VOLLEY,
+  QUIZ_STREAK_FROM,
+  QUIZ_STREAK_VOLLEY,
+  QUIZ_STREAK_RELOAD,
+  createMusicalDuel,
+  stepMusicalDuel,
+  pressKey,
+  releaseKey,
+  songClock,
+  questionOf,
+} from "./duelRhythm.js";
 
 // (As the musical duel's tests: on the song written as notes.)
 for (const id of Object.keys(TRACKS)) delete TRACKS[id];
@@ -83,7 +95,7 @@ test("the right answer is a hit, and the next question comes after a moment", ()
   assert.equal(m.marks.right[0], MARK.WAITING);
 });
 
-test("a wrong answer is a mistake: the rival's volley, heavier than one for a key of a song", () => {
+test("a wrong answer is a mistake: the rival's volley, a measured one", () => {
   const s = quiz();
   const m = s.musical;
   runTo(s, m.asks.left[0].open + 1);
@@ -165,7 +177,8 @@ test("the computer answers in its own time, right as often as its league says", 
     // Not at once, and not at the last moment.
     for (const ask of always.musical.asks[side]) assert.ok(ask.answer > ask.open + 1 && ask.answer < ask.t - 1);
   }
-  assert.equal(health(always, "left"), whole(always, "left"));
+  // (Neither made a mistake; each one's streak fired at the other all the same.)
+  assert.ok(health(always, "left") < whole(always, "left") && health(always, "right") < whole(always, "right"));
   const never = quiz({ left: STURDY, right: STURDY, bots: { left: 1, right: 0 } });
   run(never, 25);
   assert.ok(never.musical.tally.right.misses >= 2);
@@ -176,16 +189,18 @@ test("the computer answers in its own time, right as often as its league says", 
 });
 
 test("a round is over when an army is destroyed or its time is up, and the next has other questions", () => {
-  const s = quiz({ bots: { left: 1, right: 1 } });
+  const s = quiz({ left: STURDY, right: ["tank"], bots: { left: 1, right: 1 } });
   const m = s.musical;
   const span = quizSpan(m.song, 1);
   run(s, 10);
   assert.ok(Math.abs(s.clock - (span.end - songClock(s))) < 2 * STEP, "the clock is what is left of the round");
-  for (let i = 0; i < 1e5 && s.phase === "combat"; i++) stepMusicalDuel(s, STEP);
+  // (On to the round's last seconds.)
+  m.time = span.end - 1;
+  for (let i = 0; i < 1e4 && s.phase === "combat"; i++) stepMusicalDuel(s, STEP);
   assert.equal(s.phase, "roundEnd");
-  assert.ok(m.time >= span.end - 2 * STEP, "nobody made a mistake: it went to its time");
+  assert.equal(s.lastRound.reason, "time");
+  assert.equal(s.lastRound.winner, "left", "the army with more left");
   assert.ok(m.asks.left.every((ask) => ask.open < span.end));
-  const first = questionOf(m, m.asks.left[0]).text;
   // On to the second round.
   for (let i = 0; i < 1e5 && s.phase !== "buy"; i++) stepMusicalDuel(s, STEP);
   setReady(s, "left");
@@ -197,7 +212,6 @@ test("a round is over when an army is destroyed or its time is up, and the next 
   assert.equal(m.asks.left[0].level, 0);
   const texts = (round) => Array.from({ length: 6 }, (_, n) => quizQuestion(m.quiz.seed, round, n, 0).text).join();
   assert.notEqual(texts(1), texts(2));
-  assert.equal(typeof first, "string");
   // A wiped army ends it at once.
   const quick = quiz({ left: ["soldier"], right: STURDY, bots: { right: 1 } });
   runTo(quick, quick.musical.asks.left[0].open + 0.5);
@@ -205,6 +219,76 @@ test("a round is over when an army is destroyed or its time is up, and the next 
   for (let i = 0; i < 3; i++) stepMusicalDuel(quick, STEP);
   assert.equal(quick.phase === "roundEnd" || quick.phase === "over", true);
   assert.equal(quick.lastRound.winner, "right");
+});
+
+// (The user's, 2026-11-27: "if you are on a streak I think it should fire,
+// and if you fail you get shot at -- but set the damage so that a round can
+// last two or three minutes, and no shot kills the army at once".)
+test("on a streak a right answer fires one's own army: from the third in a row, a lighter volley than a mistake's", () => {
+  const s = quiz({ left: STURDY, right: STURDY, bots: { right: 1 } });
+  const m = s.musical;
+  // (The computer's own streak fires too: its volleys are left out of the
+  // count by looking at the right-hand army only.)
+  const answer = () => {
+    runTo(s, current(s, "left").open + 0.3);
+    const before = health(s, "right");
+    assert.equal(pressKey(s, "left", right(s, "left")).hit, true);
+    for (let i = 0; i < 3; i++) stepMusicalDuel(s, STEP);
+    return before - health(s, "right");
+  };
+  for (let k = 1; k < QUIZ_STREAK_FROM; k++) assert.equal(answer(), 0, `the ${k}th in a row: no shot yet`);
+  const streak = answer();
+  assert.ok(streak > 0, `the ${QUIZ_STREAK_FROM}rd in a row fires`);
+  // What a mistake's volley of the same army takes, to compare.
+  const twin = quiz({ left: STURDY, right: STURDY, bots: { left: 1 } });
+  runTo(twin, current(twin, "right").open + 0.3);
+  pressKey(twin, "right", wrong(twin, "right"));
+  for (let i = 0; i < 3; i++) stepMusicalDuel(twin, STEP);
+  const mistake = whole(twin, "right") - health(twin, "right");
+  assert.ok(Math.abs(streak / mistake - QUIZ_STREAK_VOLLEY / QUIZ_VOLLEY) < 1e-6, `${streak} against a mistake's ${mistake}`);
+  assert.ok(QUIZ_STREAK_VOLLEY < QUIZ_VOLLEY, "a mistake costs more than a right answer takes");
+});
+
+test("an army on a streak fires no more often than it reloads, however fast its player answers", () => {
+  const s = quiz({ left: STURDY, right: STURDY, bots: { right: 1 } });
+  const shots = [];
+  let last = health(s, "right");
+  const from = songClock(s);
+  // Twenty right answers, each as soon as its question comes.
+  for (let k = 0; k < 20; k++) {
+    runTo(s, current(s, "left").open + 0.1);
+    assert.equal(pressKey(s, "left", right(s, "left")).hit, true);
+    for (let i = 0; i < 3; i++) stepMusicalDuel(s, STEP);
+    if (health(s, "right") < last - 1e-9) shots.push(songClock(s));
+    last = health(s, "right");
+  }
+  assert.ok(shots.length >= 3, `${shots.length} volleys in ${songClock(s) - from} s`);
+  for (let i = 1; i < shots.length; i++) assert.ok(shots[i] - shots[i - 1] >= QUIZ_STREAK_RELOAD - 0.2, `volleys ${shots[i] - shots[i - 1]} s apart`);
+  assert.ok(shots.length < 10, "not one a right answer");
+});
+
+test("no volley takes an army at once, and a round between two who play alike lasts minutes", () => {
+  // An army and its match (rocket trucks against tanks): one mistake.
+  const s = quiz({ left: ["tank", "tank"], right: ["rocket", "soldier", "soldier", "soldier"], bots: { right: 1 } });
+  runTo(s, current(s, "left").open + 0.3);
+  pressKey(s, "left", wrong(s, "left"));
+  for (let i = 0; i < 3; i++) stepMusicalDuel(s, STEP);
+  const left = health(s, "left") / whole(s, "left");
+  assert.ok(left > 0.6 && left < 1, `${Math.round(left * 100)} % left after one mistake`);
+  // Two computers of the first league, the same army each: most rounds go past two minutes.
+  let long = 0;
+  for (let seed = 1; seed <= 12; seed++) {
+    const duel = quiz({ left: ["tank", "tank"], right: ["tank", "tank"], bots: { left: 0.72, right: 0.72 }, seed });
+    const start = songClock(duel);
+    let end = start;
+    for (let i = 0; i < 1e5 && duel.phase === "combat"; i++) {
+      end = songClock(duel);
+      stepMusicalDuel(duel, STEP);
+    }
+    if (end - start >= 100) long += 1;
+    assert.ok(end - start >= 45, `seed ${seed}: over in ${Math.round(end - start)} s`);
+  }
+  assert.ok(long >= 8, `${long} of 12 rounds lasted 100 s or more`);
 });
 
 test("on the home network an answer says when it was given, and has time to arrive", () => {

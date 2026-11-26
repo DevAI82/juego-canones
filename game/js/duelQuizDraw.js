@@ -7,7 +7,7 @@
 //
 // No page here: duelScreen.js hands it the context and what to draw.
 import { ARENA } from "./duelArenas.js";
-import { MARK, songClock, questionOf } from "./duelRhythm.js";
+import { MARK, QUIZ_STREAK_FROM, songClock, questionOf } from "./duelRhythm.js";
 import { QUIZ_LANES, QUIZ_BREAK, QUIZ_LEVELS } from "./duelQuiz.js";
 import { TRACK, drawHighway, drawRhythmFeedback, shout } from "./duelRhythmDraw.js";
 
@@ -206,10 +206,21 @@ function drawReady(ctx) {
   ctx.fillText("Van a bajar operaciones por el carril: calcula el resultado", MID, TRACK.top + 198);
   ctx.fillText("Tócalo abajo, o pulsa su tecla (1 2 3 4), antes de que llegue", MID, TRACK.top + 226);
   ctx.fillStyle = "#ffb4a8";
-  ctx.fillText("Si fallas, dispara el rival · Si falla él, disparas tú", MID, TRACK.top + 260);
+  ctx.fillText("Si fallas, dispara el rival", MID, TRACK.top + 260);
   ctx.fillStyle = "#9effb0";
-  ctx.fillText("Con la racha se van complicando… y tus disparos pegan más", MID, TRACK.top + 292);
+  ctx.fillText("Con 3 aciertos seguidos, ¡dispara tu ejército en cada acierto!", MID, TRACK.top + 292);
   ctx.restore();
+}
+
+// What a streak is worth, said over the track: how many right answers are
+// still to go before one's army fires; then that the next one fires it --
+// or, with `loading` s to go before it can again, that it is loading.
+export function quizStreakLine(streak, loading = 0) {
+  if (streak >= QUIZ_STREAK_FROM) {
+    return { text: `🔥 EN RACHA (${streak}): ${loading > 0.05 ? "tu ejército recarga…" : "¡acierta y dispara tu ejército!"}`, on: true };
+  }
+  const left = QUIZ_STREAK_FROM - Math.max(0, streak);
+  return { text: `${left === 1 ? "Un acierto más" : `${left} aciertos seguidos`} y dispara tu ejército`, on: false };
 }
 
 // scene: as duelRhythmDraw.js's drawRhythm -- { view, side, presses, loading }.
@@ -221,9 +232,12 @@ export function drawQuiz(ctx, scene) {
 
   const shown = quizShown(m, side, now);
   drawAnswers(ctx, shown, scene.presses || {});
-  if (shown) drawCard(ctx, shown, now);
-  else if (m.tally[side].hits + m.tally[side].misses === 0) drawReady(ctx);
-  if (scene.loading) shout(ctx, "Cargando música…", MID, TRACK.top + 30, { size: 20, color: "#ffe27a" });
+  if (shown) {
+    const line = quizStreakLine(m.tally[side].streak, m.loaded ? m.loaded[side] : 0);
+    shout(ctx, line.text, MID, TRACK.top + 12, { size: line.on ? 20 : 16, color: line.on ? "#ffe27a" : "#cfe6ff", alpha: line.on ? 1 : 0.85, glow: line.on ? "#ff9900" : null });
+    drawCard(ctx, shown, now);
+  } else if (m.tally[side].hits + m.tally[side].misses === 0) drawReady(ctx);
+  if (scene.loading) shout(ctx, "Cargando música…", MID, TRACK.top + 36, { size: 16, color: "#ffe27a" });
 
   drawRhythmFeedback(ctx, scene, { saidY: BOX.y + BOX.h + 26 });
 }

@@ -227,8 +227,11 @@ export function createDuelMusic({ audioContext, audible, fetchFile = (path) => f
     const gain = ac.createGain();
     gain.gain.value = audible() ? TAPE_VOLUME : 0;
     source.connect(gain).connect(ac.destination);
+    // (Round again when it ends: a Duelo Matemático's round may outlast its
+    // song -- duelQuiz.js. A musical duel's fight ends with it.)
+    source.loop = true;
     const at = ac.currentTime + 0.03;
-    source.start(at, Math.max(0, Math.min(from, buffer.duration)));
+    source.start(at, Math.max(0, from) % buffer.duration);
     tape = { file, source, gain, from, at };
   }
 

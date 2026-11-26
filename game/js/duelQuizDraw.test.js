@@ -6,7 +6,8 @@ import { TRACKS } from "./duelTracks.js";
 import { QUIZ_LANES, QUIZ_BREAK } from "./duelQuiz.js";
 import { createMusicalDuel, stepMusicalDuel, pressKey, songClock, questionOf } from "./duelRhythm.js";
 import { TRACK } from "./duelRhythmDraw.js";
-import { QUIZ_CARD, quizBox, quizLaneAt, quizCardAt, quizShown } from "./duelQuizDraw.js";
+import { QUIZ_CARD, quizBox, quizLaneAt, quizCardAt, quizShown, quizStreakLine } from "./duelQuizDraw.js";
+import { QUIZ_STREAK_FROM } from "./duelRhythm.js";
 
 for (const id of Object.keys(TRACKS)) delete TRACKS[id];
 
@@ -106,4 +107,17 @@ test("a guess of this browser's shows before the server's next question is known
   const shown = quizShown(guessed, "left", now);
   assert.equal(shown.state, "hit");
   assert.equal(shown.at, now, "answered just now, as far as this browser knows");
+});
+
+test("over the track, what the streak is worth: how many more before one's army fires, then that it does", () => {
+  assert.equal(quizStreakLine(0).on, false);
+  assert.match(quizStreakLine(0).text, new RegExp(`^${QUIZ_STREAK_FROM} aciertos seguidos`));
+  assert.match(quizStreakLine(QUIZ_STREAK_FROM - 1).text, /^Un acierto más/);
+  const firing = quizStreakLine(QUIZ_STREAK_FROM);
+  assert.equal(firing.on, true);
+  assert.match(firing.text, /dispara/);
+  assert.match(quizStreakLine(12).text, /12/);
+  // Its army fires no more often than it reloads: said while it does.
+  assert.match(quizStreakLine(5, 3.2).text, /recarga/);
+  assert.doesNotMatch(quizStreakLine(5, 0).text, /recarga/);
 });
