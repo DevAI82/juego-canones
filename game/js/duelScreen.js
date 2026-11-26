@@ -5,7 +5,9 @@
 //     duelAI.js takes the rival's turns;
 //   - against another player at home: the home server holds it (host.js).
 //     The screen draws what the server last sent and posts the player's
-//     actions; what they do shows with the server's next news.
+//     actions; what they do shows with the server's next news. (A musical
+//     duel's fight can't wait for news: duelNet.js keeps the song's time
+//     and shows a key's outcome as it is pressed.)
 // Either way duelDraw.js paints regular duels, duelMusicStage.js +
 // duelRhythmDraw.js paint the photorealistic 3D Musical Duel (both hangar
 // buy phase and combat), duelUI.js fills its panels and duelProfile.js
@@ -35,6 +37,7 @@ import {
   updateDuelUnitPanel,
   mountMusicalHangar,
   updateMusicalHangar,
+  mountDuelKeys,
   renderDuelLobby,
   showDuelResult,
   hideDuelResult,
@@ -53,11 +56,13 @@ import {
   drawRhythmHud,
   drawBuyHud,
   drawRhythmFlash,
+  drawRhythmNotice,
   laneAt,
 } from "./duelRhythmDraw.js";
 import { stagePlaces, armyHealth } from "./duelStage.js";
 import { createDuelMusicStage } from "./duelMusicStage.js";
 import { drawSong } from "./duelSongs.js";
+import { createNetFight, createOnce, mirrored } from "./duelNet.js";
 
 // Against the computer the player is always the left-hand side.
 const PLAYER = "left";
@@ -101,6 +106,8 @@ export function createDuelScreen({
   shopEl,
   panelEl,
   hangarEl,
+  keysEl, // a musical duel's keys for fingers (a phone has no keyboard)
+  touch = () => false, // whether this device is played by touch
   resultEl,
   drawUnit,
   resetVisuals,
@@ -147,6 +154,17 @@ export function createDuelScreen({
   let impacts = []; // lingering multi-stage explosions when volley shells hit
   let impactedShots = new WeakSet();
   let shopHiddenForMusical = false;
+  // --- a musical duel the home server holds (duelNet.js). Its times are
+  // the wall's, not the frames': a phone may draw few frames, and a finger
+  // doesn't wait for one.
+  const netFight = createNetFight();
+  const once = createOnce();
+  const wallNow = () => (typeof performance !== "undefined" ? performance.now() : Date.now()) / 1000;
+  let songAt = null; // s, the wall's: when the song's clock was last kept
+  // s since the server's latest news came (main.js says when: remote.at, ms).
+  const newsAge = () => (remote && typeof remote.at === "number" ? Math.max(0, wallNow() - remote.at / 1000) : clock - newsAt);
+  // s since the song's clock was last kept: a key pressed now is that much later.
+  const sinceKept = () => (songAt === null ? 0 : Math.max(0, Math.min(0.5, wallNow() - songAt)));
 
   function syncShopVisibility(hideForMusical) {
     if (!shopEl || shopHiddenForMusical === hideForMusical) return;
@@ -197,8 +215,12 @@ export function createDuelScreen({
     healthLag = { left: 1, right: 1 };
     impacts = [];
     impactedShots = new WeakSet();
+    netFight.reset();
+    once.reset();
+    songAt = null;
     photoStage.reset();
     if (hangarEl) hangarEl.classList.add("hidden");
+    if (keysEl) keysEl.classList.add("hidden");
     syncShopVisibility(false);
     if (music) music.stop();
     hideDuelResult(resultEl);
@@ -242,7 +264,8 @@ export function createDuelScreen({
       else refuse(result ? result.reason : "network");
     };
     if (remote) remote.ask(body).then(settleIt);
-    else settleIt(local());
+    else if (state) settleIt(local());
+    // (No duel here yet -- the home server's hasn't had its first frame: nothing to do.)
   }
 
   const shopping = () => {
@@ -292,10 +315,18 @@ export function createDuelScreen({
         onClose: doClosePanel,
       });
     }
-    const isMusical = Boolean(!remote && state && state.musical);
+    if (keysEl) {
+      mountDuelKeys(keysEl, {
+        onPress: (lane) => playingKeys() && pressLane(lane),
+        onRelease: (lane) => playingKeys() && releaseLane(lane),
+      });
+      keysEl.classList.add("hidden");
+    }
+    const d = duel();
+    const isMusical = Boolean(d && d.musical);
     shopHiddenForMusical = isMusical;
     shopEl.classList.toggle("hidden", isMusical);
-    if (hangarEl) hangarEl.classList.toggle("hidden", !(isMusical && state.phase === "buy"));
+    if (hangarEl) hangarEl.classList.toggle("hidden", !(isMusical && d.phase === "buy"));
   }
 
   // «¡Listo!»
@@ -332,13 +363,16 @@ export function createDuelScreen({
       }
       lastPhase = d.phase;
     }
+    // (A musical duel's news come faster than a shot goes: each is heard
+    // by who fired it and when -- duelNet.js's createOnce.)
+    const netMusical = Boolean(remote && d.musical);
     for (const shot of d.shots) {
-      if (remote ? shot.age >= NEWS_EVERY : seenShots.has(shot)) continue;
+      if (netMusical ? !once.fresh(`shot:${shot.fromId}`, clock - shot.age) : remote ? shot.age >= NEWS_EVERY : seenShots.has(shot)) continue;
       seenShots.add(shot);
       playSound(SHOT_SOUND[shot.type]);
     }
     for (const event of d.musical ? d.musical.events : []) {
-      if (seenEvents.has(event)) continue;
+      if (remote ? !once.fresh(`event:${event.side}:${event.kind}:${event.lane}`, clock - event.age) : seenEvents.has(event)) continue;
       seenEvents.add(event);
       if (event.side === mySide() && event.kind === "miss") playSound("error");
     }
@@ -423,14 +457,46 @@ export function createDuelScreen({
     };
   }
 
+  // A musical duel the home server holds: its song, heard here, and this
+  // browser's own clock of it (duelNet.js) -- the music follows that clock,
+  // which is set by the server's whenever the two come apart.
+  function keepSong(dt) {
+    const d = lastNews;
+    const song = d.musical.song;
+    loading = false;
+    if (music) music.load(song); // ahead of the fight, while shopping
+    const wall = wallNow();
+    if (d.phase !== "combat" || d.paused) {
+      if (music) music.stop();
+      netFight.keep(d, newsAge(), 0);
+      songAt = null;
+      return;
+    }
+    // With no music to go by, the time that has really passed.
+    let step = songAt === null ? dt : Math.min(0.5, wall - songAt);
+    if (music) {
+      loading = !music.ready(song);
+      if (!loading && netFight.clock() !== null) {
+        const heard = music.follow(song, netFight.clock());
+        if (heard !== null) step = heard;
+      }
+    }
+    const kept = netFight.keep(d, newsAge(), step);
+    songAt = wall;
+    if (kept && kept.jumped && music) music.stop(); // (it starts again from there)
+  }
+
   function frame(dt, { running = true, remote: news = null } = {}) {
     if (news && !remote) forget();
     remote = news;
     const d = duel();
     if (!d) return;
     clock += dt;
-    if (remote) takeNews();
-    else if (running && !d.paused) {
+    if (remote) {
+      takeNews();
+      if (d.musical) keepSong(dt);
+      else if (music) music.stop();
+    } else if (running && !d.paused) {
       let step = dt;
       loading = false;
       if (state.musical) beginFight(state);
@@ -450,7 +516,7 @@ export function createDuelScreen({
     } else if (music) {
       music.stop();
     }
-    const playing = Boolean(!remote && d.musical && d.phase === "combat");
+    const playing = Boolean(d.musical && d.phase === "combat");
     for (const lane of Object.keys(presses)) presses[lane].age += dt;
     if (remote ? !d.paused : running && !d.paused) {
       for (const burst of bursts) burst.age += dt;
@@ -461,20 +527,29 @@ export function createDuelScreen({
     if (settle && clock > settle.until) settle = null;
 
     const side = mySide();
-    const view = remote ? between() : seen();
+    const isMusical = Boolean(d.musical);
+    // A musical duel on the home network: the keys by this browser's own
+    // clock, with what this player just pressed; and for whoever has the
+    // right-hand side, the other way round -- the musical duel's screen is
+    // its player's army on the left (duelNet.js).
+    const flipped = Boolean(remote && isMusical && side === "right");
+    let view = !remote ? seen() : isMusical ? netFight.view(between(), side, newsAge()) : between();
+    if (flipped) view = mirrored(view);
+    const shownSide = flipped ? PLAYER : side || PLAYER;
     const art = picturesOf(d.arena);
-    const isMusicalLocal = Boolean(!remote && d.musical);
-    const musicalBuy = isMusicalLocal && d.phase === "buy";
-    const musicalStage = isMusicalLocal && (d.phase === "combat" || d.phase === "roundEnd" || d.phase === "over");
+    const musicalBuy = isMusical && d.phase === "buy";
+    const musicalStage = isMusical && (d.phase === "combat" || d.phase === "roundEnd" || d.phase === "over");
 
     // In Musical Duel, the old left Attack sidebar is replaced in ALL phases by
     // the full-screen photorealistic 3D battlefield + matching 3D Hangar Dock.
-    syncShopVisibility(isMusicalLocal);
+    syncShopVisibility(isMusical);
     if (hangarEl) hangarEl.classList.toggle("hidden", !musicalBuy);
+    // A phone has no keyboard: the keys, under the player's thumbs.
+    if (keysEl) keysEl.classList.toggle("hidden", !(playing && !d.paused && Boolean(side) && touch()));
 
     const scene = {
       view,
-      side: side || PLAYER,
+      side: shownSide,
       watching: !side,
       map: loaded(art.map),
       foreground: loaded(art.foreground),
@@ -497,6 +572,7 @@ export function createDuelScreen({
         selectedId,
       });
       drawBuyHud(ctx, { view, side: scene.side, paused: scene.paused });
+      drawRhythmNotice(ctx, scene.notice);
       if (hangarEl) updateMusicalHangar(hangarEl, view, scene.side, picked());
       panelEl.classList.add("hidden");
     } else if (musicalStage) {
@@ -506,12 +582,12 @@ export function createDuelScreen({
         else healthLag[s] = Math.max(cur, healthLag[s] - dt * 0.42);
       }
       if (playing) {
-        const pace = approachOf(d.musical.tally[scene.side].streak);
+        const pace = approachOf(view.musical.tally[scene.side].streak);
         approach += (pace - approach) * Math.min(1, dt * 4);
       } else {
         approach = APPROACH;
       }
-      const shake = playing ? shakeOf(d, scene.side) : { x: 0, y: 0, red: 0 };
+      const shake = playing ? shakeOf(view, scene.side) : { x: 0, y: 0, red: 0 };
 
       ctx.save();
       ctx.translate(shake.x * 0.55, shake.y * 0.55);
@@ -536,7 +612,9 @@ export function createDuelScreen({
       };
 
       for (const shot of view.shots) {
-        if (shot.age >= 0.25 && !impactedShots.has(shot)) {
+        // (On the home network a shot is another object every frame: it
+        // lands once by who fired it and when.)
+        if (shot.age >= 0.25 && (remote ? once.fresh(`impact:${shot.fromId}`, clock - shot.age) : !impactedShots.has(shot))) {
           impactedShots.add(shot);
           const pt = lastProjected.get(shot.toId);
           const at = pt || shot.to;
@@ -573,6 +651,7 @@ export function createDuelScreen({
       drawRhythmHud(ctx, rhythm);
       if (d.phase === "roundEnd") drawDuelBanner(ctx, scene);
       if (playing) drawRhythmFlash(ctx, shake);
+      drawRhythmNotice(ctx, scene.notice);
       panelEl.classList.add("hidden");
     } else {
       // Regular Duel (untouched)
@@ -602,15 +681,37 @@ export function createDuelScreen({
     return best;
   }
 
-  const playingKeys = () => Boolean(!remote && state && state.musical && state.phase === "combat" && !state.paused);
+  // A musical duel's fight is on, and this player has keys to play in it.
+  const playingKeys = () => {
+    const d = duel();
+    return Boolean(d && d.musical && d.phase === "combat" && !d.paused && mySide());
+  };
+  // On the home network a key is shown at once as the server will judge it
+  // (duelNet.js), and sent with the moment it was pressed.
   function pressLane(lane) {
+    if (remote) {
+      const guess = netFight.press(lastNews, mySide(), lane, sinceKept());
+      if (!guess) return;
+      presses[lane] = { age: 0, hit: guess.hit };
+      if (!guess.hit) playSound("error");
+      remote.ask({ type: "duelKey", lane, at: guess.at });
+      return;
+    }
     const result = pressKey(state, PLAYER, lane);
     if (!result.ok) return;
     presses[lane] = { age: 0, hit: result.hit };
     if (!result.hit) playSound("error");
   }
   function releaseLane(lane) {
-    const result = releaseKey(state, PLAYER, lane);
+    let result;
+    if (remote) {
+      const guess = netFight.release(lastNews, mySide(), lane, sinceKept());
+      if (!guess) return;
+      if (guess.held !== null) remote.ask({ type: "duelKeyUp", lane, at: guess.at });
+      result = { ok: true, held: guess.held };
+    } else {
+      result = releaseKey(state, PLAYER, lane);
+    }
     if (result.ok && result.held === false) {
       presses[lane] = { age: 0, hit: false };
       playSound("error");
@@ -619,7 +720,8 @@ export function createDuelScreen({
 
   function key(code, repeat = false) {
     const lane = KEY_LANE[code];
-    if (!lane || remote || !state || !state.musical) return false;
+    const d = duel();
+    if (!lane || !d || !d.musical) return false;
     if (!repeat && playingKeys()) pressLane(lane);
     return true;
   }
@@ -638,7 +740,7 @@ export function createDuelScreen({
     }
     if (!shopping()) return;
     // Musical Duel Buy Phase: click directly on any photorealistic blue vehicle in the 3D arena!
-    if (!remote && state && state.musical) {
+    if (duel().musical) {
       const unit = photoStage.pickUnit(pos, lastProjected, army());
       selectedId = unit ? unit.id : null;
       press = null;
@@ -686,7 +788,9 @@ export function createDuelScreen({
     photoStage.reset();
     lastProjected = null;
     shopHiddenForMusical = false;
+    netFight.reset();
     if (hangarEl) hangarEl.classList.add("hidden");
+    if (keysEl) keysEl.classList.add("hidden");
     hideDuelResult(resultEl);
     panelEl.classList.add("hidden");
     selectedId = null;

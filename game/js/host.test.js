@@ -9,6 +9,8 @@ import { TOWER_TYPES } from "./tower.js";
 import { createGameState, createSave } from "./simulate.js";
 import { ROUND_TIME } from "./attack.js";
 import { BUY_TIME_FIRST, ROUND_END_TIME, COMBAT_TIME } from "./duel.js";
+import { fightChart, songList } from "./duelSongs.js";
+import { HIT_WINDOW } from "./duelRhythm.js";
 
 // A host with its saves in memory and a clock the test moves.
 function setup(initial = null) {
@@ -502,4 +504,109 @@ test("an arena that isn't one is the first", async () => {
   const { host, view } = setup();
   await host.act("A", { type: "newDuel", arena: 99 });
   assert.equal(view("A").state.arena, 1);
+});
+
+// ------------------------------------------------------------ a musical duel between two players
+// (The user's, 2026-11-26: one on the PC, the other on a phone. The fight
+// is duelRhythm.js's; the house's server holds it as it does any duel.)
+
+async function musicalDuel() {
+  const s = setup();
+  assert.deepEqual(await s.host.act("A", { type: "newDuel", arena: 1, musical: true }), { ok: true });
+  assert.deepEqual(await s.host.act("B", { type: "join", side: "right" }), { ok: true });
+  return s;
+}
+// s into its song a musical duel's fight is, as a tab is told.
+const songAt = (v) => v.state.musical.time + v.state.acc;
+function runToSong(s, t) {
+  for (let guard = 0; songAt(s.view("A")) < t - 0.03; guard++) {
+    assert.ok(guard < 5000 && s.view("B").state.phase === "combat", `the fight never got to ${t} s`);
+    s.run(0.05);
+  }
+}
+
+test("a musical duel between two players: a song of the set, both sides played by people, and time for their keys to arrive", async () => {
+  const s = await musicalDuel();
+  const v = s.view("A");
+  assert.equal(v.net.kind, "duel");
+  assert.equal(v.state.mode, "duel");
+  assert.ok(songList().includes(v.state.musical.song));
+  assert.deepEqual(v.state.musical.bots, {});
+  assert.ok(v.state.musical.slack >= 0.25, "more than a wifi's delay and a browser's news apart");
+  assert.equal(s.view("B").state.musical.song, v.state.musical.song, "the same song for both");
+  // An ordinary duel is as it was.
+  assert.equal((await duel()).view("A").state.musical, undefined);
+});
+
+test("its fight goes by the server's clock, and a key is judged by when its player pressed it", async () => {
+  const s = await musicalDuel();
+  const { host, view, run } = s;
+  for (const player of ["A", "B"]) {
+    for (let i = 0; i < 2; i++) assert.equal((await host.act(player, { type: "duelBuy", unitType: "tank" })).ok, true);
+  }
+  assert.deepEqual(await host.act("A", { type: "duelKey", lane: "up", at: 0 }), { ok: false, reason: "phase" }, "no keys while shopping");
+  assert.deepEqual(await host.act("A", { type: "duelReady" }), { ok: true });
+  assert.deepEqual(await host.act("B", { type: "duelReady" }), { ok: true });
+  assert.equal(view("A").state.phase, "combat");
+  const chart = fightChart(view("A").state.musical.song);
+  const start = songAt(view("A"));
+  const first = chart.notes.find((note) => note.t >= start + 2);
+  run(0.5);
+  assert.ok(songAt(view("A")) > start + 0.4, "the music's time passes on the server");
+
+  // A's key arrives 0.2 s after it was pressed, on the dot.
+  runToSong(s, first.t + 0.2);
+  assert.deepEqual(await host.act("C", { type: "duelKey", lane: first.lane, at: first.t }), { ok: false, reason: "not-seated" });
+  const pressed = await host.act("A", { type: "duelKey", lane: first.lane, at: first.t });
+  assert.equal(pressed.ok, true);
+  assert.equal(pressed.hit, true);
+  assert.equal(view("B").state.musical.tally.left.hits, 1);
+  assert.deepEqual(await host.act("A", { type: "duelKeyUp", lane: first.lane, at: first.t + 0.1 }), { ok: true, held: first.hold > 0 ? false : null });
+
+  // B let it go by: A's army fires.
+  runToSong(s, first.t + HIT_WINDOW + view("A").state.musical.slack + 0.2);
+  const after = view("A").state;
+  assert.equal(after.musical.tally.right.hits, 0);
+  assert.ok(after.musical.tally.right.misses >= 1);
+  const hurt = (side) => after.units.filter((u) => u.side === side).some((u) => u.hp < u.maxHp);
+  assert.equal(hurt("right"), true);
+
+  // A pause stops the keys too.
+  assert.deepEqual(await host.act("B", { type: "pause", on: true }), { ok: true });
+  assert.deepEqual(await host.act("A", { type: "duelKey", lane: "up", at: songAt(view("A")) }), { ok: false, reason: "paused" });
+  const stopped = songAt(view("A"));
+  run(1);
+  assert.equal(songAt(view("A")), stopped);
+
+  // And an ordinary duel has no keys.
+  const plain = await duel();
+  await plain.host.act("A", { type: "duelBuy", unitType: "tank" });
+  await plain.host.act("B", { type: "duelBuy", unitType: "tank" });
+  await plain.host.act("A", { type: "duelReady" });
+  await plain.host.act("B", { type: "duelReady" });
+  assert.deepEqual(await plain.host.act("A", { type: "duelKey", lane: "up", at: 1 }), { ok: false, reason: "phase" });
+});
+
+test("a musical duel's rematch is musical too, to another song", async () => {
+  const s = await musicalDuel();
+  const { host, view, run } = s;
+  for (let i = 0; i < 3; i++) await host.act("A", { type: "duelBuy", unitType: "tank" });
+  await host.act("B", { type: "duelBuy", unitType: "soldier" });
+  // Nobody plays a key: the bigger army wins every round.
+  for (let round = 0; round < 5 && view("A").state.phase !== "over"; round++) {
+    await playRound(s);
+    for (let guard = 0; guard < 40 && view("A").state.phase === "roundEnd"; guard++) {
+      view("B");
+      run(0.25);
+    }
+  }
+  const end = view("A").state;
+  assert.equal(end.phase, "over");
+  assert.equal(end.winner, "left");
+  assert.deepEqual(await host.act("B", { type: "rematch" }), { ok: true });
+  const again = view("A").state;
+  assert.equal(again.phase, "buy");
+  assert.ok(again.musical, "still a musical duel");
+  assert.ok(again.musical.slack > 0);
+  if (songList().length > 1) assert.notEqual(again.musical.song, end.musical.song);
 });

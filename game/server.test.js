@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { startServer } from "./server.js";
+import { startServer, homeFirst } from "./server.js";
 
 // A real server on a spare port, its saves in a temporary folder -- never
 // the family's on 8420.
@@ -67,4 +67,13 @@ test("the server tells a tab its address on the home network, for the other play
     const port = new URL(base).port;
     for (const url of urls) assert.match(url, new RegExp(`^http://\\d+\\.\\d+\\.\\d+\\.\\d+:${port}$`));
   });
+});
+
+test("the home network's address comes first: a phone on the wifi can't open a VPN's", () => {
+  // (The user's PC, 2026-11-26: Tailscale's 100.x came first, and that is
+  // what the banner told the other player to open.)
+  assert.deepEqual(homeFirst(["100.71.202.37", "192.168.1.142"]), ["192.168.1.142", "100.71.202.37"]);
+  assert.deepEqual(homeFirst(["169.254.3.4", "8.8.8.8", "10.0.0.5", "172.20.1.1", "192.168.0.9"]), ["192.168.0.9", "10.0.0.5", "172.20.1.1", "8.8.8.8", "169.254.3.4"]);
+  assert.deepEqual(homeFirst(["172.32.0.1", "172.16.0.1"]), ["172.16.0.1", "172.32.0.1"], "172.16 to 172.31 are a home's");
+  assert.deepEqual(homeFirst([]), []);
 });

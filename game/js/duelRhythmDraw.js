@@ -1454,7 +1454,7 @@ export function drawBuyHud(ctx, scene) {
   ctx.font = "900 12px sans-serif";
   ctx.textAlign = "left";
   ctx.fillStyle = "#fecaca";
-  ctx.fillText("LISTO · OCULTO", rightBarX + 18, barY + 18);
+  ctx.fillText(view.sides[side === "left" ? "right" : "left"].ready ? "LISTO · OCULTO" : "COMPRANDO · OCULTO", rightBarX + 18, barY + 18);
   ctx.font = "900 13px sans-serif";
   ctx.textAlign = "right";
   ctx.fillStyle = "#fca5a5";
@@ -1463,11 +1463,37 @@ export function drawBuyHud(ctx, scene) {
   drawRoundPips(ctx, leftBarX, rightBarX, barW, barY + barH + 13, hud.mine, hud.theirs);
 
   // Center metallic shield crest: Round + Preparation + Song title
-  drawMetallicCrest(ctx, `ASALTO ${view.round}`, "ELIGE TU EJÉRCITO", m ? songOf(m.song).name : "");
+  // (Between two players the purchase has a clock.)
+  drawMetallicCrest(ctx, hud.clock || `ASALTO ${view.round}`, hud.clock ? `ASALTO ${view.round} · ELIGE TU EJÉRCITO` : "ELIGE TU EJÉRCITO", m ? songOf(m.song).name : "");
 
   if (scene.paused) {
     shout(ctx, "PAUSA", MID, TRACK.top + 85, { size: 44, color: "#ffd700" });
   }
+  ctx.restore();
+}
+
+// ------------------------------------------------------------ the home network's notice
+
+// What the home server's seats have to say (duelUI.js's duelNotice: waiting
+// for the second player, a pause of the rival's, a player gone), over a
+// musical duel's screen.
+export function drawRhythmNotice(ctx, text) {
+  if (!text) return;
+  ctx.save();
+  ctx.font = "bold 20px sans-serif";
+  const w = Math.min(ARENA.width - 40, ctx.measureText(text).width + 48);
+  const h = 42;
+  const x = MID - w / 2;
+  const y = 150;
+  ctx.fillStyle = "rgba(8, 14, 24, 0.9)";
+  ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = "#ffe27a";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
+  ctx.fillStyle = "#ffe27a";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, MID, y + h / 2 + 1, w - 28);
   ctx.restore();
 }
 

@@ -664,3 +664,81 @@
   color: #bbf7d0;
   opacity: 0.9;
 }
+
+/* ==========================================================================
+   MUSICAL DUEL -- THE KEYS FOR FINGERS (a phone has no keyboard)
+   Fixed to the window, not to the game's 1200x750 box: a thumb needs the
+   same room however small the game is drawn. The arrows as a keyboard's
+   under the left thumb, the numbers under the right one.
+   ========================================================================== */
+
+#duel-keys {
+  /* Lying down, the game fills the window and the track's dock takes its
+     middle (duelRhythmDraw.js's TRACK: a quarter of the width is free
+     either side): three keys fit beside it. */
+  --dkw: clamp(46px, calc(7.9vw - 9px), 96px);
+  --dkh: clamp(54px, 18vmin, 96px);
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  padding: 0 max(10px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+#duel-keys.hidden { display: none; }
+
+.dk-group {
+  display: grid;
+  gap: 6px;
+  pointer-events: auto;
+  touch-action: none;
+}
+.dk-arrows {
+  grid-template-columns: repeat(3, var(--dkw));
+  grid-template-areas: ". up ." "left down right";
+}
+.dk-numbers { grid-template-columns: repeat(3, var(--dkw)); }
+/* Standing up there is no room beside the track: the seven keys in a row
+   under it, in the track's own order. */
+@media (orientation: portrait) {
+  #duel-keys { --dkw: calc((100vw - 20px - 44px) / 7); --dkh: clamp(54px, 9vh, 84px); }
+  .dk-arrows {
+    grid-template-columns: repeat(4, var(--dkw));
+    grid-template-areas: "left down up right";
+  }
+}
+
+.dk-key {
+  width: var(--dkw);
+  height: var(--dkh);
+  padding: 0;
+  font: 900 calc(var(--dkw) * 0.52) / 1 sans-serif;
+  color: #0b1220;
+  background: var(--dk-color);
+  border: 3px solid rgba(255, 255, 255, 0.85);
+  border-radius: 16px;
+  box-shadow: 0 5px 0 rgba(0, 0, 0, 0.55), 0 0 18px var(--dk-color);
+  opacity: 0.82;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.dk-key.down {
+  opacity: 1;
+  transform: translateY(4px) scale(0.95);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.55), 0 0 30px #fff;
+}
+/* (The keys' colours: duelRhythmDraw.js's COLOR.) */
+.dk-key-left { grid-area: left; --dk-color: #ff4ad8; }
+.dk-key-down { grid-area: down; --dk-color: #38d8ff; }
+.dk-key-up { grid-area: up; --dk-color: #4eff7a; }
+.dk-key-right { grid-area: right; --dk-color: #ff4c4c; }
+.dk-key-1 { --dk-color: #ffd24c; }
+.dk-key-2 { --dk-color: #ff9233; }
+.dk-key-3 { --dk-color: #c678ff; }

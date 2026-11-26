@@ -9,7 +9,8 @@
 //   - "duel": the duel minigame between two players (duel.js, its design
 //     §11): one tab is the left side, another the right, each shops for
 //     its own army without seeing the other's, and the armies then fight
-//     by themselves.
+//     by themselves -- or, in a musical duel (duelRhythm.js), as their
+//     players keep to the song's keys, each on their own device.
 // It ticks the game, makes the autosaves (autosave.js), runs the automatic
 // army for an attacker playing on a phone (autoArmy.js), and answers each
 // tab with the game as that tab needs it (viewJson).
@@ -60,8 +61,15 @@ import {
   sidesOf,
 } from "./versus.js";
 import { createDuelState, duelView, buyUnit, sellUnit, moveUnit, upgradeUnit, setReady, SIDES as DUEL_SIDES } from "./duel.js";
+import { createMusicalDuel, pressKey, releaseKey } from "./duelRhythm.js";
+import { drawSong } from "./duelSongs.js";
 
 const AUTO_ARMY_EVERY = 0.25; // s between the automatic army's looks, as in solo play
+// s a musical duel's key may take from its player's finger to here (it says
+// when it was pressed: duelRhythm.js): the wifi, and how far a browser's
+// music may run from this clock before it sets itself by it again
+// (duelNet.js's RESYNC).
+const KEY_SLACK = 0.4;
 
 const isVersus = (state) => state.mode === "attack" && state.attack.defender === "player";
 const isDuel = (state) => state.mode === "duel";
@@ -136,12 +144,27 @@ export function createHost({ store, now = () => Date.now(), initial = null, log 
     duelUpgrade: (side, b) => upgradeUnit(state, side, b.unitType, b.skill),
     // «¡Listo!», or (on: false) taking it back.
     duelReady: (side, b) => setReady(state, side, b.on !== false),
+    // A musical duel's keys, pressed and let go: `at`, s into the song by
+    // the player's own music.
+    duelKey: (side, b) => (state.paused ? refuse("paused") : pressKey(state, side, b.lane, Number(b.at))),
+    duelKeyUp: (side, b) => (state.paused ? refuse("paused") : releaseKey(state, side, b.lane, Number(b.at))),
   };
 
   // A new duel between two players: both start alike, the purchase has
-  // its clock, and nothing runs until the second player is there.
-  function freshDuel(arena, waiting) {
-    const next = createDuelState({ arena: Number(arena), seed: Math.floor(Math.random() * 0x7fffffff), timed: true });
+  // its clock, and nothing runs until the second player is there. A
+  // musical one takes the next song of a shuffled round of them (as
+  // against the computer, duelScreen.js) and is played by both.
+  let songs = {};
+  function freshDuel(arena, waiting, musical = false) {
+    const options = { arena: Number(arena), seed: Math.floor(Math.random() * 0x7fffffff), timed: true };
+    let next;
+    if (musical) {
+      const drawn = drawSong(songs);
+      songs = drawn.bag;
+      next = createMusicalDuel({ ...options, song: drawn.song, slack: KEY_SLACK });
+    } else {
+      next = createDuelState(options);
+    }
     next.paused = waiting;
     return next;
   }
@@ -213,7 +236,7 @@ export function createHost({ store, now = () => Date.now(), initial = null, log 
         const nextSeats = createSeats(DUEL_SIDES);
         nextSeats.waiting = true;
         sit(nextSeats, "left", playerId, t);
-        setGame(freshDuel(body.arena, true), nextSeats);
+        setGame(freshDuel(body.arena, true, Boolean(body.musical)), nextSeats);
         return ok;
       }
       case "restart":
@@ -242,7 +265,7 @@ export function createHost({ store, now = () => Date.now(), initial = null, log 
           seats.pausedBy = null;
           seats.gone = null;
           seats.waiting = false;
-          setGame(freshDuel(state.arena, false), seats);
+          setGame(freshDuel(state.arena, false, Boolean(state.musical)), seats);
           return ok;
         }
         if (!state.gameOver) return refuse("not-over");

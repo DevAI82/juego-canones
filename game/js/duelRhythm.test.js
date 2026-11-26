@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { STEP, DUEL_UNITS, LIGHT_VS_ARMOR, ROUND_END_TIME, buyUnit, moveUnit, upgradeUnit, setReady, stepDuel, createDuelState } from "./duel.js";
 import { fightChart } from "./duelSongs.js";
 import { TRACKS } from "./duelTracks.js";
-import { HIT_WINDOW, VOLLEY_RELOAD, STREAK_POWER, streakPower, createMusicalDuel, stepMusicalDuel, pressKey, songClock } from "./duelRhythm.js";
+import { HIT_WINDOW, VOLLEY_RELOAD, STREAK_POWER, streakPower, createMusicalDuel, stepMusicalDuel, pressKey, releaseKey, keyAt, songClock } from "./duelRhythm.js";
 
 // These tests are about the song written as notes: a recording made for
 // its league since (duelTracks.js) is put aside while they run.
@@ -326,4 +326,102 @@ test("a shot says which unit fired it and which it was for", () => {
   assert.equal(target.side, "right");
   assert.deepEqual(shot.from, { x: shooter.x, y: shooter.y });
   assert.deepEqual(shot.to, { x: target.x, y: target.y });
+});
+
+// ------------------------------------------------------------ on the home network
+// (Two players, each on their own device: the user's, 2026-11-26. A key
+// travels to the house's server, so it says when it was pressed.)
+
+function netFight({ slack = 0.3, left = ["tank"], right = ["tank"], bots = {} } = {}) {
+  const s = createMusicalDuel({ arena: 1, seed: 7, slack, bots, left: { money: 5000 }, right: { money: 5000 } });
+  for (const type of left) assert.ok(buyUnit(s, "left", type).ok);
+  for (const type of right) assert.ok(buyUnit(s, "right", type).ok);
+  setReady(s, "left");
+  setReady(s, "right");
+  return s;
+}
+
+test("a duel between two devices allows its keys some time to arrive; one against the computer none", () => {
+  assert.equal(netFight({ slack: 0.3 }).musical.slack, 0.3);
+  assert.equal(fight().musical.slack, 0);
+  assert.equal(createMusicalDuel({ slack: -1 }).musical.slack, 0);
+});
+
+test("a key that says when it was pressed is judged by that moment, not by when it got there", () => {
+  const s = netFight();
+  const [first] = notes();
+  runTo(s, first.t + 0.25);
+  assert.equal(s.musical.tally.left.misses, 0, "not missed yet: it may still be on its way");
+  const pressed = pressKey(s, "left", first.lane, first.t + 0.02);
+  assert.equal(pressed.hit, true);
+  assert.ok(Math.abs(pressed.off - 0.02) < 1e-9);
+  assert.deepEqual({ ...s.musical.tally.left }, { hits: 1, misses: 0, streak: 1 });
+  // The same key, pressed as late as it got there, was no hit.
+  const late = netFight();
+  runTo(late, first.t + 0.25);
+  assert.equal(pressKey(late, "left", first.lane, first.t + 0.25).hit, false);
+});
+
+test("a key let go by is a mistake once it can't be on its way any more", () => {
+  const s = netFight({ slack: 0.3 });
+  const [first] = notes();
+  runTo(s, first.t + HIT_WINDOW + 0.25);
+  assert.equal(s.musical.tally.left.misses, 0);
+  assert.equal(health(s, "left"), whole(s, "left"));
+  runTo(s, first.t + HIT_WINDOW + 0.3 + 3 * STEP);
+  assert.equal(s.musical.tally.left.misses, 1);
+  assert.ok(health(s, "left") < whole(s, "left"), "the rival's volley");
+});
+
+test("a key can't say it was pressed longer ago than keys take to arrive, nor ahead of time", () => {
+  const s = netFight({ slack: 0.3 });
+  const [first, second] = notes();
+  // Long after the first key went by, somebody says they pressed it on time.
+  runTo(s, first.t + HIT_WINDOW + 0.3 + 3 * STEP);
+  assert.equal(pressKey(s, "left", first.lane, first.t).hit, false);
+  // And nobody presses a key that is still to come.
+  const ahead = netFight({ slack: 0.3 });
+  runTo(ahead, second.t - 1);
+  assert.equal(pressKey(ahead, "left", second.lane, second.t).hit, false);
+});
+
+test("against the computer a key is judged when it is pressed, whatever it says", () => {
+  const s = fight({ bots: { right: 1 } });
+  const [first] = notes();
+  runTo(s, first.t + 0.4);
+  assert.equal(pressKey(s, "left", first.lane, first.t).hit, false);
+});
+
+test("a long key is let go when its player says", () => {
+  const note = notes().find((n) => n.hold > 0.6);
+  assert.ok(note, "the written song has long keys");
+  // Let go 0.35 s before its end -- too soon -- and the word takes 0.2 s.
+  const at = note.t + note.hold - 0.35;
+  // (An army that stands the keys let go by before that one.)
+  const sturdy = { slack: 0.3, left: ["soldier"], right: ["tank", "tank", "tank", "tank", "tank"], bots: { left: 1 } };
+  const s = netFight(sturdy);
+  runTo(s, note.t);
+  assert.equal(pressKey(s, "right", note.lane, note.t).hit, true);
+  runTo(s, at + 0.2);
+  const before = s.musical.tally.right.misses;
+  assert.equal(releaseKey(s, "right", note.lane, at).held, false);
+  assert.equal(s.musical.tally.right.misses, before + 1);
+  // (Judged by when the word arrived it would have been kept long enough.)
+  const twin = netFight(sturdy);
+  runTo(twin, note.t);
+  pressKey(twin, "right", note.lane, note.t);
+  runTo(twin, at + 0.2);
+  assert.equal(releaseKey(twin, "right", note.lane).held, true);
+});
+
+test("which key of the song a press is for: the first of its lane within reach, or the first one got wrong", () => {
+  const all = notes();
+  const marks = all.map(() => 0);
+  const [first] = all;
+  assert.deepEqual(keyAt(all, marks, 0, first.lane, first.t + 0.05), { index: 0, hit: true });
+  const other = ["left", "down", "up", "right", "1", "2", "3"].find((lane) => lane !== first.lane && !all.some((n) => n.lane === lane && Math.abs(n.t - first.t) <= HIT_WINDOW));
+  assert.deepEqual(keyAt(all, marks, 0, other, first.t), { index: 0, hit: false });
+  assert.deepEqual(keyAt(all, marks, 0, first.lane, first.t - 1), { index: -1, hit: false }, "nothing within reach");
+  marks[0] = 1;
+  assert.equal(keyAt(all, marks, 0, first.lane, first.t).index !== 0, true, "a key already played isn't played again");
 });

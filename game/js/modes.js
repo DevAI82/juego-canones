@@ -5,16 +5,17 @@
 import { stepSimulation, canSaveNow, saveMoment, createSave, restoreSave, saveSummary } from "./simulate.js";
 import { stepAttack, canSaveAttack, attackSaveMoment, createAttackSave, restoreAttackSave, attackSaveSummary } from "./attack.js";
 import { stepRts } from "./rts.js";
-import { stepDuel } from "./duel.js";
+import { stepMusicalDuel } from "./duelRhythm.js";
 
 const attacking = (state) => state.mode === "attack";
 const attackSave = (save) => Boolean(save) && typeof save === "object" && save.mode === "attack";
 
 export function stepGame(state, dt) {
   // A duel (duel.js) between two players, on the home server; it keeps
-  // its own phases and clock, and stands still while paused.
+  // its own phases and clock, and stands still while paused. (A musical
+  // one's fight is duelRhythm.js's, which steps any other duel as duel.js.)
   if (state.mode === "duel") {
-    if (!state.paused) stepDuel(state, dt);
+    if (!state.paused) stepMusicalDuel(state, dt);
     return;
   }
   if (state.isRts) stepRts(state, dt);

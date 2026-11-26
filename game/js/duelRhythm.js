@@ -54,6 +54,17 @@ const WAITING = 0;
 const HIT = 1; // (or, in a round that starts part-way, before its start)
 const MISSED = 2;
 const HOLDING = 3; // a long key, down
+// (For the screen of a player on the home network, which guesses what the
+// server will make of a key: duelNet.js.)
+export const MARK = { WAITING, HIT, MISSED, HOLDING };
+
+// A duel between two devices (the home server holds it, host.js): a key
+// says when it was pressed -- s into the song, by its player's own music --
+// and is judged by that moment, so the wifi costs nobody a hit. `slack` (of
+// the duel: musical.slack) is how long a key may take to arrive: nothing is
+// a mistake until that long after it. A key can't say it was pressed
+// further ahead of the server's clock than this.
+export const KEY_AHEAD = 0.1;
 
 // So many hits in a row make an army's volleys so many times heavier, the
 // longest streak first: playing well is how an army hits hard. (The user's,
@@ -74,7 +85,9 @@ const both = (value) => ({ left: value(), right: value() });
 // A duel (duel.js's createDuelState, with its options) that is fought to
 // music. `song`: which one (its arena's, unless told). `bots`: the sides
 // the computer plays in the fight -- { right: 0.8 } hits four keys of five.
-export function createMusicalDuel({ song, bots = {}, ...options } = {}) {
+// `slack`: s a key may take to arrive (a duel between two devices; 0 when
+// its players are at this very keyboard).
+export function createMusicalDuel({ song, bots = {}, slack = 0, ...options } = {}) {
   const state = createDuelState(options);
   const played = {};
   for (const side of SIDES) {
@@ -83,6 +96,7 @@ export function createMusicalDuel({ song, bots = {}, ...options } = {}) {
   state.musical = {
     song: songOf(song ?? state.arena).id,
     bots: played,
+    slack: Math.max(0, Number(slack) || 0),
     round: 0, // the round whose fight the rest is of
     time: 0, // s of music played in it
     // For each side, each key of the fight (duelSongs.js's fightChart): 0
@@ -159,10 +173,35 @@ function mistake(m, side, lane, kind) {
 
 // ------------------------------------------------------------ the action
 
+// Which key of a song a press of `lane` at `now` is for, among those not
+// played yet (`marks`, from the index `from` on): the first key of that
+// lane within reach is the one pressed ({ index, hit: true }); failing
+// that, the first key of any lane within reach is the one got wrong
+// ({ index, hit: false }; index -1 with no key within reach at all).
+export function keyAt(notes, marks, from, lane, now) {
+  let wrong = -1;
+  for (let i = from; i < notes.length && notes[i].t <= now + HIT_WINDOW; i++) {
+    if (marks[i] !== WAITING || notes[i].t < now - HIT_WINDOW) continue;
+    if (notes[i].lane === lane) return { index: i, hit: true };
+    if (wrong < 0) wrong = i;
+  }
+  return { index: wrong, hit: false };
+}
+
+// The moment something a player did is judged by: the fight's own, unless
+// the duel allows keys time to arrive and this one says when it was (`at`).
+function momentOf(state, at) {
+  const now = songClock(state);
+  const { slack } = state.musical;
+  if (!(slack > 0) || !Number.isFinite(at)) return now;
+  return Math.max(now - slack, Math.min(at, now + KEY_AHEAD));
+}
+
 // This side presses a key (one of duelSongs.js's LANES). { ok: true, hit }
 // -- hit: it was a key of the song, on time; otherwise it was a mistake --
-// or { ok: false, reason } when there was nothing to play.
-export function pressKey(state, side, lane) {
+// or { ok: false, reason } when there was nothing to play. `at`: when it
+// was pressed, in a duel between two devices (see KEY_AHEAD).
+export function pressKey(state, side, lane, at) {
   if (!fighting(state)) return refuse("phase");
   if (!SIDES.includes(side)) return refuse("side");
   if (!LANES.includes(lane)) return refuse("lane");
@@ -170,44 +209,39 @@ export function pressKey(state, side, lane) {
   if (m.bots[side] !== undefined) return refuse("bot");
   const notes = fightChart(m.song).notes;
   const marks = m.marks[side];
-  const now = songClock(state);
-  // The first key of this lane within reach is the one pressed; failing
-  // that, the first key of any lane within reach is the one got wrong.
-  let wrong = -1;
-  for (let i = m.from[side]; i < notes.length && notes[i].t <= now + HIT_WINDOW; i++) {
-    if (marks[i] !== WAITING || notes[i].t < now - HIT_WINDOW) continue;
-    if (notes[i].lane === lane) {
-      hit(m, side, lane);
-      if (notes[i].hold > 0) {
-        // A long key: it is to stay down until its end (releaseKey).
-        marks[i] = HOLDING;
-        m.held[side].push(i);
-      } else {
-        marks[i] = HIT;
-      }
-      return { ok: true, hit: true, off: now - notes[i].t, hold: notes[i].hold };
+  const now = momentOf(state, at);
+  const found = keyAt(notes, marks, m.from[side], lane, now);
+  if (found.hit) {
+    const note = notes[found.index];
+    hit(m, side, lane);
+    if (note.hold > 0) {
+      // A long key: it is to stay down until its end (releaseKey).
+      marks[found.index] = HOLDING;
+      m.held[side].push(found.index);
+    } else {
+      marks[found.index] = HIT;
     }
-    if (wrong < 0) wrong = i;
+    return { ok: true, hit: true, off: now - note.t, hold: note.hold };
   }
-  if (wrong >= 0) marks[wrong] = MISSED;
+  if (found.index >= 0) marks[found.index] = MISSED;
   mistake(m, side, lane, "wrong");
   return { ok: true, hit: false };
 }
 
 // This side lets go of a key. { ok: true, held } -- held: true, a long key
 // was kept to its end (or near enough); false, it was let go too soon, a
-// mistake; null, the key was holding nothing.
-export function releaseKey(state, side, lane) {
+// mistake; null, the key was holding nothing. `at`: as pressKey's.
+export function releaseKey(state, side, lane, at) {
   if (!fighting(state)) return refuse("phase");
   if (!SIDES.includes(side)) return refuse("side");
   if (!LANES.includes(lane)) return refuse("lane");
   const m = state.musical;
   const notes = fightChart(m.song).notes;
-  const at = m.held[side].findIndex((i) => notes[i].lane === lane);
-  if (at < 0) return { ok: true, held: null };
-  const [index] = m.held[side].splice(at, 1);
+  const held = m.held[side].findIndex((i) => notes[i].lane === lane);
+  if (held < 0) return { ok: true, held: null };
+  const [index] = m.held[side].splice(held, 1);
   const note = notes[index];
-  if (songClock(state) >= note.t + note.hold - RELEASE_SLACK) {
+  if (momentOf(state, at) >= note.t + note.hold - RELEASE_SLACK) {
     m.marks[side][index] = HIT;
     m.events.push({ side, kind: "held", lane, age: 0 });
     return { ok: true, held: true };
@@ -284,7 +318,8 @@ function tick(state) {
     });
     const marks = m.marks[side];
     const accuracy = m.bots[side];
-    const due = accuracy === undefined ? m.time - HIT_WINDOW : m.time + 1e-9;
+    // (A player's key may still be on its way, between two devices.)
+    const due = accuracy === undefined ? m.time - HIT_WINDOW - m.slack : m.time + 1e-9;
     for (let i = m.from[side]; i < notes.length && notes[i].t < due; i++) {
       if (marks[i] !== WAITING) continue;
       if (accuracy !== undefined && duelRandom(state) < accuracy) {

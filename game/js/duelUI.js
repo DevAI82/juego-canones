@@ -541,6 +541,50 @@ export function mountMusicalHangar(container, { onBuy, onReady, onUpgrade, onSel
   };
 }
 
+// A musical duel's keys for fingers (the user's, 2026-11-26: his father
+// plays on a phone): the arrows under the left thumb, laid out as a
+// keyboard's, and the numbers under the right one. Each button is its own
+// target, so two can be down at once and a long key can be kept down.
+// onPress(lane), onRelease(lane): duelSongs.js's LANES.
+const KEY_FACES = { left: "←", down: "↓", up: "↑", right: "→", 1: "1", 2: "2", 3: "3" };
+export function mountDuelKeys(container, { onPress, onRelease }) {
+  container.innerHTML = "";
+  const group = (name, lanes) => {
+    const box = el("div", `dk-group dk-${name}`);
+    for (const lane of lanes) {
+      const button = el("button", `dk-key dk-key-${lane}`, KEY_FACES[lane]);
+      button.type = "button";
+      button.dataset.lane = lane;
+      let down = false;
+      const let_go = () => {
+        if (!down) return;
+        down = false;
+        button.classList.remove("down");
+        onRelease(lane);
+      };
+      button.addEventListener("pointerdown", (evt) => {
+        evt.preventDefault();
+        if (down) return;
+        down = true;
+        button.classList.add("down");
+        try {
+          button.setPointerCapture(evt.pointerId);
+        } catch {
+          // (a pointer that can't be kept: its "up" still comes here)
+        }
+        onPress(lane);
+      });
+      button.addEventListener("pointerup", let_go);
+      button.addEventListener("pointercancel", let_go);
+      button.addEventListener("lostpointercapture", let_go);
+      button.addEventListener("contextmenu", (evt) => evt.preventDefault());
+      box.appendChild(button);
+    }
+    return box;
+  };
+  container.append(group("arrows", ["up", "left", "down", "right"]), group("numbers", ["1", "2", "3"]));
+}
+
 export function updateMusicalHangar(container, view, side, unit) {
   const ui = container._musicalHangar;
   if (!ui) return;

@@ -218,6 +218,25 @@ export async function startServer({ port = 8421, dataDir = path.join(GAME_DIR, "
   };
 }
 
+// This computer's addresses, the home network's first: a PC may have
+// others -- a VPN's (Tailscale's 100.x), a link nobody set up (169.254.x) --
+// which a phone on the wifi can't open, and the first is the one the game
+// tells the other player.
+export function homeFirst(addresses) {
+  const rank = (address) => {
+    const [a, b] = address.split(".").map(Number);
+    if (a === 192 && b === 168) return 0;
+    if (a === 10) return 1;
+    if (a === 172 && b >= 16 && b <= 31) return 2;
+    if (a === 169 && b === 254) return 4;
+    return 3;
+  };
+  return addresses
+    .map((address, index) => ({ address, index }))
+    .sort((x, y) => rank(x.address) - rank(y.address) || x.index - y.index)
+    .map((entry) => entry.address);
+}
+
 function lanAddresses() {
   const out = [];
   for (const ifaces of Object.values(os.networkInterfaces())) {
@@ -225,7 +244,7 @@ function lanAddresses() {
       if (iface.family === "IPv4" && !iface.internal) out.push(iface.address);
     }
   }
-  return out;
+  return homeFirst(out);
 }
 
 // `node server.js`: the family's server. PORT and DATA_DIR let a

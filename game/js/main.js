@@ -2190,6 +2190,8 @@ function duel() {
       shopEl: attackShopEl,
       panelEl: unitUpgradeEl,
       hangarEl: document.getElementById("musical-hangar"),
+      keysEl: document.getElementById("duel-keys"),
+      touch: () => resolveControls(settings.controls, browserControlsEnv()) === "touch",
       resultEl: document.getElementById("duel-result"),
       drawUnit: drawSpriteUnit,
       resetVisuals: () => unitVisuals.keepOnly([]),
@@ -2322,8 +2324,9 @@ async function startNewGame(
 ) {
   if (mode === "duelNet") {
     // A duel against another player: the home server's game from now on
-    // (`level` is the arena); it comes with the server's next news.
-    const result = await askServer({ type: "newDuel", arena: level });
+    // (`level` is the arena; musical: fought to a song, each player on
+    // their own keys); it comes with the server's next news.
+    const result = await askServer({ type: "newDuel", arena: level, musical });
     if (!result.ok) return showToast(result.reason === "game-in-progress" ? GAME_IN_PROGRESS : "No se ha podido empezar el duelo");
     leaveLocalDuel();
     started = true;
@@ -4871,6 +4874,9 @@ function updateDefencePanels() {
 // separate "host" vs "guest" UI, only whichever machine happens to be
 // running server.js becomes the authority both browsers poll.
 const POLL_MS = 120;
+// A musical duel's fight is fast: its news come twice as often, so the
+// rival's volleys and one's own tally show with less delay.
+const POLL_FIGHT_MS = 60;
 // Asking for news says who's asking (playerId) and whether this device
 // plays the attack with the phone's automatic army, which the server then
 // runs for it (host.js).
@@ -4884,7 +4890,7 @@ async function pollState() {
   } catch {
     // transient network hiccup on a LAN -- just try again next tick
   }
-  setTimeout(pollState, POLL_MS);
+  setTimeout(pollState, netDuel() && state.musical && state.phase === "combat" ? POLL_FIGHT_MS : POLL_MS);
 }
 
 // The server's answer: { state, net } (host.js's viewJson) -- the game, its
@@ -4941,7 +4947,12 @@ function checkSeat() {
   }
   if (menu.isOpen() && !menu.isSeatScreen()) return; // (choosing something else)
   const info = netDuel()
-    ? { kind: "duel", league: arenaOf(state.arena).league, free: Object.keys(net.sides).filter((side) => !net.sides[side].connected) }
+    ? {
+        kind: "duel",
+        musical: Boolean(state.musical),
+        league: arenaOf(state.arena).league,
+        free: Object.keys(net.sides).filter((side) => !net.sides[side].connected),
+      }
     : {
         level: state.level,
         money: state.attack?.difficulty,
@@ -4966,7 +4977,8 @@ function drawnView(now) {
   const elapsed = now - snapshotAt;
   const k = span > 0 ? Math.min(1, elapsed / span) : 1;
   const between = (list, prevList, fields) => {
-    const prevById = new Map(prevList.map((o) => [o.id, o]));
+    // (The game before may have been of another kind -- a duel -- with no such list.)
+    const prevById = new Map((prevList || []).map((o) => [o.id, o]));
     return list.map((o) => {
       const p = prevById.get(o.id);
       if (!p) return o;
@@ -5056,7 +5068,8 @@ function loop(now) {
     ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
     duel().frame(dt, {
       running: started && !menu.isOpen(),
-      remote: netDuel() ? { state, net, ask: askServer, address: homeAddress() } : null,
+      // (at: when these news came -- a musical duel keeps time by it.)
+      remote: netDuel() ? { state, net, ask: askServer, address: homeAddress(), at: snapshotAt } : null,
     });
     syncMusicToPause();
     pauseBtn.textContent = state.paused ? "▶" : "⏸";

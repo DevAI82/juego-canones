@@ -88,6 +88,36 @@ Decisiones mías aquí:
 | Las teclas más rápidas son solo cómo se ven: el margen para acertar no cambia | `approachOf`; estrechar el margen sería otra regla |
 | Los ejércitos se recolocan en filas al empezar el combate (no se ven donde se pusieron) | `duelStage.js`; con el carril a 600 px no caben donde están |
 
+## 2 quinquies. Entre dos jugadores, cada uno en su aparato (2026-11-26)
+
+El usuario: «quiero jugar al duelo musical con mi padre pero juega en el móvil y yo en el PC». Hasta aquí el duelo musical solo se jugaba contra la máquina.
+
+**Cómo se juega.** En la página del servidor de casa (`node server.js`), «🎵 Duelo musical (prueba)» pregunta contra quién; «Otro jugador» crea el duelo y enseña la dirección que el otro abre en su aparato, donde le sale «Unirse al duelo». Cada uno compra su ejército sin ver el del otro (la compra tiene reloj, como en cualquier duelo entre dos: 45 s el primer asalto, 30 s los demás) y, cuando los dos dicen «¡A la batalla!», suena la misma canción en los dos aparatos y cada uno toca sus teclas. La revancha coge otra canción.
+
+**Lo que hubo que resolver:**
+
+| Problema | Cómo quedó |
+|---|---|
+| La pulsación viaja por la wifi: llegaría tarde y contaría como fallo | Cada pulsación dice en qué momento de la canción se hizo, según la música de su propio aparato, y el servidor la juzga por ese momento. Nada cuenta como fallo hasta 0,4 s después, por si la tecla está de camino |
+| Las novedades del servidor llegan cada 60–120 ms: el acierto se vería con retraso | El aparato enseña al instante lo que el servidor va a decir de la tecla (misma regla); si el servidor dice otra cosa, vale lo del servidor |
+| Dos aparatos, dos músicas | Cada aparato lleva su reloj de la canción con la música que suena en él, y lo ajusta al del servidor si se separan más de 0,2 s |
+| Un móvil no tiene teclado | Botones en pantalla: las flechas como en un teclado bajo el pulgar izquierdo, los números bajo el derecho (tumbado); de pie, las siete teclas en fila, en el orden del carril. Se pueden pulsar dos a la vez y mantener las largas |
+| El que se une es el bando derecho, y la pantalla está hecha para ver tu ejército a la izquierda | Quien tiene el bando derecho ve el duelo del revés: su ejército a la izquierda y en azul, igual que el otro ve el suyo |
+| La dirección que se enseñaba al otro jugador era la de Tailscale (100.x), que un móvil en la wifi no abre | Primero la de la red de casa (192.168.x) |
+
+**Comprobado** con el servidor de pruebas y dos pestañas (una a tamaño de móvil, con los botones): crear, unirse, comprar, tres asaltos, resultado y revancha; con el teclado, 13 aciertos de 14 teclas (tres de ellas largas) y con los botones 11 seguidos, juzgados por el servidor. **Sin comprobar:** un móvil de verdad (el sonido, el tacto de los botones, cuánto tarda su wifi) y cómo se siente a dos manos.
+
+Decisiones mías aquí:
+
+| Decisión | Si está mal |
+|---|---|
+| 0,4 s de margen para que llegue una tecla (el castigo de un fallo tarda eso más que contra la máquina) | Un número en `host.js` (`KEY_SLACK`) |
+| El servidor se fía del momento que dice cada aparato (dentro de ese margen): en casa nadie hace trampas | `momentOf` en `duelRhythm.js` |
+| Entre dos se empieza igualados (100 $, sin puntos de habilidad), como en el duelo normal entre dos | `freshDuel` en `host.js` |
+| La compra entre dos tiene reloj (45 s / 30 s): quizá corto para quien juega por primera vez en un móvil | `BUY_TIME_FIRST` / `BUY_TIME` en `duel.js`, o sin reloj en el musical |
+| Disposición de los botones (flechas en T a la izquierda, números a la derecha) y su tamaño | `mountDuelKeys` y `#duel-keys` en `duel.css` |
+| Si la canción no ha terminado de cargar en un aparato, el combate no le espera (se pide que cargue durante la compra) | Hacer que «¡A la batalla!» espere a la canción |
+
 ## 3. Decisiones mías, para poder probar
 
 | Decisión | Por qué | Si no es lo que se quería |
