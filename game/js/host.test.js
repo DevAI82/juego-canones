@@ -10,7 +10,8 @@ import { createGameState, createSave } from "./simulate.js";
 import { ROUND_TIME } from "./attack.js";
 import { BUY_TIME_FIRST, ROUND_END_TIME, COMBAT_TIME } from "./duel.js";
 import { fightChart, songList } from "./duelSongs.js";
-import { HIT_WINDOW } from "./duelRhythm.js";
+import { HIT_WINDOW, questionOf } from "./duelRhythm.js";
+import { QUIZ_LANES } from "./duelQuiz.js";
 
 // A host with its saves in memory and a clock the test moves.
 function setup(initial = null) {
@@ -609,4 +610,68 @@ test("a musical duel's rematch is musical too, to another song", async () => {
   assert.ok(again.musical, "still a musical duel");
   assert.ok(again.musical.slack > 0);
   if (songList().length > 1) assert.notEqual(again.musical.song, end.musical.song);
+});
+
+// ------------------------------------------------------------ a Duelo Matemático between two players
+// (The musical duel with questions for keys: duelQuiz.js.)
+
+test("a Duelo Matemático between two players: each answers their own questions, and a rematch is one too", async () => {
+  const s = setup();
+  const { host, view, run } = s;
+  assert.deepEqual(await host.act("A", { type: "newDuel", arena: 1, musical: true, math: true }), { ok: true });
+  assert.deepEqual(await host.act("B", { type: "join", side: "right" }), { ok: true });
+  let v = view("A").state;
+  assert.equal(typeof v.musical.quiz.seed, "number");
+  assert.ok(songList().includes(v.musical.song), "a song plays under it");
+  assert.ok(v.musical.slack > 0);
+  for (let i = 0; i < 2; i++) await host.act("A", { type: "duelBuy", unitType: "tank" });
+  await host.act("B", { type: "duelBuy", unitType: "soldier" });
+  await host.act("A", { type: "duelReady" });
+  await host.act("B", { type: "duelReady" });
+  run(0.2);
+  v = view("A").state;
+  assert.equal(v.phase, "combat");
+  const asked = v.musical.asks.left[0];
+  assert.deepEqual(await host.act("A", { type: "duelKey", lane: "1", at: asked.open - 1 }), { ok: false, reason: "nothing" });
+  // On to the question; A answers right, B wrong.
+  for (let guard = 0; songAt(view("A")) < asked.open + 1; guard++) {
+    assert.ok(guard < 2000);
+    view("B");
+    run(0.05);
+  }
+  v = view("A").state;
+  const mine = questionOf(v.musical, v.musical.asks.left[0]);
+  const theirs = questionOf(v.musical, v.musical.asks.right[0]);
+  const answered = await host.act("A", { type: "duelKey", lane: mine.lane, at: songAt(view("A")) });
+  assert.equal(answered.hit, true);
+  const failed = await host.act("B", { type: "duelKey", lane: QUIZ_LANES.find((lane) => lane !== theirs.lane), at: songAt(view("B")) });
+  assert.equal(failed.ok && !failed.hit, true);
+  run(0.2);
+  v = view("B").state;
+  assert.equal(v.musical.tally.left.hits, 1);
+  assert.equal(v.musical.tally.right.misses, 1);
+  assert.equal(v.musical.asks.left.length, 2);
+  // (B's one soldier didn't stand two tanks' volley: the round is A's.)
+  assert.equal(v.lastRound.winner, "left");
+
+  // To the end, nobody answering: A's army is the bigger.
+  for (let round = 0; round < 6 && view("A").state.phase !== "over"; round++) {
+    for (let guard = 0; guard < 40 && view("A").state.phase === "roundEnd"; guard++) {
+      view("B");
+      run(0.25);
+    }
+    if (view("A").state.phase === "over") break;
+    await playRound(s);
+    for (let guard = 0; guard < 40 && view("A").state.phase === "roundEnd"; guard++) {
+      view("B");
+      run(0.25);
+    }
+  }
+  assert.equal(view("A").state.phase, "over");
+  assert.deepEqual(await host.act("B", { type: "rematch" }), { ok: true });
+  const again = view("A").state;
+  assert.ok(again.musical.quiz, "still a Duelo Matemático");
+  assert.notEqual(again.musical.quiz.seed, v.musical.quiz.seed, "with other questions");
+  // And a musical duel is still one of keys.
+  assert.equal((await musicalDuel()).view("A").state.musical.quiz, undefined);
 });

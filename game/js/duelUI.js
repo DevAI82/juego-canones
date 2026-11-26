@@ -110,7 +110,7 @@ export function duelHud(view, side) {
   const mine = view.sides[side];
   const timed = view.phase === "combat" || (view.phase === "buy" && view.clock !== null);
   return {
-    head: `${view.musical ? "Duelo musical" : "Duelo"} · Liga ${arenaOf(view.arena).league} · Asalto ${view.round}`,
+    head: `${view.musical ? (view.musical.quiz ? "Duelo matemático" : "Duelo musical") : "Duelo"} · Liga ${arenaOf(view.arena).league} · Asalto ${view.round}`,
     money: `$${Math.floor(mine.money)}`,
     army: `Unidades ${mine.army.length}/${UNIT_CAP}`,
     clock: timed ? clock(view.clock) : null,
@@ -126,6 +126,7 @@ export function duelHint(view, side) {
   const mine = view.sides[side];
   if (mine.ready) return "Esperando al rival…";
   if (mine.army.length === 0) return "Compra tu ejército en la tienda";
+  if (view.musical && view.musical.quiz) return "Coloca delante a los que más aguantan y pulsa «¡Listo!»: empiezan las operaciones";
   if (view.musical) return "Coloca delante a los que más aguantan y pulsa «¡Listo!»: empieza la música";
   return "Arrastra tus unidades para colocarlas y pulsa «¡Listo!»";
 }
@@ -610,7 +611,7 @@ export function updateMusicalHangar(container, view, side, unit) {
   ui.readyBtn.innerHTML =
     view.phase === "buy" && mine.ready
       ? `<span class="mh-ready-main">✔ LISTO</span><span class="mh-ready-sub">Esperando…</span>`
-      : `<span class="mh-ready-main">▶ ¡A LA BATALLA!</span><span class="mh-ready-sub">Empezar la música</span>`;
+      : `<span class="mh-ready-main">▶ ¡A LA BATALLA!</span><span class="mh-ready-sub">${view.musical && view.musical.quiz ? "Empiezan las operaciones" : "Empezar la música"}</span>`;
   ui.readyBtn.classList.toggle("pulse", !ui.readyBtn.disabled && mine.army.length > 0);
 
   // Subtle guidance pill

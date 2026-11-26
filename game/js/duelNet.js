@@ -19,7 +19,7 @@
 // No page here: duelScreen.js runs it.
 import { ARENA } from "./duelArenas.js";
 import { fightChart } from "./duelSongs.js";
-import { MARK, RELEASE_SLACK, keyAt, songClock } from "./duelRhythm.js";
+import { MARK, RELEASE_SLACK, keyAt, songClock, questionOf } from "./duelRhythm.js";
 
 // s the browser's song may be from the server's before it jumps to it.
 // (host.js's KEY_SLACK allows for this and the wifi.)
@@ -90,6 +90,7 @@ export function mirrored(view) {
           owed: across(m.owed),
           reload: across(m.reload),
           tally: across(m.tally),
+          ...(m.asks ? { asks: across(m.asks) } : {}),
           events: m.events.map((event) => ({ ...event, side: OTHER[event.side] || event.side })),
         }
       : m,
@@ -154,6 +155,7 @@ export function createNetFight() {
   function press(view, side, lane, ahead = 0) {
     if (clock === null || !view.musical || !view.musical.marks[side]) return null;
     const at = clock + Math.max(0, ahead);
+    if (view.musical.quiz) return answer(view, side, lane, at);
     const notes = fightChart(view.musical.song).notes;
     const found = keyAt(notes, marksOf(view, side), view.musical.from[side] || 0, lane, at);
     if (found.index >= 0) {
@@ -162,12 +164,27 @@ export function createNetFight() {
     return { hit: found.hit, at };
   }
 
+  // A Duelo Matemático's key: the answer to this player's question -- the
+  // first one of theirs with no word yet, the server's or this browser's.
+  // { hit, at }; or { hit: false, idle: true, at } with no question to
+  // answer (between two, or before the first): nothing to tell the server.
+  function answer(view, side, lane, at) {
+    const m = view.musical;
+    const index = marksOf(view, side).findIndex((mark) => mark === MARK.WAITING);
+    const asked = index >= 0 ? m.asks[side][index] : null;
+    if (!asked || at < asked.open) return { hit: false, idle: true, at };
+    const hit = at <= asked.t && lane === questionOf(m, asked).lane;
+    guesses.set(index, hit ? MARK.HIT : MARK.MISSED);
+    return { hit, at };
+  }
+
   // This player lets go of a key, now (`ahead`: as press's). { held, at }
   // -- held: as duelRhythm.js's releaseKey says (null: it was holding
   // nothing).
   function release(view, side, lane, ahead = 0) {
     if (clock === null || !view.musical || !view.musical.marks[side]) return null;
     const at = clock + Math.max(0, ahead);
+    if (view.musical.quiz) return { held: null, at }; // (an answer isn't held)
     const notes = fightChart(view.musical.song).notes;
     const index = marksOf(view, side).findIndex((mark, i) => mark === MARK.HOLDING && notes[i].lane === lane);
     if (index < 0) return { held: null, at };

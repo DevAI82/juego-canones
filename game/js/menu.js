@@ -66,6 +66,7 @@ export function createMenu(root, handlers) {
   let chosenSide = null;
   let duelVersus = false; // a duel against another player at home, not the computer
   let duelMusical = false; // the duel being chosen is a musical one
+  let duelMath = false; // ... and a Duelo Matemático: questions for keys (duelQuiz.js)
 
   function open(ctx, screen) {
     context = ctx;
@@ -239,10 +240,10 @@ export function createMenu(root, handlers) {
   async function chooseMusicalDuel() {
     if (duelVersus) {
       if (!(await confirm("Esto empezará una partida nueva para todos los jugadores. ¿Seguir?"))) return;
-      return handlers.onNewGame(1, { mode: "duelNet", musical: true });
+      return handlers.onNewGame(1, { mode: "duelNet", musical: true, math: duelMath });
     }
     if (handlers.hasGame() && !(await confirm("Dejarás la partida en curso. ¿Empezar el duelo?"))) return;
-    handlers.onNewGame(1, { mode: "duel", musical: true });
+    handlers.onNewGame(1, { mode: "duel", musical: true, math: duelMath });
   }
 
   function renderLevels() {
@@ -261,7 +262,7 @@ export function createMenu(root, handlers) {
     if (!join) return;
     if (info.kind === "duel") {
       // A duel waiting for its second player: one side to take.
-      root.querySelector(".join-info").textContent = `${info.musical ? "🎵 Duelo musical" : "Duelo"} · Arena de la liga ${info.league}`;
+      root.querySelector(".join-info").textContent = `${info.math ? "🧮 Duelo matemático" : info.musical ? "🎵 Duelo musical" : "Duelo"} · Arena de la liga ${info.league}`;
       const sides = root.querySelector(".join-sides");
       sides.textContent = "";
       const button = document.createElement("button");
@@ -272,7 +273,11 @@ export function createMenu(root, handlers) {
       name.textContent = "Unirse al duelo";
       const desc = document.createElement("span");
       desc.className = "menu-choice-desc";
-      desc.textContent = info.musical ? "Tu ejército contra el suyo, al ritmo de la canción" : "Tu ejército contra el suyo";
+      desc.textContent = info.math
+        ? "Tu ejército contra el suyo, a base de operaciones"
+        : info.musical
+          ? "Tu ejército contra el suyo, al ritmo de la canción"
+          : "Tu ejército contra el suyo";
       button.append(name, desc);
       sides.append(button);
       return;
@@ -356,15 +361,18 @@ export function createMenu(root, handlers) {
       }
       // The musical duel, on trial: one league. At home, first against
       // whom; solo, it is against the computer.
-      if (chosenMode === "duelMusic") {
+      // (The Duelo Matemático is the same duel, with questions for keys.)
+      if (chosenMode === "duelMusic" || chosenMode === "duelMath") {
         duelVersus = false;
         duelMusical = true;
+        duelMath = chosenMode === "duelMath";
         return handlers.networked ? show("duel-rival") : chooseMusicalDuel();
       }
       if (chosenMode === "duel") {
         // At home, first against whom; solo, it is against the computer.
         duelVersus = false;
         duelMusical = false;
+        duelMath = false;
         return show(handlers.networked ? "duel-rival" : "duel");
       }
       return show("levels");

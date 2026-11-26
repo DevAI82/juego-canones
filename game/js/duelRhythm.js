@@ -50,10 +50,12 @@ export const VOLLEY_RELOAD = 0.5;
 // the first round stands some ten volleys of one like it.)
 export const VOLLEY_POWER = 1;
 // Times a unit's shot, again, in a Duelo Matemático: a question takes ten
-// times as long as a key, so a mistake has to cost more for a round to be
-// settled. (A first figure: some four mistakes destroy an army like one's
-// own.)
-export const QUIZ_VOLLEY = 2.5;
+// times as long as a key, so a mistake costs somewhat more. (A first
+// figure: an army stands six or seven mistakes against one like it, and
+// three against one that is its match -- at 2.5 a tank fell to a rocket
+// truck's first volley, which is no game for a child. A round that nobody
+// loses so goes to its time, and to whoever has more army left.)
+export const QUIZ_VOLLEY = 1.5;
 // How often the computer hits a key, by its league's grade (the first one
 // first). First figures: nobody has played against them yet.
 export const BOT_ACCURACY = [0.72, 0.8, 0.86, 0.91, 0.95, 0.98];

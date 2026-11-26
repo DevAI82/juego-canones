@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { STEP, buyUnit, setReady, duelView } from "./duel.js";
 import { fightChart } from "./duelSongs.js";
 import { TRACKS } from "./duelTracks.js";
-import { HIT_WINDOW, MARK, createMusicalDuel, stepMusicalDuel, pressKey, songClock } from "./duelRhythm.js";
+import { HIT_WINDOW, MARK, createMusicalDuel, stepMusicalDuel, pressKey, songClock, questionOf } from "./duelRhythm.js";
+import { QUIZ_LANES } from "./duelQuiz.js";
 import { ARENA } from "./duelArenas.js";
 import { RESYNC, serverClock, createOnce, createNetFight, mirrored } from "./duelNet.js";
 
@@ -246,4 +247,64 @@ test("a key pressed between two frames is timed to the moment, not to the frame 
   mine.keep(now, 0, 0);
   assert.equal(mine.press(now, "left", long.lane).hit, true);
   assert.equal(mine.release(now, "left", long.lane, long.hold - 0.05).held, true, "kept to its end, by the moment");
+});
+
+// ------------------------------------------------------------ the Duelo Matemático
+// (Questions instead of keys: duelQuiz.js. Each side has its own.)
+
+function servedQuiz() {
+  const s = createMusicalDuel({ arena: 1, seed: 7, slack: SLACK, quiz: true, left: { money: 5000 }, right: { money: 5000 } });
+  for (const side of ["left", "right"]) {
+    for (let i = 0; i < 4; i++) assert.ok(buyUnit(s, side, "tank").ok);
+    setReady(s, side);
+  }
+  stepMusicalDuel(s, STEP);
+  return s;
+}
+
+test("an answer shows at once as the server will judge it, and the server judges it so", () => {
+  const s = servedQuiz();
+  const asked = s.musical.asks.left[0];
+  const question = questionOf(s.musical, asked);
+  const net = createNetFight();
+  // Before the question comes there is nothing to answer: no guess, nothing to send.
+  let told = news(s, "left");
+  net.keep(told, 0, 0);
+  assert.deepEqual(net.press(told, "left", question.lane), { hit: false, idle: true, at: net.clock() });
+  assert.equal(net.view(told, "left", 0).musical.marks.left[0], MARK.WAITING);
+  // It is on its way down: the right answer.
+  runTo(s, asked.open + 2);
+  told = news(s, "left");
+  net.keep(told, RESYNC + 1, 0);
+  net.keep(told, 0, 0);
+  const pressed = net.press(told, "left", question.lane);
+  assert.equal(pressed.hit, true);
+  assert.equal(net.view(told, "left", 0).musical.marks.left[0], MARK.HIT, "shown before the server's word");
+  assert.equal(told.musical.marks.left[0], MARK.WAITING);
+  // Answered already: the same key again is nothing, until the next question is told.
+  assert.equal(net.press(told, "left", question.lane).idle, true);
+  runTo(s, asked.open + 2.3);
+  assert.equal(pressKey(s, "left", question.lane, pressed.at).hit, true);
+  // A wrong answer, guessed a mistake.
+  runTo(s, s.musical.asks.left[1].open + 1);
+  told = news(s, "left");
+  net.keep(told, RESYNC + 1, 0);
+  net.keep(told, 0, 0);
+  const next = questionOf(told.musical, told.musical.asks.left[1]);
+  const wrong = net.press(told, "left", QUIZ_LANES.find((lane) => lane !== next.lane));
+  assert.equal(wrong.hit, false);
+  assert.equal(wrong.idle, undefined);
+  assert.equal(net.view(told, "left", 0).musical.marks.left[1], MARK.MISSED);
+});
+
+test("the right-hand player's questions change sides with everything else", () => {
+  const s = servedQuiz();
+  runTo(s, s.musical.asks.right[0].open + 1);
+  pressKey(s, "right", questionOf(s.musical, s.musical.asks.right[0]).lane);
+  const told = news(s, "right");
+  const seen = mirrored(told);
+  assert.deepEqual(seen.musical.asks.left, told.musical.asks.right);
+  assert.deepEqual(seen.musical.asks.right, told.musical.asks.left);
+  assert.equal(seen.musical.asks.left.length, 2);
+  assert.deepEqual(seen.musical.quiz, told.musical.quiz);
 });

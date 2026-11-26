@@ -10,7 +10,8 @@
 //     §11): one tab is the left side, another the right, each shops for
 //     its own army without seeing the other's, and the armies then fight
 //     by themselves -- or, in a musical duel (duelRhythm.js), as their
-//     players keep to the song's keys, each on their own device.
+//     players keep to the song's keys, each on their own device; or, in a
+//     Duelo Matemático (duelQuiz.js), as they answer their sums.
 // It ticks the game, makes the autosaves (autosave.js), runs the automatic
 // army for an attacker playing on a phone (autoArmy.js), and answers each
 // tab with the game as that tab needs it (viewJson).
@@ -153,15 +154,16 @@ export function createHost({ store, now = () => Date.now(), initial = null, log 
   // A new duel between two players: both start alike, the purchase has
   // its clock, and nothing runs until the second player is there. A
   // musical one takes the next song of a shuffled round of them (as
-  // against the computer, duelScreen.js) and is played by both.
+  // against the computer, duelScreen.js) and is played by both; `math`,
+  // its keys are the answers to questions (a Duelo Matemático).
   let songs = {};
-  function freshDuel(arena, waiting, musical = false) {
+  function freshDuel(arena, waiting, musical = false, math = false) {
     const options = { arena: Number(arena), seed: Math.floor(Math.random() * 0x7fffffff), timed: true };
     let next;
     if (musical) {
       const drawn = drawSong(songs);
       songs = drawn.bag;
-      next = createMusicalDuel({ ...options, song: drawn.song, slack: KEY_SLACK });
+      next = createMusicalDuel({ ...options, song: drawn.song, slack: KEY_SLACK, quiz: math });
     } else {
       next = createDuelState(options);
     }
@@ -236,7 +238,7 @@ export function createHost({ store, now = () => Date.now(), initial = null, log 
         const nextSeats = createSeats(DUEL_SIDES);
         nextSeats.waiting = true;
         sit(nextSeats, "left", playerId, t);
-        setGame(freshDuel(body.arena, true, Boolean(body.musical)), nextSeats);
+        setGame(freshDuel(body.arena, true, Boolean(body.musical), Boolean(body.math)), nextSeats);
         return ok;
       }
       case "restart":
@@ -265,7 +267,7 @@ export function createHost({ store, now = () => Date.now(), initial = null, log 
           seats.pausedBy = null;
           seats.gone = null;
           seats.waiting = false;
-          setGame(freshDuel(state.arena, false, Boolean(state.musical)), seats);
+          setGame(freshDuel(state.arena, false, Boolean(state.musical), Boolean(state.musical && state.musical.quiz)), seats);
           return ok;
         }
         if (!state.gameOver) return refuse("not-over");

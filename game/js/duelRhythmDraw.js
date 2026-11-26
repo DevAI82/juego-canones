@@ -198,7 +198,7 @@ function drawSign(ctx, lane, x, y, color, scaleX, scaleY = scaleX, glow = null) 
   ctx.restore();
 }
 
-function shout(ctx, text, x, y, { size, color, alpha = 1, glow = null }) {
+export function shout(ctx, text, x, y, { size, color, alpha = 1, glow = null }) {
   ctx.save();
   ctx.globalAlpha = alpha;
   ctx.font = `900 ${size}px sans-serif`;
@@ -652,19 +652,16 @@ function drawReceptorDock(ctx, scene, now, streak) {
   ctx.restore();
 }
 
-export function drawRhythm(ctx, scene) {
-  const { view, side } = scene;
-  const m = view.musical;
-  const chart = fightChart(m.song);
-  const now = songClock(view);
-  const marks = m.marks[side] || [];
-  const approach = scene.approach || APPROACH;
-  const streak = m.tally[side].streak;
+// The highway a duel's keys come down: its deck, its rails (which light up
+// with the streak) and its song's beats rushing forward. `lanes`: with the
+// seven keys' lanes marked on it (a musical duel's; a Duelo Matemático's
+// questions come down its middle, duelQuizDraw.js).
+export function drawHighway(ctx, { song, now, approach = APPROACH, streak = 0, lanes = true }) {
   const railOuter = WIDTH / 2 + 24;
   const railInner = WIDTH / 2 + 6;
   const horizonFadeEnd = TRACK.top + 88;
 
-  // --- 1. Smoked-glass 3D highway deck fading smoothly into horizon mist + chrome neon side rails
+  // Smoked-glass 3D highway deck fading smoothly into horizon mist + chrome neon side rails
   ctx.save();
   // Elevated cast shadow under highway edges (fades cleanly to 0 at horizon!)
   highwayPoly(ctx, -(railOuter + 18), railOuter + 18, TRACK.top, TRACK.bottom + 12);
@@ -690,6 +687,7 @@ export function drawRhythm(ctx, scene) {
   highwayPoly(ctx, -railInner, railInner, TRACK.top, TRACK.bottom);
   ctx.clip();
 
+  if (lanes) {
   // Subtle colored lane glow washes converging toward horizon
   LANES.forEach((lane, i) => {
     const off = laneX(i) - MID;
@@ -740,8 +738,10 @@ export function drawRhythm(ctx, scene) {
     }
   }
 
+  } // (lanes)
+
   // Beat and bar lines rushing forward in 3D perspective
-  const beats = beatLines(m.song, now, now + approach);
+  const beats = beatLines(song, now, now + approach);
   let beatPulse = 0;
   for (const line of beats) {
     const y = keyY(line.t, now, approach);
@@ -806,6 +806,19 @@ export function drawRhythm(ctx, scene) {
     ctx.restore();
   }
   ctx.restore();
+}
+
+export function drawRhythm(ctx, scene) {
+  const { view, side } = scene;
+  const m = view.musical;
+  const chart = fightChart(m.song);
+  const now = songClock(view);
+  const marks = m.marks[side] || [];
+  const approach = scene.approach || APPROACH;
+  const streak = m.tally[side].streak;
+
+  // --- 1. The highway
+  drawHighway(ctx, { song: m.song, now, approach, streak });
 
   // --- 2. 3D Backlit Gunmetal Receptor Dock at TRACK.line
   drawReceptorDock(ctx, scene, now, streak);
@@ -918,8 +931,18 @@ export function drawRhythm(ctx, scene) {
   }
   ctx.restore();
 
+  // --- 5 to 7. What the player's last key was worth
+  drawRhythmFeedback(ctx, scene);
+}
+
+// What the player's last key was worth, in words: under the dock, the
+// streak's cheer or the mistake; over the highway, the big "¡FALLO!" and
+// the streaks of 10 and 25. `saidY`: where the words under the dock go.
+export function drawRhythmFeedback(ctx, scene, { saidY = TRACK.line + 72 } = {}) {
+  const { view, side } = scene;
+  const m = view.musical;
+
   // --- 5. Latest key feedback right below the receptor dock
-  const saidY = TRACK.line + 72;
   const last = [...m.events].reverse().find((e) => e.side === side);
   if ((m.held[side] || []).length > 0) {
     shout(ctx, "¡MANTÉN!", MID, saidY, { size: 30, color: "#ffe27a", glow: "#ffaa00" });
@@ -1415,7 +1438,7 @@ export function drawBuyHud(ctx, scene) {
   ctx.font = "900 13px sans-serif";
   ctx.textAlign = "left";
   ctx.fillStyle = "#ffe27a";
-  ctx.fillText("🎵 DUELO MUSICAL", 16, 24);
+  ctx.fillText(m && m.quiz ? "🧮 DUELO MATEMÁTICO" : "🎵 DUELO MUSICAL", 16, 24);
   ctx.font = "bold 12px sans-serif";
   ctx.fillStyle = "rgba(215, 232, 248, 0.85)";
   ctx.fillText(`LIGA ${arenaOf(view.arena).league.toUpperCase()}`, 16, 42);

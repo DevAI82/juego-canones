@@ -2320,13 +2320,14 @@ const GAME_IN_PROGRESS = "Hay una partida uno contra otro en marcha: solo sus do
 // fights are played on the keyboard, to music).
 async function startNewGame(
   level,
-  { mode = "defense", difficulty = "normal", side = "defense", money = "normal", submode = "campaign", musical = false } = {},
+  { mode = "defense", difficulty = "normal", side = "defense", money = "normal", submode = "campaign", musical = false, math = false } = {},
 ) {
   if (mode === "duelNet") {
     // A duel against another player: the home server's game from now on
     // (`level` is the arena; musical: fought to a song, each player on
-    // their own keys); it comes with the server's next news.
-    const result = await askServer({ type: "newDuel", arena: level, musical });
+    // their own keys; math: a Duelo Matemático, questions for keys); it
+    // comes with the server's next news.
+    const result = await askServer({ type: "newDuel", arena: level, musical, math });
     if (!result.ok) return showToast(result.reason === "game-in-progress" ? GAME_IN_PROGRESS : "No se ha podido empezar el duelo");
     leaveLocalDuel();
     started = true;
@@ -2351,7 +2352,7 @@ async function startNewGame(
   } else if (mode === "duel") {
     // `level` is the arena (duelArenas.js); against the computer.
     localDuel = true;
-    state = duel().start(level, { musical });
+    state = duel().start(level, { musical, math });
   } else if (mode === "attack") {
     state = createAttackState(level, difficulty);
   } else if (mode === "versus") {
@@ -4950,6 +4951,7 @@ function checkSeat() {
     ? {
         kind: "duel",
         musical: Boolean(state.musical),
+        math: Boolean(state.musical && state.musical.quiz),
         league: arenaOf(state.arena).league,
         free: Object.keys(net.sides).filter((side) => !net.sides[side].connected),
       }

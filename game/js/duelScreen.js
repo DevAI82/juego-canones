@@ -63,6 +63,7 @@ import { stagePlaces, armyHealth } from "./duelStage.js";
 import { createDuelMusicStage } from "./duelMusicStage.js";
 import { drawSong } from "./duelSongs.js";
 import { createNetFight, createOnce, mirrored } from "./duelNet.js";
+import { drawQuiz, quizLaneAt } from "./duelQuizDraw.js";
 
 // Against the computer the player is always the left-hand side.
 const PLAYER = "left";
@@ -87,7 +88,8 @@ const NEWS_EVERY = 0.12; // s between the home server's news (main.js's POLL_MS)
 const SETTLE = 0.5; // s a unit just dropped stays where it was dropped, until the server says
 
 // A musical duel's keys (duelRhythm.js), by the keyboard's: the arrows, and
-// the numbers of either the top row or the number pad.
+// the numbers of either the top row or the number pad. (The 4 is the Duelo
+// Matemático's, whose keys are its four answers: duelQuiz.js.)
 const KEY_LANE = {
   ArrowLeft: "left",
   ArrowDown: "down",
@@ -96,9 +98,11 @@ const KEY_LANE = {
   Digit1: "1",
   Digit2: "2",
   Digit3: "3",
+  Digit4: "4",
   Numpad1: "1",
   Numpad2: "2",
   Numpad3: "3",
+  Numpad4: "4",
 };
 
 export function createDuelScreen({
@@ -229,7 +233,10 @@ export function createDuelScreen({
 
   // A new duel in this arena against the computer of its league.
   let songs = {}; // the musical duels' songs still to play (duelSongs.js's drawSong)
-  function start(arenaId, { musical = false } = {}) {
+  // (musical: fought to a song, on the keyboard; math: a Duelo Matemático,
+  // the same with questions for keys.)
+  function start(arenaId, { musical = false, math = false } = {}) {
+    musical = musical || math;
     remote = null;
     profile = loadProfile(storage);
     arena = Math.min(arenaOf(arenaId).id, profile.league);
@@ -241,7 +248,7 @@ export function createDuelScreen({
       songs = drawn.bag;
       options.song = drawn.song;
     }
-    state = musical ? createMusicalDuel({ ...options, bots: { [RIVAL]: BOT_ACCURACY[grade - 1] } }) : createDuelState(options);
+    state = musical ? createMusicalDuel({ ...options, bots: { [RIVAL]: BOT_ACCURACY[grade - 1] }, quiz: math }) : createDuelState(options);
     if (musical && music) music.load(state.musical.song);
     if (musical) photoStage.preload(arena);
     state.paused = false;
@@ -422,10 +429,11 @@ export function createDuelScreen({
     profile = mine;
     const ask = remote && remote.ask;
     const result = duelResult(d, side, gained, mine, rival);
-    if (d.musical) result.league = "Duelo musical de prueba: no cuenta para tu liga ni da experiencia";
+    const math = Boolean(d.musical && d.musical.quiz);
+    if (d.musical) result.league = `Duelo ${math ? "matemático" : "musical"} de prueba: no cuenta para tu liga ni da experiencia`;
     showDuelResult(resultEl, result, {
       onRematch: () =>
-        ask ? ask({ type: "rematch" }).then((r) => r.ok || refuse(r.reason)) : onRematch(arena, { musical: Boolean(d.musical) }),
+        ask ? ask({ type: "rematch" }).then((r) => r.ok || refuse(r.reason)) : onRematch(arena, { musical: Boolean(d.musical), math }),
       onExit,
     });
   }
@@ -545,7 +553,8 @@ export function createDuelScreen({
     syncShopVisibility(isMusical);
     if (hangarEl) hangarEl.classList.toggle("hidden", !musicalBuy);
     // A phone has no keyboard: the keys, under the player's thumbs.
-    if (keysEl) keysEl.classList.toggle("hidden", !(playing && !d.paused && Boolean(side) && touch()));
+    // (A Duelo Matemático's answers are pressed where they are drawn.)
+    if (keysEl) keysEl.classList.toggle("hidden", !(playing && !d.musical.quiz && !d.paused && Boolean(side) && touch()));
 
     const scene = {
       view,
@@ -643,7 +652,7 @@ export function createDuelScreen({
       };
 
       drawRhythmSides(ctx, rhythm);
-      if (playing) drawRhythm(ctx, rhythm);
+      if (playing) (view.musical.quiz ? drawQuiz : drawRhythm)(ctx, rhythm);
       drawVolleys(ctx, rhythm);
       drawDuelBursts(ctx, scene);
       ctx.restore();
@@ -691,7 +700,7 @@ export function createDuelScreen({
   function pressLane(lane) {
     if (remote) {
       const guess = netFight.press(lastNews, mySide(), lane, sinceKept());
-      if (!guess) return;
+      if (!guess || guess.idle) return; // (no question to answer: nothing happens)
       presses[lane] = { age: 0, hit: guess.hit };
       if (!guess.hit) playSound("error");
       remote.ask({ type: "duelKey", lane, at: guess.at });
@@ -733,7 +742,7 @@ export function createDuelScreen({
 
   function pointerDown(pos) {
     if (playingKeys()) {
-      const lane = laneAt(pos);
+      const lane = duel().musical.quiz ? quizLaneAt(pos) : laneAt(pos);
       if (lane) pressLane(lane);
       fingerLane = lane;
       return;
