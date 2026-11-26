@@ -79,7 +79,15 @@ export function mirrored(view) {
     sides: { left: sideOver(view.sides.right), right: sideOver(view.sides.left) },
     units: view.units.map(turned),
     shots: view.shots.map((shot) => ({ ...shot, side: OTHER[shot.side] || shot.side, from: over(shot.from), to: over(shot.to) })),
-    lastRound: last ? { ...last, winner: OTHER[last.winner] || last.winner, income: across(last.income) } : last,
+    lastRound: last
+      ? {
+          ...last,
+          winner: OTHER[last.winner] || last.winner,
+          income: across(last.income),
+          // (A Duelo Matemático's prize for the round's quickest.)
+          ...(last.speed ? { speed: { ...last.speed, side: OTHER[last.speed.side] || last.speed.side, spare: across(last.speed.spare) } } : {}),
+        }
+      : last,
     musical: m
       ? {
           ...m,
@@ -90,7 +98,9 @@ export function mirrored(view) {
           owed: across(m.owed),
           reload: across(m.reload),
           tally: across(m.tally),
-          ...(m.asks ? { asks: across(m.asks), shoots: across(m.shoots), loaded: across(m.loaded) } : {}),
+          ...(m.asks
+            ? { asks: across(m.asks), shoots: across(m.shoots), loaded: across(m.loaded), stats: across(m.stats), totals: across(m.totals) }
+            : {}),
           events: m.events.map((event) => ({ ...event, side: OTHER[event.side] || event.side })),
         }
       : m,

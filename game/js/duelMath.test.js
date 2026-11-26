@@ -9,6 +9,10 @@ import {
   QUIZ_STREAK_FROM,
   QUIZ_STREAK_VOLLEY,
   QUIZ_STREAK_RELOAD,
+  QUIZ_FAST,
+  QUIZ_FAST_POWER,
+  QUIZ_SPEED_PRIZE,
+  QUIZ_ROUND_END,
   createMusicalDuel,
   stepMusicalDuel,
   pressKey,
@@ -245,8 +249,9 @@ test("on a streak a right answer fires one's own army: from the third in a row, 
   pressKey(twin, "right", wrong(twin, "right"));
   for (let i = 0; i < 3; i++) stepMusicalDuel(twin, STEP);
   const mistake = whole(twin, "right") - health(twin, "right");
-  assert.ok(Math.abs(streak / mistake - QUIZ_STREAK_VOLLEY / QUIZ_VOLLEY) < 1e-6, `${streak} against a mistake's ${mistake}`);
-  assert.ok(QUIZ_STREAK_VOLLEY < QUIZ_VOLLEY, "a mistake costs more than a right answer takes");
+  // (Answered at once: a quick answer's volley, the heaviest a right answer fires.)
+  assert.ok(Math.abs(streak / mistake - (QUIZ_STREAK_VOLLEY * QUIZ_FAST_POWER) / QUIZ_VOLLEY) < 1e-6, `${streak} against a mistake's ${mistake}`);
+  assert.ok(QUIZ_STREAK_VOLLEY * QUIZ_FAST_POWER < QUIZ_VOLLEY, "a mistake costs more than a right answer takes");
 });
 
 test("an army on a streak fires no more often than it reloads, however fast its player answers", () => {
@@ -312,4 +317,116 @@ test("on the home network an answer says when it was given, and has time to arri
   const silent = quiz({ slack: 0.4 });
   runTo(silent, silent.musical.asks.right[0].t + 0.4 + 3 * STEP);
   assert.equal(silent.musical.tally.right.misses, 1);
+});
+
+// ------------------------------------------------------------ quickness, and what was done
+// (The user's, 2026-11-27: "the one who gets it right faster should have
+// some reward, and statistics afterwards: not only getting it right before
+// it comes down, but rewarding getting it right and being quick".)
+
+test("a right answer with half its time still to go is a quick one, and its volley is heavier", () => {
+  assert.ok(QUIZ_FAST >= 0.4 && QUIZ_FAST <= 0.6 && QUIZ_FAST_POWER > 1);
+  // On a streak, answered at once and answered late: what each takes of the rival's army.
+  const taken = (wait) => {
+    const s = quiz({ left: STURDY, right: STURDY, bots: { right: 1 } });
+    for (let k = 1; k < QUIZ_STREAK_FROM; k++) {
+      runTo(s, current(s, "left").open + 0.3);
+      pressKey(s, "left", right(s, "left"));
+    }
+    const asked = current(s, "left");
+    runTo(s, asked.open + wait * (asked.t - asked.open));
+    const before = health(s, "right");
+    assert.equal(pressKey(s, "left", right(s, "left")).hit, true);
+    const event = s.musical.events.at(-1);
+    for (let i = 0; i < 3; i++) stepMusicalDuel(s, STEP);
+    return { lost: before - health(s, "right"), fast: event.fast };
+  };
+  const quick = taken(0.2);
+  const slow = taken(0.8);
+  assert.equal(quick.fast, true);
+  assert.equal(slow.fast, false);
+  assert.ok(slow.lost > 0);
+  assert.ok(Math.abs(quick.lost / slow.lost - QUIZ_FAST_POWER) < 1e-6, `${quick.lost} against ${slow.lost}`);
+  // Just inside and just outside the half.
+  assert.equal(taken(1 - QUIZ_FAST - 0.03).fast, true);
+  assert.equal(taken(1 - QUIZ_FAST + 0.03).fast, false);
+});
+
+test("what each player did is kept: of the round, and of the whole duel", () => {
+  const s = quiz({ left: STURDY, right: STURDY, bots: { right: 1 } });
+  const m = s.musical;
+  const none = { asked: 0, right: 0, wrong: 0, late: 0, fast: 0, time: 0, spare: 0, best: 0, level: 0 };
+  assert.deepEqual(m.stats.left, none);
+  assert.deepEqual(m.totals.left, none);
+  // A quick right answer, a slow one, a wrong one, and one let go by.
+  let asked = current(s, "left");
+  runTo(s, asked.open + 2);
+  pressKey(s, "left", right(s, "left"));
+  asked = current(s, "left");
+  runTo(s, asked.open + 10);
+  pressKey(s, "left", right(s, "left"));
+  asked = current(s, "left");
+  runTo(s, asked.open + 1);
+  pressKey(s, "left", wrong(s, "left"));
+  asked = current(s, "left");
+  runTo(s, asked.t + 3 * STEP);
+  const done = m.stats.left;
+  assert.deepEqual({ asked: done.asked, right: done.right, wrong: done.wrong, late: done.late, fast: done.fast, best: done.best }, { asked: 4, right: 2, wrong: 1, late: 1, fast: 1, best: 2 });
+  assert.ok(Math.abs(done.time - 12) < 0.1, `${done.time} s on the two right answers`);
+  assert.ok(Math.abs(done.spare - ((14 - 2) / 14 + (14 - 10) / 14)) < 0.02, "the share of its time each had left");
+  assert.equal(done.level, 1, "the highest level it was asked at");
+  assert.deepEqual(m.totals.left, done);
+  assert.ok(m.stats.right.asked >= 3 && m.stats.right.right === m.stats.right.asked, "the computer's too");
+  // The next round starts its own count; the duel's goes on.
+  m.time = quizSpan(m.song, 1).end - 0.2;
+  for (let i = 0; i < 1e5 && s.phase !== "buy"; i++) stepMusicalDuel(s, STEP);
+  const after = { ...m.totals.left };
+  setReady(s, "left");
+  setReady(s, "right");
+  stepMusicalDuel(s, STEP);
+  assert.deepEqual(m.stats.left, none);
+  assert.deepEqual(m.totals.left, after);
+  runTo(s, current(s, "left").open + 1);
+  pressKey(s, "left", right(s, "left"));
+  assert.equal(m.stats.left.right, 1);
+  assert.equal(m.totals.left.right, after.right + 1);
+});
+
+test("the round's quickest player takes a prize in money, and the round's result stays up long enough to read", () => {
+  const s = quiz({ left: STURDY, right: STURDY, bots: { right: 1 } });
+  const m = s.musical;
+  // Four answers at once: nobody thinks that fast (the computer takes a third of its time at least).
+  for (let k = 0; k < 4; k++) {
+    runTo(s, current(s, "left").open + 0.3);
+    pressKey(s, "left", right(s, "left"));
+  }
+  run(s, 35);
+  assert.ok(m.stats.right.right >= 3);
+  m.time = quizSpan(m.song, 1).end - 0.3;
+  let before = { left: s.sides.left.money, right: s.sides.right.money };
+  for (let i = 0; i < 1e4 && s.phase === "combat"; i++) {
+    before = { left: s.sides.left.money, right: s.sides.right.money };
+    stepMusicalDuel(s, STEP);
+  }
+  assert.equal(s.phase, "roundEnd");
+  const { speed, income } = s.lastRound;
+  assert.equal(speed.side, "left");
+  assert.equal(speed.prize, QUIZ_SPEED_PRIZE);
+  assert.ok(speed.spare.left > speed.spare.right && speed.spare.left > 0.9);
+  assert.ok(Math.abs(s.sides.left.money - before.left - (income.left + QUIZ_SPEED_PRIZE)) < 1e-6);
+  assert.ok(Math.abs(s.sides.right.money - before.right - income.right) < 1e-6);
+  assert.equal(s.clock, QUIZ_ROUND_END);
+  assert.ok(QUIZ_ROUND_END >= 7);
+
+  // Nobody with three right answers: no prize.
+  const dull = quiz({ left: STURDY, right: STURDY });
+  runTo(dull, current(dull, "left").open + 0.3);
+  pressKey(dull, "left", right(dull, "left"));
+  dull.musical.time = quizSpan(dull.musical.song, 1).end - 0.3;
+  for (let i = 0; i < 1e4 && dull.phase === "combat"; i++) stepMusicalDuel(dull, STEP);
+  assert.equal(dull.lastRound.speed.side, null);
+  // And a musical duel's round has none of it.
+  const song = quiz({ math: false, left: ["soldier"], right: STURDY, bots: { right: 1 } });
+  for (let i = 0; i < 1e5 && song.phase === "combat"; i++) stepMusicalDuel(song, STEP);
+  assert.equal(song.lastRound.speed, undefined);
 });

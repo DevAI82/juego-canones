@@ -62,13 +62,29 @@ export const VOLLEY_POWER = 1;
 //     often than a child's; what a grown-up has over a child is not
 //     failing.
 // Set with simulated rounds (tools/duel/quiz_rounds.mjs, which prints
-// them): two children who answer alike, 154 s a round, two in three ended
-// by an army destroyed; a grown-up against a child, 93 s; somebody who
-// answers nothing, 104 s.
+// them), quick answers' heavier volleys counted in: two children who
+// answer alike, 163 s a round, three in five ended by an army destroyed; a
+// grown-up against a child, 78 s; somebody who answers nothing, 110 s.
 export const QUIZ_VOLLEY = 1.6;
 export const QUIZ_STREAK_FROM = 3;
-export const QUIZ_STREAK_VOLLEY = 1;
+export const QUIZ_STREAK_VOLLEY = 0.9;
 export const QUIZ_STREAK_RELOAD = 8;
+// Quickness (the user's, 2026-11-27: "not only getting it right before it
+// comes down: reward getting it right and being quick"). A right answer
+// with this share of its time still to go is a quick one -- a share, not
+// seconds: a child's easy question has more time than a grown-up's hard
+// one, so each is quick by their own measure -- and the volley it fires is
+// so many times heavier.
+export const QUIZ_FAST = 0.5;
+export const QUIZ_FAST_POWER = 1.5;
+// At a round's end, whoever had more of their time to spare on their right
+// answers, on average, takes this much money for the next purchase: at
+// least so many right answers to be in it.
+export const QUIZ_SPEED_PRIZE = 15;
+export const QUIZ_SPEED_LEAST = 3;
+// s a round's result stays on screen: longer than a duel's, for there are
+// the round's statistics to read.
+export const QUIZ_ROUND_END = 9;
 // How often the computer hits a key, by its league's grade (the first one
 // first). First figures: nobody has played against them yet.
 export const BOT_ACCURACY = [0.72, 0.8, 0.86, 0.91, 0.95, 0.98];
@@ -150,10 +166,23 @@ export function createMusicalDuel({ song, bots = {}, slack = 0, quiz = false, ..
     // army fires. loaded: s until that army can fire so again.
     state.musical.quiz = { seed: state.rng };
     state.musical.asks = both(() => []);
-    state.musical.shoots = both(() => false);
+    state.musical.shoots = both(() => 0); // (times a volley: 1, or more for a quick answer)
     state.musical.loaded = both(() => 0);
+    // What each side has done: this round (stats) and in the whole duel
+    // (totals) -- see freshStats.
+    state.musical.stats = both(freshStats);
+    state.musical.totals = both(freshStats);
   }
   return state;
+}
+
+// A side's count of what it has done with its questions: how many it was
+// asked, got right, got wrong, or let go by (late); how many of the right
+// ones were quick; the s it took over the right ones and the shares of
+// their time it had left, added up; its longest streak; the highest level
+// it was asked at.
+function freshStats() {
+  return { asked: 0, right: 0, wrong: 0, late: 0, fast: 0, time: 0, spare: 0, best: 0, level: 0 };
 }
 
 // The question a side was asked (one of musical.asks): duelQuiz.js's
@@ -235,8 +264,9 @@ function beginQuiz(state) {
   m.tally = both(() => ({ hits: 0, misses: 0, streak: 0 }));
   m.events = [];
   m.asks = both(() => []);
-  m.shoots = both(() => false);
+  m.shoots = both(() => 0);
   m.loaded = both(() => 0);
+  m.stats = both(freshStats);
   for (const side of SIDES) ask(state, side, span.start + QUIZ_FIRST);
 }
 
@@ -263,14 +293,35 @@ function ask(state, side, open) {
 function settleAsk(state, side, kind, lane, now) {
   const m = state.musical;
   const index = m.from[side];
+  const asked = m.asks[side][index];
+  const whole = asked.t - asked.open;
+  const took = Math.max(0, Math.min(whole, now - asked.open));
+  const spare = 1 - took / whole;
+  const fast = kind === "hit" && spare >= QUIZ_FAST - 1e-9;
   if (kind === "hit") {
     m.marks[side][index] = HIT;
     hit(m, side, lane);
-    // On a streak, its army fires.
-    if (m.tally[side].streak >= QUIZ_STREAK_FROM) m.shoots[side] = true;
+    m.events.at(-1).fast = fast; // (for the screen's cheer)
+    // On a streak, its army fires: harder for a quick answer.
+    if (m.tally[side].streak >= QUIZ_STREAK_FROM) m.shoots[side] = fast ? QUIZ_FAST_POWER : 1;
   } else {
     m.marks[side][index] = MISSED;
     mistake(m, side, lane, kind);
+  }
+  for (const count of [m.stats[side], m.totals[side]]) {
+    count.asked += 1;
+    count.level = Math.max(count.level, asked.level);
+    if (kind === "hit") {
+      count.right += 1;
+      count.time += took;
+      count.spare += spare;
+      if (fast) count.fast += 1;
+      count.best = Math.max(count.best, m.tally[side].streak);
+    } else if (kind === "wrong") {
+      count.wrong += 1;
+    } else {
+      count.late += 1;
+    }
   }
   m.from[side] = index + 1;
   ask(state, side, now + QUIZ_BREAK);
@@ -316,6 +367,25 @@ function quizKeys(state) {
     }
   }
   return quizSpan(m.song, m.round).end;
+}
+
+// A Duelo Matemático's round is over: the quickest of the two takes the
+// prize -- whoever had more of their time to spare, on average, on their
+// right answers -- and the result stays up for the statistics to be read.
+// lastRound.speed: { side (null: nobody), prize, spare: each side's
+// average share, 0 to 1 }.
+function closeQuizRound(state) {
+  const m = state.musical;
+  const spare = {};
+  for (const side of SIDES) {
+    const done = m.stats[side];
+    spare[side] = done.right >= QUIZ_SPEED_LEAST ? done.spare / done.right : 0;
+  }
+  const [a, b] = SIDES;
+  const side = Math.abs(spare[a] - spare[b]) < 1e-9 ? null : spare[a] > spare[b] ? a : b;
+  if (side) state.sides[side].money += QUIZ_SPEED_PRIZE;
+  state.lastRound.speed = { side, prize: QUIZ_SPEED_PRIZE, spare };
+  if (state.phase === "roundEnd") state.clock = QUIZ_ROUND_END;
 }
 
 // ------------------------------------------------------------ the action
@@ -503,20 +573,21 @@ function tick(state) {
   for (const side of SIDES) {
     const rival = otherSide(side);
     const punishes = m.owed[rival] && m.reload[side] <= 1e-9;
-    const rewards = Boolean(m.quiz) && m.shoots[side] && m.loaded[side] <= 1e-9;
+    const rewards = Boolean(m.quiz) && m.shoots[side] > 0 && m.loaded[side] <= 1e-9;
     if (punishes || rewards) {
-      volley(state, side, hits, VOLLEY_POWER * (!m.quiz ? 1 : punishes ? QUIZ_VOLLEY : QUIZ_STREAK_VOLLEY));
+      volley(state, side, hits, VOLLEY_POWER * (!m.quiz ? 1 : punishes ? QUIZ_VOLLEY : QUIZ_STREAK_VOLLEY * m.shoots[side]));
       if (punishes) m.reload[side] = VOLLEY_RELOAD;
       if (rewards) m.loaded[side] = QUIZ_STREAK_RELOAD;
     }
     m.owed[rival] = false;
-    if (m.quiz) m.shoots[side] = false;
+    if (m.quiz) m.shoots[side] = 0;
   }
   for (const landed of hits) landHit(state, landed);
 
   // 3. The end of the fight: an army destroyed, or the music over.
   state.clock = Math.max(0, end - m.time);
   settleFight(state, m.time >= end - 1e-9);
+  if (m.quiz && state.phase !== "combat") closeQuizRound(state);
 }
 
 // Moves a duel `dt` seconds on: a musical duel's fight here, in duel.js's

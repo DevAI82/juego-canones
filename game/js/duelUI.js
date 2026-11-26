@@ -415,9 +415,16 @@ export function showDuelResult(container, result, { onRematch, onExit }) {
   const box = el("div", `duel-result-box ${result.won ? "won" : "lost"}`);
   box.append(el("div", "duel-result-title", result.title), el("div", "duel-result-score", result.score));
   const table = el("table", "duel-result-rows");
-  for (const [label, value] of result.rows) {
+  // (A row is a label and its value -- or, in a Duelo Matemático's
+  // statistics, the player's value and the rival's; `head` names them.)
+  if (result.head) {
+    const row = el("tr", "duel-result-head");
+    row.append(...result.head.map((text) => el("th", "", text)));
+    table.appendChild(row);
+  }
+  for (const [label, ...values] of result.rows) {
     const row = el("tr");
-    row.append(el("td", "", label), el("td", "", value));
+    row.append(el("td", "", label), ...values.map((value) => el("td", "", value)));
     table.appendChild(row);
   }
   box.appendChild(table);

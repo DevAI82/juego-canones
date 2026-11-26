@@ -7,7 +7,7 @@
 //
 // No page here: duelScreen.js hands it the context and what to draw.
 import { ARENA } from "./duelArenas.js";
-import { MARK, QUIZ_STREAK_FROM, songClock, questionOf } from "./duelRhythm.js";
+import { MARK, QUIZ_STREAK_FROM, QUIZ_FAST, songClock, questionOf } from "./duelRhythm.js";
 import { QUIZ_LANES, QUIZ_BREAK, QUIZ_LEVELS } from "./duelQuiz.js";
 import { TRACK, drawHighway, drawRhythmFeedback, shout } from "./duelRhythmDraw.js";
 
@@ -118,9 +118,20 @@ function drawCard(ctx, shown, now) {
     ctx.save();
     ctx.fillStyle = "rgba(255, 255, 255, 0.16)";
     ctx.fillRect(barX, barY, barW, 8 * s);
-    ctx.fillStyle = place.left < 0.25 ? "#ff4338" : place.left < 0.5 ? "#ffcf4a" : "#3dff7a";
+    // (While an answer would still be a quick one it is electric blue, up
+    // to the mark where that ends.)
+    const quick = place.left >= QUIZ_FAST;
+    ctx.fillStyle = quick ? "#5ff0ff" : place.left < 0.25 ? "#ff4338" : "#ffcf4a";
+    if (quick) {
+      ctx.shadowColor = "#5ff0ff";
+      ctx.shadowBlur = 10;
+    }
     ctx.fillRect(barX, barY, barW * place.left, 8 * s);
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = "rgba(255, 255, 255, 0.85)";
+    ctx.fillRect(barX + barW * QUIZ_FAST - 1, barY - 3 * s, 2, 14 * s);
     ctx.restore();
+    if (quick) shout(ctx, "⚡", barX + barW + 16 * s, barY + 4 * s, { size: Math.round(22 * s), color: "#5ff0ff" });
     // How hard it is: a pip a level.
     ctx.save();
     for (let i = 0; i < QUIZ_LEVELS; i++) {
@@ -193,7 +204,7 @@ function drawReady(ctx) {
   ctx.fillStyle = "rgba(8, 14, 24, 0.82)";
   ctx.strokeStyle = "rgba(96, 210, 255, 0.55)";
   ctx.lineWidth = 1.6;
-  rounded(ctx, MID - 250, TRACK.top + 105, 500, 226, 14);
+  rounded(ctx, MID - 262, TRACK.top + 105, 524, 236, 14);
   ctx.fill();
   ctx.stroke();
   shout(ctx, "¡PREPÁRATE!", MID, TRACK.top + 150, { size: 40, color: "#ffe27a", glow: "#ff9900" });
@@ -206,9 +217,11 @@ function drawReady(ctx) {
   ctx.fillText("Van a bajar operaciones por el carril: calcula el resultado", MID, TRACK.top + 198);
   ctx.fillText("Tócalo abajo, o pulsa su tecla (1 2 3 4), antes de que llegue", MID, TRACK.top + 226);
   ctx.fillStyle = "#ffb4a8";
-  ctx.fillText("Si fallas, dispara el rival", MID, TRACK.top + 260);
+  ctx.fillText("Si fallas, dispara el rival", MID, TRACK.top + 258);
   ctx.fillStyle = "#9effb0";
-  ctx.fillText("Con 3 aciertos seguidos, ¡dispara tu ejército en cada acierto!", MID, TRACK.top + 292);
+  ctx.fillText("Con 3 aciertos seguidos, ¡dispara tu ejército al acertar!", MID, TRACK.top + 286);
+  ctx.fillStyle = "#8fefff";
+  ctx.fillText("⚡ Contesta rápido (barra azul): pega más, y premio al más rápido", MID, TRACK.top + 314);
   ctx.restore();
 }
 
@@ -240,4 +253,90 @@ export function drawQuiz(ctx, scene) {
   if (scene.loading) shout(ctx, "Cargando música…", MID, TRACK.top + 36, { size: 16, color: "#ffe27a" });
 
   drawRhythmFeedback(ctx, scene, { saidY: BOX.y + BOX.h + 26 });
+}
+
+// ------------------------------------------------------------ the statistics
+
+const tenths = (value) => value.toFixed(1).replace(".", ",");
+
+// What two players did (duelRhythm.js's stats, or totals), row by row:
+// [{ label, mine, theirs, better: "mine" | "theirs" | null }].
+export function quizStatRows(mine, theirs) {
+  const mean = (done) => (done.right > 0 ? done.time / done.right : null);
+  const row = (label, of, text, lowerWins = false) => {
+    const a = of(mine);
+    const b = of(theirs);
+    let better = null;
+    if (a !== null && b !== null && Math.abs(a - b) > 1e-9) better = a > b !== lowerWins ? "mine" : "theirs";
+    else if ((a === null) !== (b === null)) better = a === null ? "theirs" : "mine";
+    return { label, mine: text(mine, a), theirs: text(theirs, b), better };
+  };
+  return [
+    row("Aciertos", (d) => d.right, (d) => `${d.right} de ${d.asked}`),
+    row("Fallos", (d) => d.wrong + d.late, (d, v) => String(v), true),
+    row("Mejor racha", (d) => d.best, (d, v) => String(v)),
+    row("Tiempo medio", mean, (d, v) => (v === null ? "—" : `${tenths(v)} s`), true),
+    row("Respuestas rápidas ⚡", (d) => d.fast, (d, v) => String(v)),
+    row("Nivel más alto", (d) => d.level, (d, v) => String(v + 1)),
+  ];
+}
+
+// A round's statistics, under its result: the player's and the rival's,
+// side by side, the better of each in green; and whose the prize for
+// quickness was. scene: { view, side }.
+export function drawQuizStats(ctx, scene) {
+  const { view, side } = scene;
+  const m = view.musical;
+  if (!m || !m.stats) return;
+  const rival = side === "left" ? "right" : "left";
+  const rows = quizStatRows(m.stats[side], m.stats[rival]);
+  const speed = view.lastRound ? view.lastRound.speed : null;
+  const w = 560;
+  const rowH = 30;
+  const h = 58 + rows.length * rowH + (speed ? 44 : 10);
+  const x = MID - w / 2;
+  const y = 432;
+
+  ctx.save();
+  ctx.fillStyle = "rgba(6, 10, 12, 0.86)";
+  ctx.strokeStyle = "rgba(96, 210, 255, 0.6)";
+  ctx.lineWidth = 2;
+  rounded(ctx, x, y, w, h, 10);
+  ctx.fill();
+  ctx.stroke();
+  ctx.textBaseline = "middle";
+  ctx.font = "900 16px sans-serif";
+  ctx.textAlign = "left";
+  ctx.fillStyle = "#ffe27a";
+  ctx.fillText("ESTE ASALTO", x + 22, y + 28);
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#7dd3fc";
+  ctx.fillText("TÚ", x + w - 190, y + 28);
+  ctx.fillStyle = "#fca5a5";
+  ctx.fillText("RIVAL", x + w - 70, y + 28);
+  rows.forEach((row, i) => {
+    const ry = y + 58 + i * rowH;
+    ctx.font = "17px sans-serif";
+    ctx.textAlign = "left";
+    ctx.fillStyle = "#e2f1ff";
+    ctx.fillText(row.label, x + 22, ry);
+    ctx.textAlign = "center";
+    ctx.font = "bold 18px sans-serif";
+    ctx.fillStyle = row.better === "mine" ? "#3dff7a" : "#ffffff";
+    ctx.fillText(row.mine, x + w - 190, ry);
+    ctx.fillStyle = row.better === "theirs" ? "#3dff7a" : "#ffffff";
+    ctx.fillText(row.theirs, x + w - 70, ry);
+  });
+  if (speed) {
+    const text = !speed.side
+      ? "⚡ Premio a la rapidez: sin dueño (hacen falta 3 aciertos)"
+      : speed.side === side
+        ? `⚡ ¡Premio a la rapidez para ti! +$${speed.prize}`
+        : `⚡ Premio a la rapidez para el rival: +$${speed.prize}`;
+    ctx.font = "bold 18px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillStyle = speed.side === side ? "#5ff0ff" : "#cfe6ff";
+    ctx.fillText(text, MID, y + h - 24);
+  }
+  ctx.restore();
 }

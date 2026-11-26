@@ -953,7 +953,8 @@ export function drawRhythmFeedback(ctx, scene, { saidY = TRACK.line + 72 } = {})
     } else {
       const sNow = last.kind === "hit" ? last.streak : m.tally[side].streak;
       const pop = 1 + 0.32 * Math.max(0, 1 - last.age / 0.12);
-      shout(ctx, cheer(sNow).text, MID, saidY, {
+      // (A Duelo Matemático's quick answer: the cheer with a bolt.)
+      shout(ctx, `${last.fast ? "⚡ " : ""}${cheer(sNow).text}`, MID, saidY, {
         size: Math.round((sNow >= 5 ? 32 : 27) * pop),
         color: cheerColor(sNow),
         alpha: 1 - k * k,

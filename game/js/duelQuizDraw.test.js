@@ -6,7 +6,7 @@ import { TRACKS } from "./duelTracks.js";
 import { QUIZ_LANES, QUIZ_BREAK } from "./duelQuiz.js";
 import { createMusicalDuel, stepMusicalDuel, pressKey, songClock, questionOf } from "./duelRhythm.js";
 import { TRACK } from "./duelRhythmDraw.js";
-import { QUIZ_CARD, quizBox, quizLaneAt, quizCardAt, quizShown, quizStreakLine } from "./duelQuizDraw.js";
+import { QUIZ_CARD, quizBox, quizLaneAt, quizCardAt, quizShown, quizStreakLine, quizStatRows } from "./duelQuizDraw.js";
 import { QUIZ_STREAK_FROM } from "./duelRhythm.js";
 
 for (const id of Object.keys(TRACKS)) delete TRACKS[id];
@@ -120,4 +120,22 @@ test("over the track, what the streak is worth: how many more before one's army 
   // Its army fires no more often than it reloads: said while it does.
   assert.match(quizStreakLine(5, 3.2).text, /recarga/);
   assert.doesNotMatch(quizStreakLine(5, 0).text, /recarga/);
+});
+
+test("the statistics, row by row, for the player and the rival: who did better in each", () => {
+  const mine = { asked: 10, right: 8, wrong: 1, late: 1, fast: 5, time: 36, spare: 5.2, best: 6, level: 3 };
+  const theirs = { asked: 14, right: 9, wrong: 5, late: 0, fast: 2, time: 27, spare: 3.1, best: 4, level: 2 };
+  const rows = quizStatRows(mine, theirs);
+  const row = (label) => rows.find((r) => r.label.startsWith(label));
+  assert.deepEqual(row("Aciertos"), { label: "Aciertos", mine: "8 de 10", theirs: "9 de 14", better: "theirs" });
+  assert.deepEqual(row("Fallos"), { label: "Fallos", mine: "2", theirs: "5", better: "mine" }, "fewer is better");
+  assert.deepEqual(row("Mejor racha"), { label: "Mejor racha", mine: "6", theirs: "4", better: "mine" });
+  assert.deepEqual(row("Tiempo medio"), { label: "Tiempo medio", mine: "4,5 s", theirs: "3,0 s", better: "theirs" });
+  assert.deepEqual(row("Respuestas rápidas"), { label: "Respuestas rápidas ⚡", mine: "5", theirs: "2", better: "mine" });
+  assert.deepEqual(row("Nivel más alto"), { label: "Nivel más alto", mine: "4", theirs: "3", better: "mine" }, "levels are counted from 1");
+  // Nothing right: no time to speak of; and level with level, nobody is better.
+  const blank = { asked: 2, right: 0, wrong: 2, late: 0, fast: 0, time: 0, spare: 0, best: 0, level: 0 };
+  const flat = quizStatRows(blank, blank);
+  assert.equal(flat.find((r) => r.label === "Tiempo medio").mine, "—");
+  assert.ok(flat.every((r) => r.better === null));
 });

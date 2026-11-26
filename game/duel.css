@@ -742,3 +742,17 @@
 .dk-key-1 { --dk-color: #ffd24c; }
 .dk-key-2 { --dk-color: #ff9233; }
 .dk-key-3 { --dk-color: #c678ff; }
+
+/* A Duelo Matemático's result: the player's numbers and the rival's. */
+.duel-result-rows .duel-result-head th {
+  padding: 2px 10px 6px;
+  font-size: 13px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #ffe27a;
+}
+.duel-result-rows .duel-result-head ~ tr td:not(:first-child) {
+  padding: 0 12px;
+  font-weight: bold;
+  text-align: center;
+}

@@ -63,7 +63,7 @@ import { stagePlaces, armyHealth } from "./duelStage.js";
 import { createDuelMusicStage } from "./duelMusicStage.js";
 import { drawSong } from "./duelSongs.js";
 import { createNetFight, createOnce, mirrored } from "./duelNet.js";
-import { drawQuiz, quizLaneAt } from "./duelQuizDraw.js";
+import { drawQuiz, drawQuizStats, quizLaneAt, quizStatRows } from "./duelQuizDraw.js";
 
 // Against the computer the player is always the left-hand side.
 const PLAYER = "left";
@@ -430,6 +430,12 @@ export function createDuelScreen({
     const ask = remote && remote.ask;
     const result = duelResult(d, side, gained, mine, rival);
     const math = Boolean(d.musical && d.musical.quiz);
+    if (math) {
+      // A Duelo Matemático's result: what each did in the whole duel.
+      const rival = side === "left" ? "right" : "left";
+      result.head = ["", "Tú", "Rival"];
+      result.rows = quizStatRows(d.musical.totals[side], d.musical.totals[rival]).map((row) => [row.label, row.mine, row.theirs]);
+    }
     if (d.musical) result.league = `Duelo ${math ? "matemático" : "musical"} de prueba: no cuenta para tu liga ni da experiencia`;
     showDuelResult(resultEl, result, {
       onRematch: () =>
@@ -659,6 +665,7 @@ export function createDuelScreen({
 
       drawRhythmHud(ctx, rhythm);
       if (d.phase === "roundEnd") drawDuelBanner(ctx, scene);
+      if (d.phase === "roundEnd" && view.musical.quiz) drawQuizStats(ctx, scene);
       if (playing) drawRhythmFlash(ctx, shake);
       drawRhythmNotice(ctx, scene.notice);
       panelEl.classList.add("hidden");

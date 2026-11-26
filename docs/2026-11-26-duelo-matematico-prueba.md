@@ -14,6 +14,10 @@ Y al día siguiente, visto el resumen:
 
 > «Un asalto pon que puede durar hasta 3 minutos. Si vas en racha yo creo que sí que debería disparar y si fallas recibes disparos. Pero configura el daño para que más o menos pueda durar de 2-3 minutos... si falla mucho pues durará poco pero que cada disparo no mate de una al ejército.»
 
+Y después:
+
+> «Puedes hacer que el que acierte más rápido su ronda tenga algún tipo de recompensa, ¿no? Que luego salgan unas estadísticas también. Que no se limite sólo a acertar hasta que baje el resultado sino que también premie el acierto y la rapidez.»
+
 ## 2. Cómo quedó
 
 Es el duelo musical tal cual —comprar ejército, asaltos al mejor de cinco, la canción de fondo, las barras de vida, los cañonazos, ¡BIEN!/¡MUY BIEN!/GREAT!, ¡FALLO! con la pantalla en rojo, descargas ×1,5 y ×2 con rachas de 10 y 25— con dos diferencias: **lo que hay que acertar**, y que **con racha tu ejército dispara**.
@@ -36,6 +40,12 @@ Es el duelo musical tal cual —comprar ejército, asaltos al mejor de cinco, la
 | 6 | 20–27 | 8 s | como el 5 | como el 5 |
 | 7 | 28 o más | 6 s | como el 5 | como el 5 |
 
+**La rapidez cuenta**, medida como la parte de su tiempo que a cada uno le sobra (no en segundos: la operación fácil de un niño tiene más tiempo que la difícil de un adulto, así que cada uno es rápido a su medida):
+
+- Un acierto con **la mitad del tiempo o más por delante** es una respuesta rápida: la barra de la tarjeta está azul eléctrico con un ⚡ mientras dura esa mitad (hay una marca donde se acaba), el mensaje sale con rayo («⚡ ¡BIEN!») y, si el ejército dispara, **pega ×1,5**.
+- Al acabar el asalto, **premio a la rapidez**: +$15 para la compra siguiente a quien, de media, le sobró más parte de su tiempo en sus aciertos (hacen falta al menos 3 aciertos para optar).
+- **Estadísticas**: al final de cada asalto, bajo el resultado, una tabla «Este asalto» con lo tuyo y lo del rival (aciertos, fallos, mejor racha, tiempo medio, respuestas rápidas, nivel más alto), en verde quien lo hizo mejor, y de quién fue el premio; el resultado se queda 9 s en pantalla para leerlo. Al final del duelo, la misma tabla con los totales.
+
 La mitad de las operaciones son tablas; el resto, sumas y restas a partes iguales. Los resultados equivocados son los errores típicos (uno más, uno menos, diez más, la casilla de al lado de la tabla).
 
 Un asalto dura **tres minutos** como mucho (o hasta que un ejército cae). Si nadie cae, lo gana quien conserve más ejército. La canción suele ser más corta: vuelve a empezar por debajo.
@@ -44,14 +54,16 @@ Un asalto dura **tres minutos** como mucho (o hasta que un ejército cae). Si na
 
 | Quién contra quién | Dura (mediana) | Acaba con un ejército destruido |
 |---|---|---|
-| Dos niños parecidos (6–11 s por operación, 80 % de aciertos) | 2 min 34 s | 2 de cada 3 |
+| Dos niños parecidos (6–11 s por operación, 80 % de aciertos) | 2 min 43 s | 3 de cada 5 |
 | Un niño así contra otro que duda más (8–14 s, 65 %) | 2 min 41 s | 2 de cada 3 |
-| Dos niños que dudan | 3 min (al tiempo) | 1 de cada 3 |
-| Un adulto (2–4 s, 97 %) contra un niño | 1 min 33 s | siempre |
-| Dos adultos | 1 min 58 s | siempre |
-| Un niño contra alguien que no contesta nada | 1 min 44 s | siempre |
+| Dos niños que dudan | 3 min (al tiempo) | 1 de cada 4 |
+| Un adulto (2–4 s, 97 %) contra un niño | 1 min 18 s | siempre |
+| Dos adultos | 1 min 39 s | siempre |
+| Un niño contra alguien que no contesta nada | 1 min 50 s | siempre |
 
-Un fallo quita a un ejército en torno a un octavo si el rival tiene uno parecido, y **un tercio en el peor caso** (lanzacohetes contra tanques, que es su contrario): ninguno lo mata de una. Un disparo de racha quita algo menos que un fallo.
+(Con las respuestas rápidas contadas: un adulto casi siempre contesta rápido, por eso sus asaltos son más cortos.)
+
+Un fallo quita a un ejército en torno a un octavo si el rival tiene uno parecido, y **un tercio en el peor caso** (lanzacohetes contra tanques, que es su contrario): ninguno lo mata de una. Un disparo de racha quita algo más de la mitad que un fallo, y uno rápido casi tanto como un fallo.
 
 Se entra por **Nueva partida → 🧮 Duelo matemático (prueba)**. En la página del servidor de casa pregunta contra quién: la máquina, u otro jugador en su aparato (igual que el musical: el otro abre la dirección y pulsa «Unirse al duelo»).
 
@@ -63,7 +75,10 @@ Se entra por **Nueva partida → 🧮 Duelo matemático (prueba)**. En la págin
 | «En racha» es desde el **tercer** acierto seguido, y entonces dispara con cada acierto | El usuario dijo «si vas en racha debería disparar»; tres seguidos ya es racha para un niño y se alcanza a menudo | `QUIZ_STREAK_FROM` en `duelRhythm.js` |
 | El ejército en racha dispara como mucho cada **8 s** | Sin eso un adulto, que contesta en 3 s, dispararía tres veces más que un niño y lo barrería en medio minuto; así su ventaja es no fallar, no la velocidad | `QUIZ_STREAK_RELOAD` |
 | Pulsar cuando no hay operación (entre dos, o antes de la primera) no cuenta como nada | En el musical es fallo; aquí castigaría un toque de más de un niño | `answerKey`, la línea de «nothing» |
-| Un fallo pega ×1,6 de un disparo del musical, y un disparo de racha ×1 | Los números que dan asaltos de 2–3 minutos en la simulación de arriba; con ×0,8 y ×0,3 nadie caía nunca, ni sin contestar | `QUIZ_VOLLEY` y `QUIZ_STREAK_VOLLEY` en `duelRhythm.js` |
+| «Rápido» es con la mitad del tiempo o más por delante, y se mide en parte del tiempo, no en segundos | Para que un niño pueda ser rápido a su medida; en segundos ganaría siempre el adulto | `QUIZ_FAST` en `duelRhythm.js` |
+| Un acierto rápido pega ×1,5 (solo cuando el ejército dispara, es decir, en racha) | Premia la rapidez sin añadir otra regla de cuándo se dispara | `QUIZ_FAST_POWER` |
+| El premio del asalto al más rápido son $15 (un asalto da $50, y $25 más al que lo gana) | Que se note en la compra siguiente —una moto más— sin decidir el duelo | `QUIZ_SPEED_PRIZE`, `QUIZ_SPEED_LEAST` |
+| Un fallo pega ×1,6 de un disparo del musical, y un disparo de racha ×0,9 | Los números que dan asaltos de 2–3 minutos en la simulación de arriba; con ×0,8 y ×0,3 nadie caía nunca, ni sin contestar | `QUIZ_VOLLEY` y `QUIZ_STREAK_VOLLEY` en `duelRhythm.js` |
 | Tiempos de 14 s a 6 s y los escalones de racha de la tabla | «Mucho más despacio»; son primeros números, sin haberlo visto jugar a un niño | `TIME` y `LEVEL_AT` en `duelQuiz.js` |
 | Qué entra en cada nivel (qué tablas, llevando o no) | El orden en que se suelen aprender | `TABLES`, `plus`, `minus` en `duelQuiz.js` |
 | Cuatro respuestas, ordenadas de menor a mayor | Cuatro es lo habitual; ordenadas se encuentran antes | `QUIZ_LANES` y `make` en `duelQuiz.js` |
@@ -74,6 +89,6 @@ Se entra por **Nueva partida → 🧮 Duelo matemático (prueba)**. En la págin
 
 ## 4. Comprobado y sin comprobar
 
-Comprobado en el navegador: el menú, la compra, la operación bajando con su barra, acierto con tecla (tarjeta verde, ¡BIEN!), fallo tocando una respuesta (¡FALLO!, disparo, resultado correcto en rojo), dejar pasar una operación, nueve aciertos seguidos subiendo de nivel, fin de asalto por tiempo, y dos jugadores con el segundo a tamaño de móvil tocando la respuesta (el servidor la cuenta). Con las reglas del segundo día: reloj de 3:00, el tercer acierto seguido dispara (el rival bajó al 83 %), el cuarto no (recargando) y el rótulo lo dice.
+Comprobado en el navegador: el menú, la compra, la operación bajando con su barra, acierto con tecla (tarjeta verde, ¡BIEN!), fallo tocando una respuesta (¡FALLO!, disparo, resultado correcto en rojo), dejar pasar una operación, nueve aciertos seguidos subiendo de nivel, fin de asalto por tiempo, y dos jugadores con el segundo a tamaño de móvil tocando la respuesta (el servidor la cuenta). Con las reglas del segundo día: reloj de 3:00, el tercer acierto seguido dispara (el rival bajó al 83 %), el cuarto no (recargando) y el rótulo lo dice. Con las del tercero: barra azul con ⚡ y su marca, «⚡ ¡BIEN!», la tabla del asalto con el premio a la rapidez (+$15) y la tabla final del duelo.
 
 Sin comprobar: un móvil de verdad; que la canción se oiga bien al volver a empezar; y sobre todo **si los tiempos, los niveles y el daño son los buenos para un niño de 8 años** — los «niños» de la simulación son suposiciones mías, y eso solo se ve jugando con él.

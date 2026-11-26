@@ -307,4 +307,10 @@ test("the right-hand player's questions change sides with everything else", () =
   assert.deepEqual(seen.musical.asks.right, told.musical.asks.left);
   assert.equal(seen.musical.asks.left.length, 2);
   assert.deepEqual(seen.musical.quiz, told.musical.quiz);
+  // What each did, and whose the round's prize was.
+  assert.deepEqual(seen.musical.stats.left, told.musical.stats.right);
+  assert.deepEqual(seen.musical.totals.right, told.musical.totals.left);
+  const ended = { ...told, lastRound: { round: 1, winner: "right", reason: "time", income: { left: 50, right: 75 }, speed: { side: "right", prize: 15, spare: { left: 0.2, right: 0.7 } } } };
+  assert.deepEqual(mirrored(ended).lastRound.speed, { side: "left", prize: 15, spare: { left: 0.7, right: 0.2 } });
+  assert.equal(mirrored({ ...ended, lastRound: { ...ended.lastRound, speed: { side: null, prize: 15, spare: { left: 0, right: 0 } } } }).lastRound.speed.side, null);
 });
