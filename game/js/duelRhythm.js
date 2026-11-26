@@ -8,6 +8,12 @@
 // of the rival's army: one shot of each unit it has left. The round is
 // over when an army is destroyed, or the music ends.
 //
+// The Duelo Matemático (duelQuiz.js) is the same duel with questions for
+// keys: a duel whose `musical` part has a `quiz`. A song plays under it,
+// but each side has its own questions at its own pace -- one comes down
+// the track, four answers under it; the right one is a hit, a wrong one or
+// none in time a mistake -- harder as its player's streak goes on.
+//
 // Like duel.js this is the game without a screen: the duel's own state
 // with a `musical` part, actions on it, and a step that moves it on. The
 // armies stand where they were placed; everything else of a duel (the
@@ -27,6 +33,7 @@ import {
   settleFight,
 } from "./duel.js";
 import { LANES, fightChart, songOf } from "./duelSongs.js";
+import { QUIZ_LANES, QUIZ_BREAK, QUIZ_FIRST, quizLevel, quizTime, quizQuestion, quizSpan } from "./duelQuiz.js";
 
 // s before or after its moment that a key still counts. (A first figure,
 // wide on purpose for the first league: to be set from how people play.)
@@ -42,6 +49,11 @@ export const VOLLEY_RELOAD = 0.5;
 // Times a unit's shot, in a volley. (A first figure: with 1, an army of
 // the first round stands some ten volleys of one like it.)
 export const VOLLEY_POWER = 1;
+// Times a unit's shot, again, in a Duelo Matemático: a question takes ten
+// times as long as a key, so a mistake has to cost more for a round to be
+// settled. (A first figure: some four mistakes destroy an army like one's
+// own.)
+export const QUIZ_VOLLEY = 2.5;
 // How often the computer hits a key, by its league's grade (the first one
 // first). First figures: nobody has played against them yet.
 export const BOT_ACCURACY = [0.72, 0.8, 0.86, 0.91, 0.95, 0.98];
@@ -86,8 +98,9 @@ const both = (value) => ({ left: value(), right: value() });
 // music. `song`: which one (its arena's, unless told). `bots`: the sides
 // the computer plays in the fight -- { right: 0.8 } hits four keys of five.
 // `slack`: s a key may take to arrive (a duel between two devices; 0 when
-// its players are at this very keyboard).
-export function createMusicalDuel({ song, bots = {}, slack = 0, ...options } = {}) {
+// its players are at this very keyboard). `quiz`: a Duelo Matemático --
+// questions (duelQuiz.js) instead of the song's keys.
+export function createMusicalDuel({ song, bots = {}, slack = 0, quiz = false, ...options } = {}) {
   const state = createDuelState(options);
   const played = {};
   for (const side of SIDES) {
@@ -113,14 +126,30 @@ export function createMusicalDuel({ song, bots = {}, slack = 0, ...options } = {
     // (not the key asked for), "drop" (a long key let go too soon).
     events: [],
   };
+  if (quiz) {
+    // seed: what its questions are made from. asks: for each side, the
+    // questions it has been asked this round, the last one the one to
+    // answer -- { n, level, open (s into the song it starts coming down),
+    // t (s it reaches the line) }; marks[side] says what became of each.
+    state.musical.quiz = { seed: state.rng };
+    state.musical.asks = both(() => []);
+  }
   return state;
+}
+
+// The question a side was asked (one of musical.asks): duelQuiz.js's
+// { text, answer, options, lane }.
+export function questionOf(m, ask) {
+  return quizQuestion(m.quiz.seed, m.round, ask.n, ask.level);
 }
 
 // s into its song a musical duel's fight is, to the frame. (A fight about
 // to start is where its round starts.)
 export function songClock(state) {
   const m = state.musical;
-  if (state.phase === "combat" && m.round !== state.round) return roundStart(fightChart(m.song), state.round);
+  if (state.phase === "combat" && m.round !== state.round) {
+    return m.quiz ? quizSpan(m.song, state.round).start : roundStart(fightChart(m.song), state.round);
+  }
   return m.time + state.acc;
 }
 
@@ -134,6 +163,7 @@ export function roundStart(chart, round) {
 
 function begin(state) {
   const m = state.musical;
+  if (m.quiz) return beginQuiz(state);
   const chart = fightChart(m.song);
   const start = roundStart(chart, state.round);
   // From the top every key is asked for; part-way in, the ones from a
@@ -171,6 +201,100 @@ function mistake(m, side, lane, kind) {
   m.events.push({ side, kind, lane, age: 0 });
 }
 
+// ------------------------------------------------------------ the questions
+
+function beginQuiz(state) {
+  const m = state.musical;
+  const span = quizSpan(m.song, state.round);
+  m.round = state.round;
+  m.time = span.start;
+  m.marks = both(() => []);
+  m.from = both(() => 0);
+  m.held = both(() => []);
+  m.owed = both(() => false);
+  m.reload = both(() => 0);
+  m.tally = both(() => ({ hits: 0, misses: 0, streak: 0 }));
+  m.events = [];
+  m.asks = both(() => []);
+  for (const side of SIDES) ask(state, side, span.start + QUIZ_FIRST);
+}
+
+// This side's next question, to start coming down at `open`: as hard as
+// its streak says. (None with the round about to end.) The computer makes
+// up its mind as it is asked: whether it will get it right, and when.
+function ask(state, side, open) {
+  const m = state.musical;
+  if (open >= quizSpan(m.song, m.round).end - 1) return;
+  const level = quizLevel(m.tally[side].streak);
+  const next = { n: m.asks[side].length, level, open, t: open + quizTime(level) };
+  const accuracy = m.bots[side];
+  if (accuracy !== undefined) {
+    next.right = duelRandom(state) < accuracy;
+    next.answer = open + (0.3 + 0.4 * duelRandom(state)) * quizTime(level);
+  }
+  m.asks[side].push(next);
+  m.marks[side].push(WAITING);
+}
+
+// What became of the question this side had to answer, at `now`: "hit",
+// or a mistake -- "wrong" (not the right answer) or "miss" (none in time)
+// -- and its next one is on its way.
+function settleAsk(state, side, kind, lane, now) {
+  const m = state.musical;
+  const index = m.from[side];
+  if (kind === "hit") {
+    m.marks[side][index] = HIT;
+    hit(m, side, lane);
+  } else {
+    m.marks[side][index] = MISSED;
+    mistake(m, side, lane, kind);
+  }
+  m.from[side] = index + 1;
+  ask(state, side, now + QUIZ_BREAK);
+}
+
+// This side answers its question with the key of one of the four answers.
+function answerKey(state, side, lane, at) {
+  const m = state.musical;
+  if (!QUIZ_LANES.includes(lane)) return refuse("lane");
+  if (m.bots[side] !== undefined) return refuse("bot");
+  const now = momentOf(state, at);
+  const index = m.from[side];
+  const asked = m.asks[side][index];
+  // (Between two questions, or before the first: nothing to answer, and
+  // no harm done.)
+  if (!asked || m.marks[side][index] !== WAITING || now < asked.open - 1e-9) return refuse("nothing");
+  const question = questionOf(m, asked);
+  if (now > asked.t + 1e-9) {
+    settleAsk(state, side, "miss", question.lane, now);
+    return { ok: true, hit: false };
+  }
+  const right = lane === question.lane;
+  settleAsk(state, side, right ? "hit" : "wrong", lane, now);
+  return { ok: true, hit: right };
+}
+
+// A tick's questions: the computer answers its own when it has made up
+// its mind; a player's that has reached the line unanswered is a mistake
+// (once no answer can still be on its way). Returns when the round ends.
+function quizKeys(state) {
+  const m = state.musical;
+  for (const side of SIDES) {
+    const index = m.from[side];
+    const asked = m.asks[side][index];
+    if (!asked || m.marks[side][index] !== WAITING) continue;
+    const question = questionOf(m, asked);
+    if (m.bots[side] !== undefined) {
+      if (m.time < asked.answer) continue;
+      const lane = asked.right ? question.lane : QUIZ_LANES.find((other) => other !== question.lane);
+      settleAsk(state, side, asked.right ? "hit" : "wrong", lane, m.time);
+    } else if (m.time > asked.t + m.slack + 1e-9) {
+      settleAsk(state, side, "miss", question.lane, m.time);
+    }
+  }
+  return quizSpan(m.song, m.round).end;
+}
+
 // ------------------------------------------------------------ the action
 
 // Which key of a song a press of `lane` at `now` is for, among those not
@@ -204,6 +328,7 @@ function momentOf(state, at) {
 export function pressKey(state, side, lane, at) {
   if (!fighting(state)) return refuse("phase");
   if (!SIDES.includes(side)) return refuse("side");
+  if (state.musical.quiz) return answerKey(state, side, lane, at);
   if (!LANES.includes(lane)) return refuse("lane");
   const m = state.musical;
   if (m.bots[side] !== undefined) return refuse("bot");
@@ -234,6 +359,7 @@ export function pressKey(state, side, lane, at) {
 export function releaseKey(state, side, lane, at) {
   if (!fighting(state)) return refuse("phase");
   if (!SIDES.includes(side)) return refuse("side");
+  if (state.musical.quiz) return { ok: true, held: null }; // (an answer isn't held)
   if (!LANES.includes(lane)) return refuse("lane");
   const m = state.musical;
   const notes = fightChart(m.song).notes;
@@ -277,7 +403,8 @@ function volley(state, side, hits) {
     const target = targets.find((v) => left.get(v) > 1e-9) || targets[0];
     // A gun that shoots faster puts more into a volley, and so does an
     // army whose player is on a streak.
-    const amount = u.damage * (DUEL_UNITS[u.type].cooldown / u.cooldown) * VOLLEY_POWER * streakPower(state.musical.tally[side].streak);
+    const power = VOLLEY_POWER * (state.musical.quiz ? QUIZ_VOLLEY : 1);
+    const amount = u.damage * (DUEL_UNITS[u.type].cooldown / u.cooldown) * power * streakPower(state.musical.tally[side].streak);
     take(u, target, amount);
     const splash = DUEL_UNITS[u.type].splash;
     if (splash) {
@@ -293,22 +420,14 @@ function volley(state, side, hits) {
   }
 }
 
-function tick(state) {
+// A tick's keys of the song: the ones whose moment has come. The computer
+// plays its own as they reach the line (a long one as any other); a
+// player's are missed once out of reach, and the long ones still down at
+// their end are done. Returns when the fight's music ends.
+function songKeys(state) {
   const m = state.musical;
-  if (m.round !== state.round) begin(state);
   const chart = fightChart(m.song);
   const notes = chart.notes;
-
-  for (const shot of state.shots) shot.age += STEP;
-  state.shots = state.shots.filter((shot) => shot.age < SHOT_SHOWN);
-  for (const event of m.events) event.age += STEP;
-  m.events = m.events.filter((event) => event.age < EVENT_SHOWN);
-
-  m.time += STEP;
-
-  // 1. The keys whose moment has come: the computer plays its own as they
-  // reach the line (a long one as any other); a player's are missed once
-  // out of reach, and the long ones still down at their end are done.
   for (const side of SIDES) {
     m.held[side] = m.held[side].filter((i) => {
       if (m.time < notes[i].t + notes[i].hold - 1e-9) return true;
@@ -332,6 +451,23 @@ function tick(state) {
     }
     while (m.from[side] < notes.length && marks[m.from[side]] !== WAITING) m.from[side] += 1;
   }
+  return chart.length;
+}
+
+function tick(state) {
+  const m = state.musical;
+  if (m.round !== state.round) begin(state);
+
+  for (const shot of state.shots) shot.age += STEP;
+  state.shots = state.shots.filter((shot) => shot.age < SHOT_SHOWN);
+  for (const event of m.events) event.age += STEP;
+  m.events = m.events.filter((event) => event.age < EVENT_SHOWN);
+
+  m.time += STEP;
+
+  // 1. What each side had to play at this moment: a song's keys, or a
+  // Duelo Matemático's questions.
+  const end = m.quiz ? quizKeys(state) : songKeys(state);
 
   // 2. A side that made a mistake takes the other army's volley, if that
   // army is loaded. Both volleys are worked out before either lands.
@@ -350,8 +486,8 @@ function tick(state) {
   for (const landed of hits) landHit(state, landed);
 
   // 3. The end of the fight: an army destroyed, or the music over.
-  state.clock = Math.max(0, chart.length - m.time);
-  settleFight(state, m.time >= chart.length - 1e-9);
+  state.clock = Math.max(0, end - m.time);
+  settleFight(state, m.time >= end - 1e-9);
 }
 
 // Moves a duel `dt` seconds on: a musical duel's fight here, in duel.js's
