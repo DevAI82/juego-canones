@@ -33,8 +33,16 @@ def changing(tempos, offset):
     return offset + np.concatenate([[0.0], np.cumsum(gaps)])
 
 
-def make_song(beats, seed, busy=False):
-    """beats: when each beat of the song comes, in s (four to a bar)."""
+def ramping(bpm_from, bpm_to, bars, offset):
+    """The same for a song that goes little by little from one tempo to another."""
+    gaps = 60.0 / np.linspace(bpm_from, bpm_to, bars * 4)
+    return offset + np.concatenate([[0.0], np.cumsum(gaps)])
+
+
+def make_song(beats, seed, busy=False, intro=0):
+    """beats: when each beat of the song comes, in s (four to a bar).
+    intro: bars it opens with that keep no beat -- chords, and sounds that
+    come whenever."""
     rng = np.random.default_rng(seed)
     bars = (len(beats) - 1) // 4
     out = np.zeros(int((beats[-1] + 2.0) * SR))
@@ -74,6 +82,10 @@ def make_song(beats, seed, busy=False):
         root, triad = chords[bar % 4]
         for m in triad:
             add(at, 0.08 * tone(midi(m), 4 * beat, 4, fade=0.1))
+        if bar < intro:
+            for _ in range(5):
+                add(at + float(rng.uniform(0, 3.8 * beat)), 0.3 * tone(midi(scale[int(rng.integers(len(scale)))]), 0.3 * beat, 6))
+            continue
         drums = not (busy and bar in (20, 21))  # the busy song's break
         if drums:
             for b in range(4):
@@ -82,7 +94,7 @@ def make_song(beats, seed, busy=False):
         # The bass: on the beats, or (busy) three, three and two half-beats long.
         for b in ((0, 1.5, 3) if busy else (0, 1, 2, 3)):
             add(when(bar, b), 0.35 * tone(midi(root), 0.8 * beat, 3))
-        if bar < 2:
+        if bar < intro + 2:
             continue  # drums and chords alone, to begin with
         if busy and drums:
             # Quick notes up and down the chord, four to a beat.
@@ -111,23 +123,26 @@ def off(times, marks):
     return np.array([np.abs(marks - t).min() for t in times])
 
 
-def check(folder, name, beats, league, seed, busy=False):
+def check(folder, name, beats, league, seed, busy=False, tempo_slack=0.1, intro=0):
     path = folder / f"song_{name}.wav"
-    write_wav(path, make_song(beats, seed, busy))
+    write_wav(path, make_song(beats, seed, busy, intro))
     found = tool.analyse(path, league)
     report = found["report"]
     halves = np.concatenate([beats, (beats[:-1] + beats[1:]) / 2])
     usual = 60.0 / float(np.median(np.diff(beats)))
     keys = found["notes"]
-    off_bar = off([found["first"]], beats[::4])[0]
-    off_beat = off(found["beats"], beats)
+    # (Over an opening that keeps no beat there are none to be right about.)
+    opens = beats[intro * 4]
+    heard = [t for t in found["beats"] if t >= opens - 0.1]
+    off_bar = off([heard[(-len(heard)) % 4]], beats[::4])[0] if intro else off([found["first"]], beats[::4])[0]
+    off_beat = off(heard, beats)
     off_grid = off([t for t, _, _ in keys], halves)
     gaps = np.diff([t for t, _, _ in keys])
     print(f"{name}: found {found['bpm']} bpm (it is {usual:.2f}), first bar {found['first']} ({1000 * off_bar:.0f} ms from a bar line)")
     print(f"   {report}")
     print(f"   beats off the song's: {1000 * off_beat.max():.0f} ms at most; keys off its half-beats: {1000 * off_grid.max():.0f} ms at most; starts {found['starts']}")
     problems = []
-    if abs(found["bpm"] - usual) > 0.1:
+    if abs(found["bpm"] - usual) > tempo_slack:
         problems.append("tempo")
     if off_bar > 0.03:
         problems.append("bar line")
@@ -150,6 +165,14 @@ def check(folder, name, beats, league, seed, busy=False):
         if hold and later and t + hold > later[0] - 0.2:
             problems.append("a long key runs into the next one")
             break
+    if intro:
+        # No keys while the song keeps no beat, and the first round doesn't
+        # make the player sit through that.
+        print(f"   the beat comes in at {opens:.2f}: first key {keys[0][0]}, first round from {found['starts'][0]}")
+        if keys[0][0] < opens - 0.05:
+            problems.append("keys before the beat comes in")
+        if not keys[0][0] - 8 <= found["starts"][0] <= keys[0][0] - 3:
+            problems.append("the first round starts long before its first key, or on top of it")
     if any(lane not in ("left", "down", "up", "right", "1", "2", "3") for _, lane, _ in keys):
         problems.append("lanes")
     print("   " + ("OK" if not problems else "PROBLEMS: " + ", ".join(problems)))
@@ -170,6 +193,11 @@ def main():
             # (Like the first real song put through the tool: a little slow
             # for half a minute, then at its tempo.)
             check(folder, "changing", changing([(110.1, 16), (111.24, 36)], 0.4), 1, 6, busy=True),
+            # (And like the next ones: a tempo that creeps up all the way,
+            # and one that drops at once and climbs back.)
+            check(folder, "intro", even(104.0, 0.3, 52), 1, 9, busy=True, intro=8),
+            check(folder, "creeping", ramping(118.0, 124.0, 56, 0.15), 1, 7, busy=True, tempo_slack=0.6),
+            check(folder, "dropping", np.concatenate([changing([(125.5, 20)], 0.1)[:-1], ramping(123.0, 126.0, 36, changing([(125.5, 20)], 0.1)[-1])]), 1, 8, busy=True, tempo_slack=0.6),
         ]
     return 0 if all(ok) else 1
 
