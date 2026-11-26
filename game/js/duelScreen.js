@@ -40,6 +40,7 @@ import {
 import { drawDuel, BURST_TIME } from "./duelDraw.js";
 import { BOT_ACCURACY, createMusicalDuel, stepMusicalDuel, pressKey, releaseKey, songClock, beginFight } from "./duelRhythm.js";
 import { drawRhythm, laneAt } from "./duelRhythmDraw.js";
+import { drawSong } from "./duelSongs.js";
 
 // Against the computer the player is always the left-hand side.
 const PLAYER = "left";
@@ -162,6 +163,7 @@ export function createDuelScreen({ ctx, shopEl, panelEl, resultEl, drawUnit, res
   // A new duel in this arena against the computer of its league. Returns
   // the duel's state: main.js's game while it lasts. `musical`: its fights
   // are played on the keyboard, to the league's song (duelRhythm.js).
+  let songs = {}; // the musical duels' songs still to play (duelSongs.js's drawSong)
   function start(arenaId, { musical = false } = {}) {
     remote = null;
     profile = loadProfile(storage);
@@ -171,6 +173,12 @@ export function createDuelScreen({ ctx, shopEl, panelEl, resultEl, drawUnit, res
     grade = arena;
     const seed = Math.floor(Math.random() * 0x7fffffff);
     const options = { arena, seed, left: startOf(profile), right: gradeStart(grade, seed) };
+    if (musical) {
+      // (Another song each time: duelSongs.js's round of them.)
+      const drawn = drawSong(songs);
+      songs = drawn.bag;
+      options.song = drawn.song;
+    }
     state = musical ? createMusicalDuel({ ...options, bots: { [RIVAL]: BOT_ACCURACY[grade - 1] } }) : createDuelState(options);
     // (A recorded song is fetched while the player shops.)
     if (musical && music) music.load(state.musical.song);

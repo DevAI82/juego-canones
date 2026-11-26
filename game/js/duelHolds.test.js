@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { STEP, DUEL_UNITS, ROUND_END_TIME, buyUnit, setReady } from "./duel.js";
-import { LANES, songOf, chartOf, fightChart, beatLines } from "./duelSongs.js";
+import { LANES, songOf, chartOf, fightChart, beatLines, songList, drawSong } from "./duelSongs.js";
 import { TRACKS } from "./duelTracks.js";
 import { HIT_WINDOW, RELEASE_SLACK, LEAD_IN, createMusicalDuel, stepMusicalDuel, pressKey, releaseKey, songClock } from "./duelRhythm.js";
 
@@ -262,6 +262,59 @@ test("a recording whose tempo wanders gives its beats one by one", () => {
   } finally {
     delete TRACKS[90];
   }
+});
+
+test("the songs there are to play: the recordings, or the one written as notes", () => {
+  assert.deepEqual(songList(), [1]);
+  TRACKS[91] = { ...TAPE, name: "Otra" };
+  TRACKS[90] = TAPE;
+  try {
+    assert.deepEqual(songList(), [90, 91]);
+  } finally {
+    delete TRACKS[90];
+    delete TRACKS[91];
+  }
+});
+
+test("each musical duel takes another song: all of them before one comes back", () => {
+  for (const id of [90, 91, 92]) TRACKS[id] = { ...TAPE, name: `Cinta ${id}` };
+  try {
+    // A die that is not the same every time, and is the same every run.
+    let seed = 7;
+    const roll = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    let bag;
+    const played = [];
+    for (let i = 0; i < 12; i++) {
+      const drawn = drawSong(bag, roll);
+      bag = drawn.bag;
+      played.push(drawn.song);
+    }
+    for (let round = 0; round < 12; round += 3) {
+      assert.deepEqual([...played.slice(round, round + 3)].sort(), [90, 91, 92], `songs ${round} to ${round + 2}: ${played}`);
+    }
+    for (let i = 1; i < played.length; i++) assert.notEqual(played[i], played[i - 1], `the same song twice running: ${played}`);
+    // A song taken away meanwhile is not played.
+    delete TRACKS[91];
+    for (let i = 0; i < 6; i++) {
+      const drawn = drawSong(bag, roll);
+      bag = drawn.bag;
+      assert.notEqual(drawn.song, 91);
+    }
+  } finally {
+    for (const id of [90, 91, 92]) delete TRACKS[id];
+  }
+  // With one song there is, it is that one every time.
+  const only = drawSong(undefined, Math.random);
+  assert.equal(only.song, 1);
+  assert.equal(drawSong(only.bag, Math.random).song, 1);
+});
+
+test("a musical duel plays the song it is given", () => {
+  withTape(() => {
+    const s = createMusicalDuel({ arena: 1, seed: 3, song: 90 });
+    assert.equal(s.musical.song, 90);
+    assert.equal(s.arena, 1);
+  });
 });
 
 test("each round of a recorded song starts further into it", () => {

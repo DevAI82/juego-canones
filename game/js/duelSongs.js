@@ -196,6 +196,33 @@ export function songOf(id) {
   return made(known, "song", (source) => (source === TRACKS[known] ? recorded(known, source) : build(known, source)));
 }
 
+// The songs there are to play: the recordings' numbers, or the one written
+// as notes when there is none.
+export function songList() {
+  const recordings = Object.keys(TRACKS)
+    .map(Number)
+    .sort((a, b) => a - b);
+  return recordings.length ? recordings : [1];
+}
+
+// The song of the next musical duel: they are taken in turn from a
+// shuffled round of all of them, so none comes back before the others have
+// played, nor twice running. bag: what the last draw returned (nothing, the
+// first time). Returns { song, bag }.
+export function drawSong(bag = {}, roll = Math.random) {
+  const all = songList();
+  let left = (bag.left || []).filter((id) => all.includes(id));
+  if (!left.length) {
+    left = [...all];
+    for (let i = left.length - 1; i > 0; i--) {
+      const j = Math.floor(roll() * (i + 1));
+      [left[i], left[j]] = [left[j], left[i]];
+    }
+    if (left.length > 1 && left[0] === bag.last) left.push(left.shift());
+  }
+  return { song: left[0], bag: { left: left.slice(1), last: left[0] } };
+}
+
 // The song's beats from `from` to `to` (s into it), for the screen to draw:
 // [{ t, bar }] -- bar: whether the beat opens a bar. From its first bar
 // line on: a recording that gives its beats one by one has those and no
