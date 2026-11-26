@@ -593,6 +593,26 @@ export function mountDuelKeys(container, { onPress, onRelease }) {
   container.append(group("arrows", ["up", "left", "down", "right"]), group("numbers", ["1", "2", "3"]));
 }
 
+// What each kind of unit is good for in a volley (duel.js's DUEL_UNITS: a
+// light weapon does two thirds on armour, the rocket truck's two and a
+// half times and spills on what stands by its target): the choice of army
+// is worth something, and the hangar says what.
+const UNIT_TIPS = {
+  soldier: "Soldado: el más barato; su arma ligera hace poco a los tanques",
+  motorcycle: "Moto: barata; su arma ligera hace poco a los tanques",
+  buggy: "Buggy: aguanta más que la moto; su arma ligera hace poco a los tanques",
+  tank: "Tanque: el que más aguanta; las armas ligeras le hacen poco, los lanzacohetes mucho",
+  rocket: "Lanzacohetes: destroza tanques y salpica a los de al lado, pero aguanta poco",
+};
+
+// The hangar's line of advice: what to buy with nothing bought yet; what
+// the picked unit is good for; otherwise, what to do next.
+export function hangarHint(view, side, unit) {
+  if (unit) return `${UNIT_TIPS[unit.type] || ""} · Las mejoras valen para todas las de su tipo`.replace(/^ · /, "");
+  if (view.sides[side].army.length === 0) return "Elige tu ejército: los tanques aguantan, los lanzacohetes destrozan tanques, los ligeros salen baratos";
+  return "Toca un vehículo de la arena para ver para qué sirve, mejorarlo o venderlo · Pulsa «¡A la batalla!» cuando estés listo";
+}
+
 export function updateMusicalHangar(container, view, side, unit) {
   const ui = container._musicalHangar;
   if (!ui) return;
@@ -622,13 +642,7 @@ export function updateMusicalHangar(container, view, side, unit) {
   ui.readyBtn.classList.toggle("pulse", !ui.readyBtn.disabled && mine.army.length > 0);
 
   // Subtle guidance pill
-  if (mine.army.length === 0) {
-    ui.hintEl.textContent = "Elige vehículos en el hangar para desplegar tu ejército en la arena";
-  } else if (!unit) {
-    ui.hintEl.textContent = "Toca cualquier vehículo en la arena para mejorarlo o venderlo · Pulsa «¡A la batalla!» cuando estés listo";
-  } else {
-    ui.hintEl.textContent = "Las mejoras se aplican a todas las unidades del mismo tipo durante todo el duelo";
-  }
+  ui.hintEl.textContent = hangarHint(view, side, unit);
 
   // Upgrade & sell drawer
   ui.drawer.classList.toggle("hidden", !unit);

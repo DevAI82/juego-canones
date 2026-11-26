@@ -12,6 +12,7 @@ import {
   QUIZ_FAST,
   QUIZ_FAST_POWER,
   QUIZ_SPEED_PRIZE,
+  QUIZ_BONUS_MOST,
   QUIZ_ROUND_END,
   createMusicalDuel,
   stepMusicalDuel,
@@ -429,4 +430,41 @@ test("the round's quickest player takes a prize in money, and the round's result
   const song = quiz({ math: false, left: ["soldier"], right: STURDY, bots: { right: 1 } });
   for (let i = 0; i < 1e5 && song.phase === "combat"; i++) stepMusicalDuel(song, STEP);
   assert.equal(song.lastRound.speed, undefined);
+});
+
+// (The user's own round, 2026-11-27: fourteen right answers at 1.4 s each
+// took the computer's army in 45 s -- "perhaps it is over too soon?".)
+test("a long streak and a quick answer don't pile up without end, and a mistake's volley is the same whatever the rival's streak", () => {
+  // The tenth right answer in a row, quick: its volley against a plain one's.
+  const taken = (answers, wait) => {
+    const s = quiz({ left: STURDY, right: STURDY, bots: { right: 1 } });
+    for (let k = 1; k < answers; k++) {
+      runTo(s, current(s, "left").open + 0.3);
+      pressKey(s, "left", right(s, "left"));
+    }
+    const asked = current(s, "left");
+    runTo(s, asked.open + wait * (asked.t - asked.open));
+    s.musical.loaded.left = 0; // (its army has loaded again)
+    const before = health(s, "right");
+    assert.equal(pressKey(s, "left", right(s, "left")).hit, true);
+    assert.equal(s.musical.tally.left.streak, answers);
+    for (let i = 0; i < 3; i++) stepMusicalDuel(s, STEP);
+    return before - health(s, "right");
+  };
+  const plain = taken(QUIZ_STREAK_FROM, 0.8);
+  const both = taken(10, 0.1);
+  assert.ok(plain > 0);
+  assert.equal(QUIZ_BONUS_MOST, 2);
+  assert.ok(Math.abs(both / plain - QUIZ_BONUS_MOST) < 1e-6, `${both} against ${plain}: twice, not 1.5 x 1.5`);
+  // A mistake against a rival on a long streak costs what it costs against any.
+  const lost = (streak) => {
+    const s = quiz({ left: STURDY, right: STURDY, bots: { right: 1 } });
+    runTo(s, current(s, "left").open + 0.5);
+    s.musical.tally.right.streak = streak;
+    pressKey(s, "left", wrong(s, "left"));
+    for (let i = 0; i < 3; i++) stepMusicalDuel(s, STEP);
+    return whole(s, "left") - health(s, "left");
+  };
+  assert.ok(lost(0) > 0);
+  assert.ok(Math.abs(lost(30) - lost(0)) < 1e-6);
 });

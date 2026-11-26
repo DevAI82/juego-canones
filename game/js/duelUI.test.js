@@ -10,8 +10,9 @@ import {
   duelResult,
   lobbyInfo,
   duelNotice,
+  hangarHint,
 } from "./duelUI.js";
-import { createDuelState, buyUnit, upgradeUnit, setReady, stepDuel, duelView, STEP, ROUND_END_TIME } from "./duel.js";
+import { DUEL_UNITS, createDuelState, buyUnit, upgradeUnit, setReady, stepDuel, duelView, STEP, ROUND_END_TIME } from "./duel.js";
 import { freshProfile, recordDuel, assignPoint, xpProgress } from "./duelProfile.js";
 
 const entry = (view, side, type) => duelShopEntries(view, side).find((e) => e.type === type);
@@ -243,4 +244,24 @@ test("the notice over a duel on the home network: who is awaited, and whose paus
   assert.equal(duelNotice(net({}), "x"), "");
   assert.equal(duelNotice(net({ you: null }), "x"), "Estás viendo el duelo de otros dos jugadores");
   assert.equal(duelNotice(net({ you: null, waiting: true }), "x"), "Estás viendo el duelo de otros dos jugadores");
+});
+
+// (The user's, 2026-11-27, of the Duelo Matemático: "does the damage take
+// the kind of vehicle into account? Choosing one or another should be
+// rewarded." It does -- duel.js's units -- and the hangar says so.)
+test("the hangar's hint: what to buy with nothing bought, what each vehicle is good for when one is picked", () => {
+  const view = { sides: { left: { army: [] } } };
+  const empty = hangarHint(view, "left", null);
+  assert.match(empty, /tanque/i);
+  assert.match(empty, /lanzacohetes/i);
+  const bought = { sides: { left: { army: [{ id: 1, type: "tank" }] } } };
+  assert.match(hangarHint(bought, "left", null), /A la batalla/);
+  // Each kind of unit, by what duel.js makes of it.
+  for (const [type, unit] of Object.entries(DUEL_UNITS)) {
+    const tip = hangarHint(bought, "left", { id: 1, type });
+    assert.ok(tip.length > 20 && tip.length < 130, `${type}: ${tip}`);
+    if (unit.light) assert.match(tip, /ligera|ligero/i, `${type} has a light weapon`);
+    if (unit.armored) assert.match(tip, /aguanta/i, `${type} is armoured`);
+    if (unit.antiArmor) assert.match(tip, /tanques/i, `${type} is made against armour`);
+  }
 });

@@ -53,21 +53,28 @@ export const VOLLEY_POWER = 1;
 // streak it should fire, and if you fail you get shot at; set the damage
 // so that a round lasts two or three minutes -- shorter for somebody who
 // fails a lot -- and no shot kills the army at once"). Times a unit's shot:
-//   - a mistake's, the rival's army's: an army stands some eight from one
-//     like it, and three from one that is its match (rocket trucks on
-//     tanks: a third of the army a mistake, the worst there is);
+//   - a mistake's, the rival's army's: an army stands some nine from one
+//     like it, and three or four from one that is its match (rocket
+//     trucks on tanks: the worst there is). What the units are counts, as
+//     in any duel -- the user's, 2026-11-27: "choosing one vehicle or
+//     another should be rewarded" --, so there is no one size of volley:
+//     these are the sizes that leave room for the choice to matter;
 //   - a right answer's, one's own army's, once its player has so many in
-//     a row: lighter, and no more often than the army reloads, however
-//     fast its player answers -- so a grown-up's army fires hardly more
-//     often than a child's; what a grown-up has over a child is not
-//     failing.
+//     a row: much lighter, and no more often than the army reloads,
+//     however fast its player answers -- so a grown-up's army fires
+//     hardly more often than a child's; what a grown-up has over a child
+//     is not failing.
 // Set with simulated rounds (tools/duel/quiz_rounds.mjs, which prints
-// them), quick answers' heavier volleys counted in: two children who
-// answer alike, 163 s a round, three in five ended by an army destroyed; a
-// grown-up against a child, 78 s; somebody who answers nothing, 110 s.
-export const QUIZ_VOLLEY = 1.6;
+// them), twice: the first figures (1.6 and 0.9, a streak's bonus on a
+// mistake's volley too) gave the user, who answers in 1.4 s and doesn't
+// fail, a round of 45 s against the computer ("perhaps it is over too
+// soon?"). With these, somebody like him takes the first league's computer
+// in a minute and a half (it fails one answer in four, and buys a frail
+// army one time in three); a child against the computer, 2 min 40 s; two
+// children go to the round's three minutes with their armies near level.
+export const QUIZ_VOLLEY = 1.4;
 export const QUIZ_STREAK_FROM = 3;
-export const QUIZ_STREAK_VOLLEY = 0.9;
+export const QUIZ_STREAK_VOLLEY = 0.35;
 export const QUIZ_STREAK_RELOAD = 8;
 // Quickness (the user's, 2026-11-27: "not only getting it right before it
 // comes down: reward getting it right and being quick"). A right answer
@@ -77,6 +84,11 @@ export const QUIZ_STREAK_RELOAD = 8;
 // so many times heavier.
 export const QUIZ_FAST = 0.5;
 export const QUIZ_FAST_POWER = 1.5;
+// What a streak (STREAK_POWER) and a quick answer make of a volley
+// together, at most: somebody quick who never fails has both all the time,
+// and one on top of the other took the computer's army in 45 s (the
+// user's own round, 2026-11-27: "perhaps it is over too soon?").
+export const QUIZ_BONUS_MOST = 2;
 // At a round's end, whoever had more of their time to spare on their right
 // answers, on average, takes this much money for the next purchase: at
 // least so many right answers to be in it.
@@ -482,8 +494,10 @@ function inFront(a, b) {
 // This side's army fires: each unit it has left, one shot. Every shot goes
 // to the first enemy in front that the shots before it won't have
 // destroyed already. The hits are added to `hits`, to land with the
-// tick's others. `power`: times a unit's shot.
-function volley(state, side, hits, power = VOLLEY_POWER) {
+// tick's others. `power`: times a unit's shot; `streaked`: and as many
+// times again as its player's streak says (STREAK_POWER) -- a Duelo
+// Matemático counts its streak in `power` itself.
+function volley(state, side, hits, power = VOLLEY_POWER, streaked = true) {
   const shooters = state.units.filter((u) => u.alive && u.side === side).sort((a, b) => a.slot - b.slot);
   const targets = state.units.filter((u) => u.alive && u.side !== side).sort(inFront);
   if (shooters.length === 0 || targets.length === 0) return;
@@ -496,7 +510,7 @@ function volley(state, side, hits, power = VOLLEY_POWER) {
     const target = targets.find((v) => left.get(v) > 1e-9) || targets[0];
     // A gun that shoots faster puts more into a volley, and so does an
     // army whose player is on a streak.
-    const amount = u.damage * (DUEL_UNITS[u.type].cooldown / u.cooldown) * power * streakPower(state.musical.tally[side].streak);
+    const amount = u.damage * (DUEL_UNITS[u.type].cooldown / u.cooldown) * power * (streaked ? streakPower(state.musical.tally[side].streak) : 1);
     take(u, target, amount);
     const splash = DUEL_UNITS[u.type].splash;
     if (splash) {
@@ -574,10 +588,19 @@ function tick(state) {
     const rival = otherSide(side);
     const punishes = m.owed[rival] && m.reload[side] <= 1e-9;
     const rewards = Boolean(m.quiz) && m.shoots[side] > 0 && m.loaded[side] <= 1e-9;
-    if (punishes || rewards) {
-      volley(state, side, hits, VOLLEY_POWER * (!m.quiz ? 1 : punishes ? QUIZ_VOLLEY : QUIZ_STREAK_VOLLEY * m.shoots[side]));
+    if ((punishes || rewards) && m.quiz) {
+      // A mistake's volley is what it is. A right answer's is heavier for
+      // the army's streak and for a quick answer -- so far, the two
+      // together. (The streak isn't counted in a mistake's too: the
+      // computer's own mistakes, at twice their size against somebody on
+      // a long streak, were most of what ended a round early.)
+      const bonus = Math.min(QUIZ_BONUS_MOST, streakPower(m.tally[side].streak) * m.shoots[side]);
+      volley(state, side, hits, VOLLEY_POWER * (punishes ? QUIZ_VOLLEY : QUIZ_STREAK_VOLLEY * bonus), false);
       if (punishes) m.reload[side] = VOLLEY_RELOAD;
       if (rewards) m.loaded[side] = QUIZ_STREAK_RELOAD;
+    } else if (punishes) {
+      volley(state, side, hits);
+      m.reload[side] = VOLLEY_RELOAD;
     }
     m.owed[rival] = false;
     if (m.quiz) m.shoots[side] = 0;

@@ -204,7 +204,7 @@ function drawReady(ctx) {
   ctx.fillStyle = "rgba(8, 14, 24, 0.82)";
   ctx.strokeStyle = "rgba(96, 210, 255, 0.55)";
   ctx.lineWidth = 1.6;
-  rounded(ctx, MID - 262, TRACK.top + 105, 524, 236, 14);
+  rounded(ctx, MID - 285, TRACK.top + 105, 570, 236, 14);
   ctx.fill();
   ctx.stroke();
   shout(ctx, "¡PREPÁRATE!", MID, TRACK.top + 150, { size: 40, color: "#ffe27a", glow: "#ff9900" });

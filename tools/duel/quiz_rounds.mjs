@@ -18,13 +18,18 @@ const load = (file) => import(pathToFileURL(path.join(game, "js", file)).href);
 const { STEP, buyUnit, setReady } = await load("duel.js");
 const { QUIZ_LANES } = await load("duelQuiz.js");
 const rhythm = await load("duelRhythm.js");
-const { createMusicalDuel, stepMusicalDuel, pressKey, songClock, questionOf } = rhythm;
+const { createMusicalDuel, stepMusicalDuel, pressKey, songClock, questionOf, BOT_ACCURACY } = rhythm;
+const { gradeStart, playTurn } = await load("duelAI.js");
 
 const PLAYERS = {
   "niño (6-11 s, 80 %)": { think: [6, 11], right: 0.8 },
   "niño que duda (8-14 s, 65 %)": { think: [8, 14], right: 0.65 },
   "adulto (2-4 s, 97 %)": { think: [2, 4], right: 0.97 },
   "adulto que no falla (2-3 s)": { think: [2, 3], right: 1 },
+  "adulto muy rápido que no falla (1-2 s)": { think: [1, 2], right: 1 },
+  // The game's own rival of the first league: it buys its own army and
+  // answers as duelRhythm.js has it answer.
+  "la máquina": { machine: true },
   "nadie contesta": { think: [99, 99], right: 0 },
 };
 const ARMIES = {
@@ -46,9 +51,13 @@ function dice(seed) {
 }
 
 function play(seed, left, right, armyLeft, armyRight) {
-  const s = createMusicalDuel({ arena: 1, seed, quiz: true, left: { money: 5000 }, right: { money: 5000 } });
+  const machine = Boolean(right.machine);
+  const s = machine
+    ? createMusicalDuel({ arena: 1, seed, quiz: true, right: gradeStart(1, seed), bots: { right: BOT_ACCURACY[0] } })
+    : createMusicalDuel({ arena: 1, seed, quiz: true, left: { money: 5000 }, right: { money: 5000 } });
   for (const type of armyLeft) buyUnit(s, "left", type);
-  for (const type of armyRight) buyUnit(s, "right", type);
+  if (machine) playTurn(s, "right", 1);
+  else for (const type of armyRight) buyUnit(s, "right", type);
   setReady(s, "left");
   setReady(s, "right");
   stepMusicalDuel(s, STEP);
@@ -61,6 +70,7 @@ function play(seed, left, right, armyLeft, armyRight) {
     end = songClock(s);
     for (const side of ["left", "right"]) {
       const m = s.musical;
+      if (m.bots[side] !== undefined) continue; // (the machine answers by itself)
       const asked = m.asks[side][m.from[side]];
       if (!asked) continue;
       if (!plan[side] || plan[side].n !== asked.n) {
@@ -87,6 +97,10 @@ const pct = (share) => `${Math.round(share * 100)} %`.padStart(5);
 
 console.log(`QUIZ_VOLLEY ${rhythm.QUIZ_VOLLEY} · racha desde ${rhythm.QUIZ_STREAK_FROM}: ${rhythm.QUIZ_STREAK_VOLLEY} cada ${rhythm.QUIZ_STREAK_RELOAD} s · ${rounds} asaltos por pareja\n`);
 const PAIRS = [
+  ["adulto muy rápido que no falla (1-2 s)", "la máquina", "2 tanques", "el suyo"],
+  ["adulto (2-4 s, 97 %)", "la máquina", "2 tanques", "el suyo"],
+  ["niño (6-11 s, 80 %)", "la máquina", "2 tanques", "el suyo"],
+  ["niño que duda (8-14 s, 65 %)", "la máquina", "2 tanques", "el suyo"],
   ["niño (6-11 s, 80 %)", "niño (6-11 s, 80 %)", "2 tanques", "2 tanques"],
   ["niño (6-11 s, 80 %)", "niño que duda (8-14 s, 65 %)", "2 tanques", "2 tanques"],
   ["niño que duda (8-14 s, 65 %)", "niño que duda (8-14 s, 65 %)", "2 tanques", "2 tanques"],
